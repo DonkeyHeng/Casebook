@@ -153,25 +153,40 @@ def _read_tears(session) -> list[dict]:
 def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = None) -> dict:
     """根据状态码 + 模块级 BLKSTAT/BLKMSG + 撕裂流误差,判定这次运行能不能用。
 
-    实测经验(2026-10-31):
+    实测经验(2026-10-31 起,2026-11-01 修正):
       * 正常收敛: RSTAT=0 CVSTAT=0 UOSSTAT=0 PER_ERROR=0,但 CSSTAT/PPSTAT 可能是 2 —— 2 不代表失败
       * 模块状态 BLKSTAT:0=正常、1=错误、2=告警;错误原文在 `Output\\BLKMSG`
       * 有模块报错时 CVSTAT/UOSSTAT 会变成 1,但**撕裂流误差可能依然很小**,
         所以"撕裂流收敛"不等于"整条流程可用",必须看模块级状态
+
+    **UOSSTAT / PER_ERROR 不能单独当作"错误"**(2026-11-01 实测修正):
+    读入一个样本模型,7 个模块只有 status=2 的告警(相稳定性检查)、**没有一个 status=1**,
+    但 UOSSTAT=1、PER_ERROR=1 —— 旧规则据此判成"有错误",横幅直接说"不建议用它算收率",
+    这是误报。对照之前那个真出错的模型(T0202/T0205 是 status=1),这两组状态码**都是 1**,
+    说明 UOSSTAT/PER_ERROR 只表示"有东西非零",区分不了告警和错误。
+
+    所以现在分两档:
+      * **硬错误**(判 error):模块 status=1、CVSTAT 非 0(收敛块自己出错)、撕裂流超容差
+      * **软信号**(最多判 warning):UOSSTAT / PER_ERROR / RSTAT 非 0、模块 status=2
     """
-    reasons: list[str] = []
+    hard: list[str] = []      # 真·错误
+    soft: list[str] = []      # 只是"有东西非零"
+
     text = str(errtxt or "")
-
     if "completed with errors" in text:
-        reasons.append("Aspen 报告有模块/收敛块报错")
+        hard.append("Aspen 报告有模块/收敛块报错")
 
-    for key in ("RSTAT", "CVSTAT", "UOSSTAT"):
+    # CVSTAT = 收敛块状态:它非 0 才是真出错(CVSTAT=1 时 .sum 里会出现 $OLVER 报错)
+    if codes.get("CVSTAT") not in (0, None):
+        hard.append(f"CVSTAT={codes.get('CVSTAT')}(收敛块出错)")
+
+    for key in ("RSTAT", "UOSSTAT"):
         if codes.get(key) not in (0, None):
-            reasons.append(f"{key}={codes.get(key)}(非 0)")
+            soft.append(f"{key}={codes.get(key)}(非 0,含告警)")
 
     per_error = codes.get("PER_ERROR")
     if isinstance(per_error, (int, float)) and per_error > 1e-6:
-        reasons.append(f"PER_ERROR={per_error}")
+        soft.append(f"PER_ERROR={per_error}(有非零状态项)")
 
     block_errors, block_warnings = [], []
     for b in blocks or []:
@@ -182,16 +197,17 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
             block_warnings.append(b)
 
     for b in block_errors:
-        reasons.append(f"{b['name']} 报错:{b.get('message') or '未知原因'}")
+        hard.append(f"{b['name']} 报错:{b.get('message') or '未知原因'}")
     for b in block_warnings:
-        reasons.append(f"{b['name']} 告警:{b.get('message') or '未知原因'}")
+        soft.append(f"{b['name']} 告警:{b.get('message') or '未知原因'}")
 
     for tear in tears:
         err, tol = tear.get("error"), tear.get("tolerance")
         if isinstance(err, (int, float)) and tol and err > tol:
-            reasons.append(f"撕裂流 {tear.get('stream')} 未收敛(误差 {err} > {tol})")
+            hard.append(f"撕裂流 {tear.get('stream')} 未收敛(误差 {err} > {tol})")
 
-    if block_errors or any("非 0" in r or "报错" in r for r in reasons):
+    reasons = hard + soft
+    if hard:
         severity = "error"
     elif reasons:
         severity = "warning"
@@ -200,7 +216,9 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
 
     return {
         "severity": severity,            # ok / warning / error
-        "converged": severity == "ok",   # 只有 ok 才允许进统计对比
+        # 有告警的数据仍然可用(只是引用时要注明),所以 converged 只排除 error。
+        # 名字沿用 converged(库里已有列),语义是"能不能拿去分析"。
+        "converged": severity != "error",
         "reasons": reasons,
         "block_errors": [b["name"] for b in block_errors],
         "block_warnings": [b["name"] for b in block_warnings],

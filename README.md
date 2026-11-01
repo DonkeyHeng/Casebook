@@ -55,6 +55,9 @@ Aspen Plus 数据读取与分析工具。通过 COM 附着到已运行的 Aspen 
 - 单位不统一(加热器 `cal/sec`、泵 `kW`),必须按节点 `UnitString` 换算。
 - **模块级报错要看 `\Data\Blocks\<设备>\Output\BLKSTAT`(0 正常 / 1 错误 / 2 告警)和 `BLKMSG`**;
   Run-Status 里没有完整错误文本,不要指望从树里读到一句现成的结论。
+- 判定只看**硬错误**:模块 `BLKSTAT=1`、收敛块 `CVSTAT≠0`、撕裂流超容差。
+  `UOSSTAT` / `PER_ERROR` 非 0 只说明"有东西非零",**区分不了告警和错误**,
+  不能据此判"有错误"(实测:一个全是告警的样本模型,这两个码同样是 1)。
 - 撕裂流误差小 ≠ 流程可用:曾实测到 6 条撕裂流误差都在 1e-14~1e-6,
   但两个塔仍报"干涸""组分平衡不收敛"。
 - **不收敛的数据照读,但必须标记**:收敛结果(绿)/ 未收敛有值(黄,禁止进入统计对比)/ 读取失败(红)。
@@ -87,6 +90,7 @@ aspen-insight/
     bench.py              性能基准(测 COM 调用成本与规模曲线)
     column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
     make_icon.py          从源图生成 .ico(圆形抠底 + 7 个尺寸)
+    repair_cases.py       按最新规则/单位表重算历史工况(不用回 Aspen 重读)
     stop.py               按端口停止服务
   assets/app-icon.ico    图标源件(favicon 用它;桌面快捷方式用部署到 %LOCALAPPDATA% 的副本)
   docs/aspen-field-map.md 真实字段路径地图(实测)
