@@ -431,6 +431,56 @@ function fmtFrac(v) {
   return v.toFixed(6);
 }
 
+/* 百分比:99.6% / 0.21% / 0.0007% —— 按量级换精度,别把痕量写成 0.00% */
+function pctText(fraction) {
+  if (fraction === null || fraction === undefined) return "—";
+  const p = fraction * 100;
+  if (p === 0) return "0";
+  if (p >= 10) return `${p.toFixed(1)}%`;
+  if (p >= 0.1) return `${p.toFixed(2)}%`;
+  if (p >= 0.001) return `${p.toFixed(3)}%`;
+  return `${p.toExponential(1)}%`;
+}
+
+const PHASE_COLORS = ["#2563eb", "#60a5fa", "#93c5fd", "#a5b4fc", "#c4b5fd", "#f59e0b"];
+const PHASE_REST_COLOR = "#cbd5e1";
+
+/* 一条相态条:横条按比例分色(前 6 个组分 + 其他),右边写 Top3 百分比 */
+function phaseRow(label, key, comps, sum) {
+  const total = typeof sum === "number" && sum > 0 ? sum : 0;
+  const items = comps
+    .map((c) => ({ name: String(c.component), v: typeof c[key] === "number" ? c[key] : 0 }))
+    .filter((c) => c.v > 0)
+    .sort((a, b) => b.v - a.v);
+
+  if (!total || !items.length) {
+    return `<div class="phase-row">
+      <span class="phase-label">${esc(label)}</span>
+      <span class="phase-bar"></span>
+      <span class="phase-legend">该相没有可显示的值</span>
+    </div>`;
+  }
+
+  const head = items.slice(0, 6);
+  const tail = items.slice(6);
+  const tailSum = tail.reduce((s, c) => s + c.v, 0);
+
+  const segs = head.map((c, i) =>
+    `<i class="phase-seg" style="width:${(c.v / total * 100).toFixed(3)}%;background:${PHASE_COLORS[i % PHASE_COLORS.length]}"></i>`
+  ).join("") + (tail.length
+    ? `<i class="phase-seg" style="width:${(tailSum / total * 100).toFixed(3)}%;background:${PHASE_REST_COLOR}"></i>`
+    : "");
+
+  const legend = head.slice(0, 3).map((c) => `${esc(c.name)} ${pctText(c.v / total)}`);
+  if (tail.length) legend.push(`其他 ${pctText(tailSum / total)}`);
+
+  return `<div class="phase-row">
+    <span class="phase-label">${esc(label)}</span>
+    <span class="phase-bar">${segs}</span>
+    <span class="phase-legend" title="${esc(legend.join(" · "))}">${legend.join(" · ")}</span>
+  </div>`;
+}
+
 const compState = { seq: 0 };
 
 async function openComposition(stream) {
@@ -458,11 +508,12 @@ async function openComposition(stream) {
 
 function renderComposition(data) {
   const body = document.getElementById("compBody");
+  const comps = data.components || [];
   const note = data.source === "live"
     ? '<p class="comp-note live">刚从当前打开的 Aspen 读出来,已存入本工况(下次打开直接取,不再连 Aspen)。</p>'
     : '<p class="comp-note">来自本工况已存的数据。</p>';
 
-  const rows = (data.components || []).map((c) => {
+  const rows = comps.map((c) => {
     const zero = (v) => (v === 0 ? " comp-zero" : "");
     return `<tr>
       <td class="name">${esc(c.component)}</td>
@@ -472,14 +523,18 @@ function renderComposition(data) {
   }).join("");
 
   body.innerHTML = `${note}
-    <div class="table-wrap small">
+    <div class="comp-table-wrap">
       <table>
         <thead><tr><th>组分</th><th class="num">液相摩尔分数 x</th><th class="num">气相摩尔分数 y</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>
-    <p class="comp-sum">共 ${data.count} 个组分 · 合计 x = ${fmt(data.sum_x, 4)} · 合计 y = ${fmt(data.sum_y, 4)}${
-      data.run_id ? ` · 运行 ID ${esc(data.run_id)}` : ""}</p>`;
+    <div class="comp-foot">
+      ${phaseRow("液相", "x_liq", comps, data.sum_x)}
+      ${phaseRow("气相", "y_vap", comps, data.sum_y)}
+      <p class="comp-sum">共 ${data.count} 个组分 · 合计 x = ${fmt(data.sum_x, 4)} · 合计 y = ${fmt(data.sum_y, 4)}${
+        data.run_id ? ` · 运行 ID ${esc(data.run_id)}` : ""}</p>
+    </div>`;
 }
 
 /* ------------------------------------------------------------ 对比 */

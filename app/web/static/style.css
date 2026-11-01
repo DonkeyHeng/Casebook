@@ -432,14 +432,54 @@ td.changed { color: var(--accent); font-weight: 600; }
 #columnTable tbody tr.hl td { background: #e8f1ff; }
 #columnTable tbody tr.hl td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
 
-/* ---------- 流股组成抽屉 ---------- */
+/* ---------- 流股组成抽屉 ----------
+   布局:标题 → 说明 → (占满剩余高度、内部滚动的)组分表 → 固定的底部相态条。
+   行高固定 38px,所以"窗口多高就显示多少行",超出部分在表格里滚动,
+   抽屉本身不滚(overflow:hidden),底部两块始终贴在窗口下沿。 */
+.column-panel.comp-panel {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.comp-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  gap: 10px;
+}
+
+.comp-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.comp-table-wrap table { width: 100%; }
+.comp-table-wrap tbody td {
+  height: 38px;
+  padding: 0 12px;
+  line-height: 38px;
+}
+
+.comp-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .comp-note {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 12.5px;
   color: var(--muted);
   line-height: 1.7;
 }
 .comp-note.live { color: var(--accent); }
+
 .comp-error {
   white-space: pre-wrap;
   border: 1px solid #fecaca;
@@ -450,8 +490,36 @@ td.changed { color: var(--accent); font-weight: 600; }
   line-height: 1.8;
   font-size: 13px;
 }
+
+/* 相态条:一条横条按比例分色,右边跟 Top3 + 其他 的文字 */
+.phase-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.phase-label { flex: none; width: 30px; color: var(--muted); }
+.phase-bar {
+  flex: 0 0 150px;
+  display: flex;
+  height: 12px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+.phase-seg { display: block; height: 100%; }
+.phase-legend {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .comp-sum {
-  margin: 8px 0 0;
+  margin: 0;
   font-size: 12.5px;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
