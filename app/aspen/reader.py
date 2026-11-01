@@ -10,6 +10,12 @@
   - components:组分清单
 
 规模提示:1000 条流股约 6000 次 COM 调用,必须放后台线程并给 `progress` 回调。
+
+两个进度回调(都是可选的):
+  * `progress(done, total, label)` —— 每读完一条流股/一个设备调一次,
+    用于"读取设备 45/77"这种细粒度进度。
+  * `on_phase(阶段名)` —— 阶段切换时调一次(读流股 → 读设备 → 判收敛 …),
+    给网页进度条一个"现在在干什么"的粗粒度说明。
 """
 from __future__ import annotations
 
@@ -45,6 +51,7 @@ RUN_STATUS_FIELDS = (
 )
 
 Progress = Callable[[int, int, str], None]
+PhaseHook = Callable[[str], None]
 
 
 # ---------------------------------------------------------------- 底层取值
@@ -361,15 +368,30 @@ def read_column_profiles(session, blocks: list[dict] | None = None) -> list[dict
 
 def read_case(session, include_composition: bool = False,
               include_profiles: bool = True,
-              progress: Progress | None = None) -> dict:
+              progress: Progress | None = None,
+              on_phase: PhaseHook | None = None) -> dict:
     """读一整个工况,返回可直接入库的 dict。"""
     t0 = time.time()
-    streams = read_streams(session, progress=None, include_composition=include_composition)
+
+    def phase(name: str) -> None:
+        if on_phase:
+            try:
+                on_phase(name)
+            except Exception:
+                pass  # 进度回调出错不能连累读取
+
+    phase("读取流股")
+    streams = read_streams(session, progress=progress,
+                           include_composition=include_composition)
+    phase("读取设备")
     blocks = read_blocks(session, progress=progress)
     # 收敛判定要用到模块级状态,所以必须放在 blocks 之后
+    phase("判定收敛状态")
     convergence = read_convergence(session, blocks)
+    phase("读取塔板剖面")
     profiles = read_column_profiles(session, blocks) if include_profiles else []
 
+    phase("整理结果")
     components = []
     if streams:
         components = child_names(session.find(rf"\Data\Streams\{streams[0]['name']}\Output\X"))

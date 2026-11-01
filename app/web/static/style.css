@@ -70,6 +70,91 @@ select {
 .btn.danger { color: var(--err); border-color: #fecaca; }
 .btn.danger:hover { background: #fef2f2; }
 
+/* 主操作:读取当前工况 */
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 550;
+}
+.btn.primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+
+/* ---------- 读取进度 / 读取结果 ---------- */
+.read-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 20px 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.read-status.running { color: #1d4ed8; border-color: #bfdbfe; background: #f5f9ff; }
+.read-status.done    { color: var(--ok);  border-color: #bbf7d0; background: #f0fdf4; }
+.read-status.done.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+.read-status.done.err  { color: var(--err);  border-color: #fecaca; background: #fef2f2; }
+
+/* 失败提示是多行文本(哪几项要检查),必须原样换行显示 */
+.read-status.error {
+  color: var(--err);
+  border-color: #fecaca;
+  background: #fef2f2;
+  align-items: flex-start;
+}
+.read-status.error .read-text { white-space: pre-wrap; }
+
+.read-text { flex: 1 1 auto; min-width: 0; }
+.read-time { flex: none; font-variant-numeric: tabular-nums; opacity: .8; }
+
+.read-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: read-pulse 1s ease-in-out infinite;
+}
+@keyframes read-pulse {
+  0%, 100% { opacity: .2; }
+  50%      { opacity: 1; }
+}
+
+.read-progress {
+  flex: 0 1 200px;
+  min-width: 90px;
+  height: 6px;
+  border-radius: 999px;
+  background: #dbeafe;
+  overflow: hidden;
+}
+.read-bar {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .25s linear;
+}
+
+.read-close {
+  flex: none;
+  border: 1px solid currentColor;
+  background: rgba(255, 255, 255, .7);
+  color: inherit;
+  border-radius: 6px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: .75;
+}
+.read-close:hover { opacity: 1; background: #fff; }
+
 .exit-screen {
   position: fixed;
   inset: 0;
@@ -89,8 +174,10 @@ select {
   border: 1px solid;
   line-height: 1.7;
 }
-.banner.error { background: #fef2f2; border-color: #fecaca; color: var(--err); }
-.banner.warning { background: #fffbeb; border-color: #fde68a; color: var(--warn); }
+/* 注意:JS 里 SEVERITY 的 class 是 ok / warn / err(和 .badge 共用一套),
+   所以这里必须同时认 err/warn —— 只写 error/warning 的话横幅会悄悄变成没颜色。 */
+.banner.err, .banner.error { background: #fef2f2; border-color: #fecaca; color: var(--err); }
+.banner.warn, .banner.warning { background: #fffbeb; border-color: #fde68a; color: var(--warn); }
 .banner.ok { background: #f0fdf4; border-color: #bbf7d0; color: var(--ok); }
 
 .banner-head {
@@ -252,7 +339,7 @@ td.name { font-weight: 550; }
 
 .msg { color: var(--muted); max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
 
-.empty { padding: 40px; text-align: center; color: var(--muted); }
+.empty { padding: 40px; text-align: center; color: var(--muted); white-space: pre-wrap; line-height: 1.8; }
 .hidden { display: none !important; }
 
 /* ---------- 对比页 ---------- */

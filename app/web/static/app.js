@@ -412,13 +412,17 @@ async function openColumn(block) {
 function fillCompareSelects() {
   const base = document.getElementById("baseSelect");
   const other = document.getElementById("otherSelect");
+  // 记住用户已经选的那两个,只在失效时才回退到最新两条
+  const wantBase = base.value;
+  const wantOther = other.value;
   const opts = state.cases.map((c) =>
     `<option value="${c.id}">#${c.id} · ${esc(c.read_at)} · ${esc(c.model_name || "")}</option>`).join("");
   base.innerHTML = opts;
   other.innerHTML = opts;
   if (state.cases.length >= 2) {
-    base.value = state.cases[0].id;
-    other.value = state.cases[1].id;
+    const ids = state.cases.map((c) => String(c.id));
+    base.value = ids.includes(wantBase) ? wantBase : ids[0];
+    other.value = ids.includes(wantOther) ? wantOther : ids[1];
   }
 }
 
@@ -467,7 +471,193 @@ function toggleCompareBar(isCompare) {
   document.getElementById("count").classList.toggle("hidden", isCompare);
 }
 
+/* ------------------------------------------------------------ 读取当前工况 */
+
+/* 读数要 9–25 s(1000 流股约 76 s),所以不阻塞页面:
+   POST /api/read 起一个后台任务 → 每 0.6 s 问一次 /api/read/status → 完成后自动切到新工况。 */
+const READ_POLL_MS = 600;
+const READ_DONE_HIDE_MS = 9000;
+const readState = { timer: null, hideTimer: null, busy: false };
+
+function readStatusEl() {
+  return document.getElementById("readStatus");
+}
+
+function setReadBusy(busy) {
+  readState.busy = busy;
+  const btn = document.getElementById("readBtn");
+  btn.disabled = busy;
+  btn.textContent = busy ? "读取中…" : "读取当前工况";
+}
+
+function hideReadStatus(delay = 0) {
+  clearTimeout(readState.hideTimer);
+  const hide = () => readStatusEl().classList.add("hidden");
+  if (delay) readState.hideTimer = setTimeout(hide, delay);
+  else hide();
+}
+
+/* 失败提示照原样显示:connect.py 里那句提示本来就是分好行的人话(该查哪几项) */
+function showReadError(message) {
+  const el = readStatusEl();
+  el.className = "read-status error";
+  el.innerHTML = `<span class="read-text">${esc(message)}</span>
+    <button class="read-close" type="button" title="关闭">✕</button>`;
+  el.querySelector(".read-close").addEventListener("click", () => hideReadStatus());
+  el.classList.remove("hidden");
+}
+
+function renderReadRunning(snap) {
+  const el = readStatusEl();
+  const total = Number(snap.total || 0);
+  const done = Number(snap.done || 0);
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const parts = [esc(snap.phase || "读取中")];
+  if (total) parts.push(`${done}/${total}`);
+  if (snap.label) parts.push(esc(snap.label));
+
+  el.className = "read-status running";
+  el.innerHTML = `
+    <span class="read-dot"></span>
+    <span class="read-text">${parts.join(" · ")}</span>
+    <span class="read-progress"><span class="read-bar" style="width:${pct}%"></span></span>
+    <span class="read-time">${Number(snap.elapsed_sec || 0).toFixed(1)} s</span>`;
+  el.classList.remove("hidden");
+}
+
+function renderReadDone(snap) {
+  const el = readStatusEl();
+  const sev = SEVERITY[snap.severity] || SEVERITY.warning;
+  el.className = `read-status done ${sev.cls}`;
+  el.innerHTML = `
+    <span class="read-text">已读入工况 #${esc(snap.case_id)}:${esc(snap.stream_count ?? "-")} 流股 /
+      ${esc(snap.block_count ?? "-")} 设备 · ${sev.text} ·
+      ${Number(snap.elapsed_sec || 0).toFixed(1)} s</span>
+    <button class="read-close" type="button" title="关闭">✕</button>`;
+  el.querySelector(".read-close").addEventListener("click", () => hideReadStatus());
+  el.classList.remove("hidden");
+  hideReadStatus(READ_DONE_HIDE_MS);
+}
+
+async function startRead() {
+  if (readState.busy) return;
+  setReadBusy(true);
+  hideReadStatus();
+
+  let payload;
+  try {
+    const res = await fetch("/api/read", { method: "POST" });
+    payload = await res.json().catch(() => ({}));
+    if (res.status === 409) {
+      // 已经有一次读取在跑(比如页面刷新过):接管它的进度,而不是弹个错就完事
+      renderReadRunning(payload.job || {});
+      pollRead();
+      return;
+    }
+    if (!res.ok) {
+      showReadError(payload.error || `请求失败:${res.status}`);
+      setReadBusy(false);
+      return;
+    }
+  } catch (err) {
+    showReadError(`连不上后台服务:${err.message}\n\n服务可能已经被关掉了,重新双击桌面快捷方式即可。`);
+    setReadBusy(false);
+    return;
+  }
+
+  renderReadRunning(payload.job || {});
+  pollRead();
+}
+
+async function pollRead() {
+  clearTimeout(readState.timer);
+  let snap;
+  try {
+    snap = await api("/api/read/status");
+  } catch (err) {
+    setReadBusy(false);
+    showReadError(`查询读取进度失败:${err.message}`);
+    return;
+  }
+
+  if (snap.state === "running") {
+    renderReadRunning(snap);
+    readState.timer = setTimeout(pollRead, READ_POLL_MS);
+    return;
+  }
+
+  setReadBusy(false);
+  if (snap.state === "done") {
+    renderReadDone(snap);
+    try {
+      await afterRead(snap.case_id);
+    } catch (err) {
+      showReadError(`工况已经读进来了,但刷新页面数据时出错:${err.message}`);
+    }
+    return;
+  }
+  if (snap.state === "error") {
+    showReadError(snap.error || "读取失败,原因未知。");
+    return;
+  }
+  hideReadStatus();
+}
+
+/* 读完:刷新工况下拉 → 切到新工况 → (若在对比页)重跑对比 */
+async function afterRead(caseId) {
+  await refreshCases(caseId);
+  if (!caseId) return;
+  await loadCase(caseId);
+  if (state.tab === "compare") await runCompare();
+}
+
+/* 页面刷新/重开时,后台可能正在读 —— 接着显示进度,不用让用户再点一次 */
+async function resumeReadIfRunning() {
+  try {
+    const snap = await api("/api/read/status");
+    if (snap && snap.state === "running") {
+      setReadBusy(true);
+      renderReadRunning(snap);
+      pollRead();
+    }
+  } catch (err) {
+    // 老版本服务没有这个接口,忽略即可
+  }
+}
+
 /* ------------------------------------------------------------ 初始化 */
+
+function showEmpty(text) {
+  const el = document.getElementById("empty");
+  el.textContent = text || "还没有工况。点右上角「读取当前工况」,从已经打开的 Aspen 里读一次。";
+  el.classList.remove("hidden");
+}
+
+function hideEmpty() {
+  document.getElementById("empty").classList.add("hidden");
+}
+
+/* 没有工况时两个导出按钮点了也没反应,不如直接禁用,免得像"坏了" */
+function setExportEnabled(on) {
+  document.getElementById("exportBtn").disabled = !on;
+  document.getElementById("aiPackBtn").disabled = !on;
+}
+
+async function refreshCases(preferId = null) {
+  state.cases = await api("/api/cases");
+
+  const select = document.getElementById("caseSelect");
+  select.innerHTML = state.cases.map((c) =>
+    `<option value="${c.id}">#${c.id} · ${esc(c.model_name || "")} · ${esc(c.read_at || "")}</option>`
+  ).join("");
+
+  const target = preferId ?? (state.current ? state.current.id : null);
+  if (target && state.cases.some((c) => c.id === target)) select.value = String(target);
+
+  fillCompareSelects();
+  if (!state.cases.length) showEmpty();
+  setExportEnabled(!!state.current && state.cases.length > 0);
+}
 
 async function loadCase(id) {
   const [detail, streams, blocks] = await Promise.all([
@@ -478,36 +668,53 @@ async function loadCase(id) {
   state.current = detail;
   state.streams = streams;
   state.blocks = blocks;
+  const select = document.getElementById("caseSelect");
+  if (select.value !== String(id)) select.value = String(id);
+  hideEmpty();
+  setExportEnabled(true);
   if (state.tab !== "compare") renderTable();
   renderBanner();
 }
 
-async function init() {
+/* 页签只从地址栏恢复一次,之后以点选为准 */
+function applyHashTab() {
+  const hash = location.hash.replace("#", "").split("/")[0];
+  if (!["streams", "blocks", "compare"].includes(hash)) return hash;
+  state.tab = hash;
+  document.querySelectorAll(".tab").forEach((b) =>
+    b.classList.toggle("active", b.dataset.tab === hash));
+  toggleCompareBar(hash === "compare");
+  return hash;
+}
+
+/* 退出:停服务并关掉窗口(应用窗口模式下 window.close() 生效) */
+async function quitApp() {
+  if (!confirm("确定退出 aspen-insight 吗?\n后台服务会一起停止。")) return;
+  const btn = document.getElementById("quitBtn");
+  btn.disabled = true;
+  btn.textContent = "正在退出…";
   try {
-    state.cases = await api("/api/cases");
+    await fetch("/api/shutdown", { method: "POST" });
   } catch (err) {
-    const empty = document.getElementById("empty");
-    empty.textContent = err.message;
-    empty.classList.remove("hidden");
-    return;
+    // 服务已经关掉,连接被丢弃属于正常
   }
+  window.close();
+  // 如果窗口没被关掉(普通标签页不允许脚本关闭),退化成一张空白的"已退出"页
+  setTimeout(() => {
+    document.body.innerHTML = '<div class="exit-screen">已退出</div>';
+  }, 500);
+}
 
-  const select = document.getElementById("caseSelect");
-  if (!state.cases.length) {
-    document.getElementById("empty").classList.remove("hidden");
-    return;
-  }
-
-  select.innerHTML = state.cases.map((c) =>
-    `<option value="${c.id}">#${c.id} · ${esc(c.model_name || "")} · ${esc(c.read_at || "")}</option>`
-  ).join("");
-
-  select.addEventListener("change", () => loadCase(Number(select.value)));
+/* 所有按钮都只绑定一次 —— 即使库里一条工况都没有,也得能点「读取当前工况」 */
+function bindEvents() {
+  document.getElementById("caseSelect").addEventListener("change", (e) => {
+    loadCase(Number(e.target.value));
+  });
 
   document.querySelectorAll(".tab").forEach((btn) => {
     btn.addEventListener("click", () => {
       setTab(btn.dataset.tab);
-      location.hash = btn.dataset.tab === "compare" ? "compare" : btn.dataset.tab;
+      location.hash = btn.dataset.tab;
     });
   });
 
@@ -526,48 +733,50 @@ async function init() {
   document.getElementById("closeColumn").addEventListener("click", () =>
     document.getElementById("columnPanel").classList.add("hidden"));
 
-  // 导出 Excel:把当前工况下载成工作簿
+  document.getElementById("readBtn").addEventListener("click", startRead);
+
+  // 导出 Excel:给人看
   document.getElementById("exportBtn").addEventListener("click", () => {
     if (!state.current) return;
     window.location.href = `/api/cases/${state.current.id}/export.xlsx`;
   });
 
-  // 退出:停服务并关掉窗口(应用窗口模式下 window.close() 生效)
-  document.getElementById("quitBtn").addEventListener("click", async () => {
-    if (!confirm("确定退出 aspen-insight 吗?\n后台服务会一起停止。")) return;
-    const btn = document.getElementById("quitBtn");
-    btn.disabled = true;
-    btn.textContent = "正在退出…";
-    try {
-      await fetch("/api/shutdown", { method: "POST" });
-    } catch (err) {
-      // 服务已经关掉,连接被丢弃属于正常
-    }
-    window.close();
-    // 如果窗口没被关掉(普通标签页不允许脚本关闭),退化成一张空白的"已退出"页
-    setTimeout(() => {
-      document.body.innerHTML = '<div class="exit-screen">已退出</div>';
-    }, 500);
+  // 导出 AI 分析包:给 AI 读(Markdown 说明 + CSV)
+  document.getElementById("aiPackBtn").addEventListener("click", () => {
+    if (!state.current) return;
+    window.location.href = `/api/cases/${state.current.id}/export.ai.zip`;
   });
 
-  fillCompareSelects();
+  document.getElementById("quitBtn").addEventListener("click", quitApp);
+}
 
-  const hashParts = location.hash.replace("#", "").split("/");
-  const hash = hashParts[0];
-  if (["streams", "blocks", "compare"].includes(hash)) {
-    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === hash));
-    state.tab = hash;
-    toggleCompareBar(hash === "compare");
+async function init() {
+  bindEvents();
+
+  try {
+    await refreshCases(null);
+  } catch (err) {
+    showEmpty(`读不到工况列表:${err.message}\n\n后台服务可能没起来,重新双击桌面快捷方式。`);
+    return;
+  }
+
+  const hash = applyHashTab();
+
+  if (!state.cases.length) {
+    await resumeReadIfRunning();
+    return;
   }
 
   await loadCase(state.cases[0].id);
   if (state.tab === "compare") {
     renderTable();
-    runCompare();
+    await runCompare();
   }
-  if (hash === "blocks" && hashParts[1]) {
-    openColumn(hashParts[1]);
-  }
+
+  const hashParts = location.hash.replace("#", "").split("/");
+  if (hash === "blocks" && hashParts[1]) openColumn(hashParts[1]);
+
+  await resumeReadIfRunning();
 }
 
 init();

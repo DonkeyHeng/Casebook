@@ -5,15 +5,21 @@
     python -m app.api --port 8800 --db data/cases.db
 
 接口:
-    GET /api/health                 健康检查
-    GET /api/cases                  工况列表
-    GET /api/cases/{id}             单个工况详情(含收敛状态与原因)
-    GET /api/cases/{id}/streams     流股表
-    GET /api/cases/{id}/blocks      设备表
+    GET  /api/health                 健康检查
+    POST /api/read                   从已打开的 Aspen 读一次(后台线程,立刻返回)
+    GET  /api/read/status            读取进度/结果(前端每 0.5 s 问一次)
+    GET  /api/cases                  工况列表
+    GET  /api/cases/{id}             单个工况详情(含收敛状态与原因)
+    GET  /api/cases/{id}/streams     流股表
+    GET  /api/cases/{id}/blocks      设备表
+    GET  /api/cases/{id}/export.xlsx      导出 Excel(给人看)
+    GET  /api/cases/{id}/export.ai.zip    导出 AI 分析包(Markdown + CSV,给 AI 读)
 
 设计:
   * 只用标准库,不引第三方依赖(打包 exe 时省事)
-  * 只读:不提供写入接口,读 Aspen 的动作仍然走命令行的 `app.cli`
+  * 读 Aspen 的动作走 `app.api.read_job` 的后台线程:服务由 pythonw 启动、没有控制台,
+    进度只能靠 `/api/read/status` 轮询回页面
+  * 只读:除了"读工况"和"写这次的快照",不碰用户的模型
   * 每个请求单独开库,避免多线程共享连接
 """
 from __future__ import annotations
@@ -34,6 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app.store import db
+from app.api import read_job
 from app.api import window as win
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -161,17 +168,39 @@ class Handler(BaseHTTPRequestHandler):
                 # 必须换个线程关,否则会在请求处理线程里自己等自己
                 threading.Timer(0.2, self.server.shutdown).start()
                 return
+            if path == "/api/read":
+                self._start_read()
+                return
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
+    def _start_read(self) -> None:
+        """POST /api/read —— 起一个后台读取任务,立刻返回当前状态。
+
+        不让请求线程同步等 9–25 s:Aspen 的 COM 调用卡住时页面会一直转圈,
+        用户看不出是"在算"还是"死了"。轮询能显示进度,也能显示卡在哪一步。
+        """
+        snap, started = read_job.start(self.db_path)
+        if not started:
+            self._json({
+                "ok": False,
+                "error": "已经有一次读取在进行中,等它结束再点。",
+                "job": snap,
+            }, 409)
+            return
+        self._json({"ok": True, "job": snap})
+
     def _api(self, path: str, query: dict | None = None) -> None:
         parts = [p for p in path.split("/") if p]  # ['api', 'cases', '1', 'streams']
         query = query or {}
         if parts == ["api", "health"]:
             self._json({"ok": True, "db": self.db_path})
+            return
+        if parts == ["api", "read", "status"]:
+            self._json(read_job.snapshot())
             return
         if parts == ["api", "compare"]:
             self._compare(query)
@@ -226,9 +255,32 @@ class Handler(BaseHTTPRequestHandler):
             if parts[3] == "export.xlsx":
                 self._export(conn, case_id)
                 return
+            if parts[3] == "export.ai.zip":
+                self._export_ai(conn, case_id)
+                return
             self._error("未知接口", 404)
         finally:
             conn.close()
+
+    # ------------------------------------------------------------ AI 分析包导出
+
+    def _export_ai(self, conn, case_id: int) -> None:
+        """把工况导成给 AI 读的一组文件(Markdown + CSV + JSON,打成 zip)。"""
+        from app.api import aipack
+
+        try:
+            data, fname = aipack.build_zip(conn, case_id)
+        except LookupError:
+            self._error(f"没有 id={case_id} 的工况", 404)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     # ------------------------------------------------------------ Excel 导出
 
@@ -430,6 +482,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", f"{ctype}; charset=utf-8" if ctype.startswith("text") else ctype)
         self.send_header("Content-Length", str(len(body)))
+        # 本地应用,更新后必须立刻生效:否则浏览器会拿旧 app.js 配新 index.html,
+        # 表现为"新按钮点了没反应",非常难排查。
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
