@@ -431,8 +431,88 @@ unit = u() if callable(u) else u
 | 项 | 状态 | 怎么确认 |
 | --- | --- | --- |
 | 纯"不收敛"(无模块报错)时的状态码 | ⚠️ 部分 | 已拿到"有模块报错"样本(CVSTAT/UOSSTAT/PER_ERROR=1);还缺"只有撕裂流不收敛"的样本 |
-| 能量流(热流)的字段形态 | ❓ 两个模型全是物流 | 找一个含蒸汽/热流的模型 |
+| 能量流(热流)的字段形态 | ✅ 已确认 | 见 12.1:`HMX_FLOW\MIXED` 就是 MW 级的能量流 |
 | `X1` / `X2` 与 `X` 的区别 | ❓ 疑似子物流(substream) | 多 substream 模型验证 |
 | 200–1000 流股的耗时 | ⚠️ 部分 | 已测 121 流股 / 77 模块 ≈ 9 s;按此线性外推 1000 流股 ≈ 75 s |
 | 只读入口 `Apwn.ReadOnlyComposite.41.0` | ❓ 未测 | 若存在,可用于"绝不改模型"的强约束 |
 | `PER_ERROR` 的确切定义 | ❓ | 两次样本 0 / 1,疑似"出错项计数",未证 |
+
+---
+
+## 12. 焓 / 设备连接 / 公用工程(2026-11-01 实测,第 1 步落地依据)
+
+
+探测报告:`data/probe_topology.txt`(由 `probe_topology.bat` 生成,脚本 `tools/probe_topology.py`)。
+
+### 12.1 流股焓:`HMX` 是目录,真正的值在 `MIXED`
+
+| 语义 | 路径 | 单位(实测) | 备注 |
+| --- | --- | --- | --- |
+| 摩尔焓 | `\Data\Streams\<流>\Output\HMX\MIXED` | `J/kmol` | **直接读 `HMX` 会拿到 `1` 这种标志位** |
+| 质量焓 | `...\Output\HMX_MASS\MIXED` | `J/kg` | |
+| 能量流 m·h | `...\Output\HMX_FLOW\MIXED` | `MW` | 已经是 m·h,**可直接相加做 ΔH** |
+
+* 98/98 条流股三个字段都有值。
+* 参考态任意(含生成焓),绝对值不能跨设备相加;只有同一股流进出之差才有意义。
+* **不是**流股焓、别拿来算平衡的名字:
+  `ENTH_CYCLE` / `ENTH_TIME`(循环 / 时间统计,单位空)、
+  `L1_ENTH` / `LIQ_ENTH` / `VAP_ENTH`(分相焓,`L2_ENTH` 在纯液相流股上是空节点)。
+* 读取实现:`app/aspen/reader.py` 的 `_enthalpy_leaf()`(自动把目录解析到 `MIXED`)。
+
+### 12.2 设备连接:`IN_STRMID` 只有塔有,通用来源在流股侧
+
+| 来源 | 路径 | 实测覆盖 |
+| --- | --- | --- |
+| 流股上下游 | `...\Output\SOURCE` / `DESTINATION`(值是块名) | 94/98、89/98 |
+| 塔进料 | `\Data\Blocks\<塔>\Output\IN_STRMID`(元素 **Name=端口号、Value=流股名**) | 8/67(全是 RadFrac) |
+| 塔进料板 | `\Data\Blocks\<塔>\Input\FEED_STAGE`(元素 **Name=流股名、Value=板号**) | 同上 |
+| 换热器分侧 | `Input\FCOLD` / `FHOT`;`Output\COLDIN` / `COLDOUT` / `HOTIN` / `HOTOUT` | 9 台 HeatX 全可读 |
+| 其它设备 | 没有 `IN_STRMID`(`Heater` / `Pump` / `Compr` / `MCompr` / `Sep` / `Valve` / `RCSTR`) | — |
+
+* 同一个"设备 ↔ 流股"可能被多路看到(流股侧 / IN_STRMID / 换热器分侧),
+  入库时按 `(设备, 方向, 流股)` 合并,`source` 记来源(`stream` / `strmid` / `hx` / `feed_stage`)。
+* 判定"端口字段"的通用办法:**值或元素名等于一条真实流股名**。
+  这样 `FCOLD=0104` 会被认出来,而 `CALC_NSHELLS=NO`、`REPORT=REPORT` 这类噪声自动滤掉。
+* 边界流股:没有 `SOURCE` = 进料(4 条),没有 `DESTINATION` = 产品(9 条)。
+* 读取实现:`app/aspen/reader.py` 的 `read_connections()`。
+
+### 12.3 热负荷单位跟单位集走
+
+同一模型里 `QCALC` / `HX_DUTY` 给 `MW`,泵 / 压缩机 `BRAKE_POWER` 给 `kW`,`HX_AREAC` 给 `sqm`。
+一律按 `UnitString` 换算(见 `app/aspen/units.py`;`cal` 仍是 IT 卡 4.1868 J)。
+
+> 实测对照(焓平衡可行性):Heater 的 `ΔH = Σ出 − Σ入(HMX_FLOW)` 与 `QCALC` 误差 **0.00%**;
+> 压缩机与 `BRAKE_POWER` 差 **5.00%**(= 效率 0.95,`ΔH` 只含流体得到的那部分)。
+> 所以第 2 步就用 `HMX_FLOW` 的 ΔH 对 `duty_kw`,容差 1% / 0.5 kW 是够的。
+
+### 12.4 公用工程(`\Data\Utilities`)
+
+样本里 7 个成员:`CW / E / HP / LP / LPG / MP / SALTW`,成员 `Output` 下:
+
+| 字段 | 单位(实测) | 含义 |
+| --- | --- | --- |
+| `UTL_TCOST` | `$/hr` | 当前费用 |
+| `UTL_TRATE` | `kg/hr` | 用量 |
+| `UTL_PPRICE` | `$/kg`(电是 `$/kWhr`) | 单价 |
+| `UTL_ENTH_IN` / `UTL_ENTH_OUT` | `J/kg` | 进出口比焓 |
+| `UTL_IN_TEMP` / `UTL_OUT_TEMP` | `C` | 进出口温度 |
+| `UTL_DUTY` / `UTL_USAGE` / `BLK_ID` | 数组 | **元素名 = 用到它的设备** |
+
+设备侧的反向引用:`Input\UTILITY_ID`、`COND_UTIL`、`REB_UTIL`(`UTILITY_ID=MP` 这种)。
+
+> HANDOFF 0.3 已拍板:只记录结构,不做公用工程识别 / 成本判断(用户模型的公用工程命名没有统一规律)。
+
+### 12.5 焓平衡判定口径(2026-11-01 落地,`app/aspen/balance.py`)
+
+| 设备 | 参照值 | 判据 | 备注 |
+| --- | --- | --- | --- |
+| Heater / Flash2 | `duty_kw`(`QCALC` / `QNET`) | `abs(ΔH − duty) ≤ max(1% × duty, 0.5 kW)` | 热负荷为 0 时按绝热规则 |
+| HeatX | `HX_DUTY` | 只校验**冷侧**:`ΔH_cold = HX_DUTY` | 整体 ΔH 恒为 0(热侧给出、冷侧收取) |
+| Pump / Compr / MCompr | `power_kw`(`BRAKE_POWER`) | `ΔH / 功率 ∈ [0.85, 1.05]` | 差的是效率:实测泵 1.000、压缩机 0.950 |
+| Mixer / FSplit / Valve | 0 | `abs(ΔH) ≤ max(0.5% × 最大焓流, 0.5 kW)` | 绝热;4.7 kW / 20 万 kW 属噪声 |
+| RadFrac / 反应器 | — | 不校验 | 塔有冷凝器 / 再沸器;反应器的 `QCALC` 不是换热负荷 |
+
+四态:`ok` 通过 / `bad` 超差 / `no_data` 无法校验(缺流股焓值或缺参照值)/ `skip` 不校验。
+
+三份真实模型(98/67、116/82、105/74)按此口径跑:**0 台超差**;无法校验分别为 1 / 0 / 4 台
+——1 台多级压缩机没有 `BRAKE_POWER`;天大模型的 `E0102-1` / `E0102-2` 被能量流 `0136` 卡住。

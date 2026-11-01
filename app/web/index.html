@@ -8,77 +8,135 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="topbar">
+  <!-- 左侧栏:品牌 + 当前工况(全局语境)+ 模块导航 + 退出 -->
+  <aside class="sidebar">
     <div class="brand">aspen-insight</div>
-    <div class="meta">
-      <label>
-        工况
-        <select id="caseSelect"></select>
-      </label>
-      <span id="caseInfo" class="muted"></span>
-      <div class="actions">
-        <button id="readBtn" class="btn primary" title="从已经打开的 Aspen 里读一次当前工况(约 10–30 秒)">读取当前工况</button>
-        <button id="exportBtn" class="btn" title="把当前工况导出成 Excel(概要/流股/设备/塔剖面)">导出 Excel</button>
-        <button id="aiPackBtn" class="btn" title="导出给 AI 读的一组文件(Markdown 说明 + CSV 数据)">AI 分析包</button>
-        <button id="deleteBtn" class="btn danger" title="删除当前工况及其全部明细(不可恢复)">删除工况</button>
-        <button id="quitBtn" class="btn danger" title="停止服务并关闭窗口">退出</button>
-      </div>
+
+    <div class="side-case">
+      <label class="side-label" for="caseSelect">当前工况</label>
+      <select id="caseSelect"></select>
+      <button id="readBtn" class="btn primary block" title="从已经打开的 Aspen 里读一次当前工况(约 10–30 秒)">读取当前工况</button>
+      <div id="caseInfo" class="side-meta"></div>
     </div>
-  </header>
 
-  <div id="readStatus" class="read-status hidden"></div>
+    <nav class="side-nav">
+      <a class="tab nav-item" data-tab="home" href="#home">首页</a>
+      <a class="tab nav-item" data-tab="streams" href="#streams">流股</a>
+      <a class="tab nav-item" data-tab="blocks" href="#blocks">设备</a>
+      <a class="tab nav-item" data-tab="compare" href="#compare">对比</a>
+      <a class="tab nav-item" data-tab="flow" href="#flow">流程</a>
+    </nav>
 
-  <div id="banner" class="banner hidden"></div>
-
-  <nav class="toolbar">
-    <div class="tabs">
-      <button data-tab="streams" class="tab active">流股</button>
-      <button data-tab="blocks" class="tab">设备</button>
-      <button data-tab="compare" class="tab">对比</button>
+    <div class="side-foot">
+      <button id="quitBtn" class="btn block" title="停止服务并关闭窗口">退出</button>
     </div>
-    <input id="filter" type="search" placeholder="按名称筛选…" autocomplete="off">
-    <span id="compareScope" class="segmented hidden">
-      <button type="button" data-scope="streams" class="active">流股</button>
-      <button type="button" data-scope="blocks">设备</button>
-    </span>
-    <span id="count" class="muted"></span>
-    <span class="spacer"></span>
-    <button id="compareHint" class="icon-btn" type="button" title="对比两个工况">⇄</button>
-    <span id="compareControls" class="compare-controls hidden">
-      <label>基础 <select id="baseSelect"></select></label>
-      <label>对比 <select id="otherSelect"></select></label>
-      <span id="compareSummary" class="muted"></span>
-    </span>
-  </nav>
+  </aside>
 
-  <main>
-    <div class="table-wrap" id="tableWrap">
-      <table id="table">
-        <thead></thead>
-        <tbody></tbody>
-      </table>
-    </div>
-    <p id="empty" class="empty hidden">还没有工况。点右上角「读取当前工况」,从已经打开的 Aspen 里读一次。</p>
+  <div class="workspace">
+    <div id="readStatus" class="read-status hidden"></div>
 
-    <section id="columnPanel" class="column-panel hidden">
-      <header class="panel-head">
-        <h3 id="columnTitle">塔剖面</h3>
-        <button id="closeColumn" class="close" title="关闭">✕</button>
+    <!-- 首页:工况信息 / 收敛状态 / 规模 / 焓平衡 / 异常模块 -->
+    <section id="pageHome" class="page">
+      <header class="page-head">
+        <h2>首页</h2>
+        <div class="page-actions">
+          <button id="exportBtn" class="btn" title="把当前工况导出成 Excel(概要/流股/设备/连接/塔剖面)">导出 Excel</button>
+          <button id="aiPackBtn" class="btn" title="导出给 AI 读的一组文件(Markdown 说明 + CSV 数据)">AI 分析包</button>
+          <button id="deleteBtn" class="btn danger" title="删除当前工况及其全部明细(不可恢复)">删除工况</button>
+        </div>
       </header>
-      <div id="columnCharts" class="charts"></div>
-      <div class="table-wrap small">
-        <table id="columnTable"><thead></thead><tbody></tbody></table>
-      </div>
+
+      <div id="banner" class="banner hidden"></div>
+      <div id="homeCards" class="cards"></div>
+
+      <section id="homeProblemsCard" class="card wide hidden">
+        <h3>异常模块</h3>
+        <div id="homeProblems"></div>
+      </section>
     </section>
 
-    <section id="compPanel" class="column-panel comp-panel hidden">
-      <header class="panel-head">
-        <h3 id="compTitle">流股组成</h3>
-        <button id="closeComp" class="close" title="关闭">✕</button>
+    <!-- 流程页:设备连接图(全图 + 缩放 + 点设备聚焦上下游 2 层) -->
+    <section id="pageFlow" class="page hidden">
+      <header class="page-head">
+        <h2>流程</h2>
+        <div class="page-actions">
+          <button id="flowFit" class="btn" title="缩放到全部设备(双击画布同效)">适应窗口</button>
+          <button id="flowZoomIn" class="btn" title="放大">＋</button>
+          <button id="flowZoomOut" class="btn" title="缩小">－</button>
+          <button id="flowLabels" class="btn" title="在连线上显示流股名">流股名</button>
+        </div>
       </header>
-      <div id="compBody" class="comp-body"></div>
+
+      <div class="flow-bar">
+        <span class="muted" id="flowHint">滚轮缩放、拖动平移;点击设备聚焦它上下游 2 层,Esc 取消。</span>
+        <span class="spacer"></span>
+        <span id="flowLegend" class="legend"></span>
+      </div>
+
+      <div id="flowWrap" class="flow-wrap">
+        <svg id="flowSvg" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div id="flowEmpty" class="flow-empty hidden"></div>
+      </div>
+
+      <section id="flowPanel" class="card flow-panel hidden">
+        <header class="panel-head">
+          <h3 id="flowPanelTitle">设备</h3>
+          <button id="flowPanelClose" class="close" title="取消聚焦">✕</button>
+        </header>
+        <div id="flowPanelBody"></div>
+      </section>
     </section>
-  </main>
+
+    <!-- 数据页:流股 / 设备 / 对比 共用 -->
+    <section id="pageData" class="page hidden">
+      <header class="page-head">
+        <h2 id="pageTitle">流股</h2>
+      </header>
+
+      <nav class="toolbar">
+        <input id="filter" type="search" placeholder="按名称筛选…" autocomplete="off">
+        <span id="compareScope" class="segmented hidden">
+          <button type="button" data-scope="streams" class="active">流股</button>
+          <button type="button" data-scope="blocks">设备</button>
+        </span>
+        <span id="count" class="muted"></span>
+        <span class="spacer"></span>
+        <button id="compareHint" class="icon-btn" type="button" title="对比两个工况">⇄</button>
+        <span id="compareControls" class="compare-controls hidden">
+          <label>基础 <select id="baseSelect"></select></label>
+          <label>对比 <select id="otherSelect"></select></label>
+          <span id="compareSummary" class="muted"></span>
+        </span>
+      </nav>
+
+      <div class="table-wrap" id="tableWrap">
+        <table id="table">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p id="empty" class="empty hidden">还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。</p>
+
+      <section id="columnPanel" class="column-panel hidden">
+        <header class="panel-head">
+          <h3 id="columnTitle">塔剖面</h3>
+          <button id="closeColumn" class="close" title="关闭">✕</button>
+        </header>
+        <div id="columnCharts" class="charts"></div>
+        <div class="table-wrap small">
+          <table id="columnTable"><thead></thead><tbody></tbody></table>
+        </div>
+      </section>
+
+      <section id="compPanel" class="column-panel comp-panel hidden">
+        <header class="panel-head">
+          <h3 id="compTitle">流股组成</h3>
+          <button id="closeComp" class="close" title="关闭">✕</button>
+        </header>
+        <div id="compBody" class="comp-body"></div>
+      </section>
+    </section>
+  </div>
 
   <div id="chartTip" class="chart-tip hidden"></div>
 

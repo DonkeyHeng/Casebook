@@ -50,8 +50,27 @@ CREATE TABLE IF NOT EXISTS streams (
     mole_flow_kmolh REAL,
     vap_frac       REAL,
     vol_flow_m3h   REAL,
+    enthalpy_kjkg   REAL,   -- 质量焓(HMX_MASS 的 MIXED 子节点)
+    enthalpy_kjkmol REAL,   -- 摩尔焓(HMX 的 MIXED 子节点)
+    enthalpy_flow_kw REAL,  -- 能量流 m·h(HMX_FLOW 的 MIXED 子节点),可直接相加做 ΔH
     raw_json       TEXT,
     PRIMARY KEY (case_id, name)
+);
+
+-- 设备 ↔ 流股的连接关系(第 1 步:拓扑)
+-- 主来源是流股侧的 SOURCE / DESTINATION;设备 IN_STRMID 只在塔上存在,
+-- 换热器另有分侧字段(COLDIN/COLDOUT/HOTIN/HOTOUT),合并成 side。
+CREATE TABLE IF NOT EXISTS connections (
+    case_id   INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    block     TEXT    NOT NULL,
+    direction TEXT    NOT NULL,          -- in / out
+    stream    TEXT    NOT NULL,
+    side      TEXT    DEFAULT '',        -- cold / hot(换热器分侧),其余为空
+    port      TEXT    DEFAULT '',        -- 端口号(塔的 IN_STRMID 元素名)
+    stage     INTEGER,                   -- 塔进料板号(来自 Input 的 FEED_STAGE)
+    source    TEXT,                      -- stream / strmid / hx / feed_stage
+    seq       INTEGER,
+    PRIMARY KEY (case_id, block, direction, stream)
 );
 
 CREATE TABLE IF NOT EXISTS stream_components (
@@ -75,6 +94,11 @@ CREATE TABLE IF NOT EXISTS blocks (
     bottom_temp_c REAL,
     status        INTEGER,
     message       TEXT,
+    dh_kw         REAL,   -- 焓平衡:ΔH = Σ出 − Σ入(流股能量流)
+    ref_kw        REAL,   -- 对照值:热负荷 / 轴功率 / 0(绝热)
+    ref_kind      TEXT,   -- duty / power / zero / hx_cold
+    balance_state TEXT,   -- ok 通过 / bad 超差 / no_data 无法校验 / skip 不校验
+    balance_note  TEXT,   -- 人话说明(含差值、容差、比值)
     raw_json      TEXT,
     PRIMARY KEY (case_id, name)
 );
@@ -94,6 +118,8 @@ CREATE TABLE IF NOT EXISTS column_stages (
 CREATE INDEX IF NOT EXISTS idx_streams_case ON streams(case_id);
 CREATE INDEX IF NOT EXISTS idx_blocks_case  ON blocks(case_id);
 CREATE INDEX IF NOT EXISTS idx_stages_case  ON column_stages(case_id);
+CREATE INDEX IF NOT EXISTS idx_conn_case   ON connections(case_id);
+CREATE INDEX IF NOT EXISTS idx_conn_block  ON connections(case_id, block);
 """
 
 
@@ -120,12 +146,36 @@ _ADDED_COLUMNS = (
     ("unit_gaps_json", "TEXT"),
 )
 
+# streams 表后加的列(焓)
+_STREAM_ADDED_COLUMNS = (
+    ("enthalpy_kjkg", "REAL"),
+    ("enthalpy_kjkmol", "REAL"),
+    ("enthalpy_flow_kw", "REAL"),
+)
+
+# blocks 表后加的列(焓平衡自检)
+_BLOCK_ADDED_COLUMNS = (
+    ("dh_kw", "REAL"),
+    ("ref_kw", "REAL"),
+    ("ref_kind", "TEXT"),
+    ("balance_state", "TEXT"),
+    ("balance_note", "TEXT"),
+)
+
 
 def _migrate(conn: sqlite3.Connection) -> None:
     have = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
     for name, ddl in _ADDED_COLUMNS:
         if name not in have:
             conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {ddl}")
+    have_stream = {row["name"] for row in conn.execute("PRAGMA table_info(streams)")}
+    for name, ddl in _STREAM_ADDED_COLUMNS:
+        if name not in have_stream:
+            conn.execute(f"ALTER TABLE streams ADD COLUMN {name} {ddl}")
+    have_block = {row["name"] for row in conn.execute("PRAGMA table_info(blocks)")}
+    for name, ddl in _BLOCK_ADDED_COLUMNS:
+        if name not in have_block:
+            conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {ddl}")
 
 
 # ---------------------------------------------------------------- 写入
@@ -175,8 +225,9 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     conn.executemany(
         """
         INSERT INTO streams (case_id, name, temperature_c, pressure_bar, mass_flow_kgh,
-                             mole_flow_kmolh, vap_frac, vol_flow_m3h, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?)
+                             mole_flow_kmolh, vap_frac, vol_flow_m3h,
+                             enthalpy_kjkg, enthalpy_kjkmol, enthalpy_flow_kw, raw_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -188,11 +239,38 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 s.get("mole_flow_kmolh"),
                 s.get("vap_frac"),
                 s.get("vol_flow_m3h"),
+                s.get("enthalpy_kjkg"),
+                s.get("enthalpy_kjkmol"),
+                s.get("enthalpy_flow_kw"),
                 json.dumps(s.get("raw", {}), ensure_ascii=False),
             )
             for s in case.get("streams", [])
         ],
     )
+
+    conn_rows = [
+        (
+            case_id,
+            c.get("block"),
+            c.get("direction"),
+            c.get("stream"),
+            c.get("side") or "",
+            c.get("port") or "",
+            c.get("stage"),
+            c.get("source"),
+            c.get("seq"),
+        )
+        for c in case.get("connections", [])
+    ]
+    if conn_rows:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO connections
+                (case_id, block, direction, stream, side, port, stage, source, seq)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            """,
+            conn_rows,
+        )
 
     comp_rows = []
     for stream in case.get("streams", []):
@@ -212,8 +290,9 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     conn.executemany(
         """
         INSERT INTO blocks (case_id, name, type, duty_kw, power_kw, area_m2, nstage,
-                            top_temp_c, bottom_temp_c, status, message, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                            top_temp_c, bottom_temp_c, status, message,
+                            dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -228,6 +307,11 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 b.get("bottom_temp_c"),
                 b.get("status"),
                 b.get("message"),
+                (b.get("balance") or {}).get("dh_kw"),
+                (b.get("balance") or {}).get("ref_kw"),
+                (b.get("balance") or {}).get("ref_kind"),
+                (b.get("balance") or {}).get("balance_state"),
+                (b.get("balance") or {}).get("balance_note"),
                 json.dumps(b.get("raw", {}), ensure_ascii=False),
             )
             for b in case.get("blocks", [])
@@ -285,11 +369,32 @@ def read_blocks(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+def read_connections(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
+    """某个工况的设备 ↔ 流股连接关系(按写入顺序)。"""
+    return conn.execute(
+        "SELECT block, direction, stream, side, port, stage, source, seq "
+        "FROM connections WHERE case_id = ? ORDER BY seq, block, direction, stream",
+        (case_id,),
+    ).fetchall()
+
+
 def read_column_stages(conn: sqlite3.Connection, case_id: int, block: str) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM column_stages WHERE case_id = ? AND block = ? ORDER BY stage",
         (case_id, block),
     ).fetchall()
+
+
+def balance_summary(conn: sqlite3.Connection, case_id: int) -> dict:
+    """某个工况的焓平衡四态台数(给首页仪表盘用)。"""
+    counts = {"ok": 0, "bad": 0, "no_data": 0, "skip": 0}
+    for row in conn.execute(
+            "SELECT balance_state, COUNT(*) AS n FROM blocks WHERE case_id = ? "
+            "GROUP BY balance_state", (case_id,)):
+        key = row["balance_state"]
+        if key in counts:
+            counts[key] = row["n"]
+    return counts
 
 
 def list_columns(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
@@ -355,7 +460,7 @@ def delete_case(conn: sqlite3.Connection, case_id: int) -> dict:
     明细表显式删除,不依赖 `ON DELETE CASCADE`(外键 pragma 在不同连接上未必生效)。
     """
     counts: dict[str, int] = {}
-    for table in ("stream_components", "column_stages", "blocks", "streams"):
+    for table in ("connections", "stream_components", "column_stages", "blocks", "streams"):
         cur = conn.execute(f"DELETE FROM {table} WHERE case_id = ?", (case_id,))
         counts[table] = cur.rowcount
     conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))

@@ -20,6 +20,8 @@ _*.*
 
 # 探测输出与截图(运行时生成)
 probe_out/
+data/probe_topology.txt
+data/preview/
 
 # Python
 __pycache__/

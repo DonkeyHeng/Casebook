@@ -88,6 +88,14 @@ def _num(value):
     return value
 
 
+BALANCE_TEXT = {
+    "ok": "通过",
+    "bad": "超差",
+    "no_data": "无法校验",
+    "skip": "不校验",
+}
+
+
 def _json(value, fallback):
     try:
         return json.loads(value) if value else fallback
@@ -140,6 +148,25 @@ def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
     for n, reason in enumerate(reasons, 1):
         add("判定理由", f"第 {n} 条", reason, "", "")
 
+    # 焓平衡自检:ΔH = Σ出 − Σ入(流股能量流),对设备热负荷 / 功率
+    counts = {"ok": 0, "bad": 0, "no_data": 0, "skip": 0}
+    for b in blocks:
+        state = b["balance_state"]
+        if state in counts:
+            counts[state] += 1
+    checked = counts["ok"] + counts["bad"]
+    add("焓平衡", "参与校验台数", checked, "台",
+        "塔 / 反应器按约定不校验;缺数据 / 缺参照值的记「无法校验」")
+    add("焓平衡", "通过", counts["ok"], "台", "|ΔH − 参照| 在容差内(热负荷 1% 或 0.5 kW 取大)")
+    add("焓平衡", "超差", counts["bad"], "台", "超出容差,明细见 blocks.csv 的「平衡说明」列")
+    add("焓平衡", "无法校验", counts["no_data"], "台", "有流股没有焓值,或缺热负荷 / 轴功率字段")
+    add("焓平衡", "不校验", counts["skip"], "台", "RadFrac / 反应器:进出口焓差不等于设备热负荷")
+    worst = sorted((b for b in blocks if b["balance_state"] == "bad"),
+                   key=lambda b: -abs((b["dh_kw"] or 0) - (b["ref_kw"] or 0)))[:5]
+    for b in worst:
+        add("焓平衡-超差", b["name"], f"ΔH {b['dh_kw']:.2f} kW", "kW",
+            b["balance_note"] or "")
+
     # 报错/告警模块逐条列原文(Aspen 的 BLKMSG 是唯一可得的准确原因)
     for b in blocks:
         status = b["status"]
@@ -173,11 +200,33 @@ def _streams_csv(streams) -> bytes:
             _num(s["mole_flow_kmolh"]),
             _num(s["vap_frac"]),
             _num(s["vol_flow_m3h"]),
+            _num(s["enthalpy_kjkg"]),
+            _num(s["enthalpy_kjkmol"]),
+            _num(s["enthalpy_flow_kw"]),
             _compact(raw),
         ])
     return _csv_bytes(
         ["流股", "温度℃", "压力bar", "质量流量kg/h", "摩尔流量kmol/h",
-         "汽化率", "体积流量m³/h", "原始数据(JSON:字段→值+单位)"],
+         "汽化率", "体积流量m³/h", "质量焓kJ/kg", "摩尔焓kJ/kmol", "能量流kW",
+         "原始数据(JSON:字段→值+单位)"],
+        rows,
+    )
+
+
+def _connections_csv(connections) -> bytes:
+    rows = []
+    for c in connections:
+        rows.append([
+            c["block"],
+            "进" if c["direction"] == "in" else "出",
+            c["stream"],
+            c["side"] or "",
+            c["port"] or "",
+            _num(c["stage"]),
+            c["source"] or "",
+        ])
+    return _csv_bytes(
+        ["设备", "方向", "流股", "分侧", "端口", "进料板", "来源"],
         rows,
     )
 
@@ -197,12 +246,17 @@ def _blocks_csv(blocks) -> bytes:
             _num(b["nstage"]),
             _num(b["top_temp_c"]),
             _num(b["bottom_temp_c"]),
+            _num(b["dh_kw"]),
+            _num(b["ref_kw"]),
+            BALANCE_TEXT.get(b["balance_state"], ""),
+            b["balance_note"] or "",
             b["message"] or "",
             _compact(raw),
         ])
     return _csv_bytes(
         ["设备", "类型", "状态码", "状态", "热负荷kW", "功率kW", "换热面积m²",
-         "理论级数", "顶温℃", "底温℃", "提示原文(BLKMSG)", "原始数据(JSON)"],
+         "理论级数", "顶温℃", "底温℃", "ΔH kW", "参照kW", "焓平衡", "平衡说明",
+         "提示原文(BLKMSG)", "原始数据(JSON)"],
         rows,
     )
 
@@ -237,7 +291,7 @@ def _composition_csv(rows) -> bytes:
 
 
 def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
-               composition) -> bytes:
+               composition, connections) -> bytes:
     files = {
         "README.md": "说明书 + 数据字典(先读这个)",
         "metrics.csv": "精简指标:概览 / 状态码 / 异常清单",
@@ -247,6 +301,8 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
     }
     if columns:
         files["column_profiles.csv"] = "塔逐板剖面"
+    if connections:
+        files["connections.csv"] = "设备 ↔ 流股连接关系(拓扑)"
     if composition["rows"]:
         files["composition.csv"] = "已读流股的逐组分摩尔分数"
 
@@ -267,6 +323,9 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
             "run_user": case["run_user"],
             "stream_count": case["stream_count"],
             "block_count": case["block_count"],
+            "connection_count": len(connections),
+            "balance": {state: sum(1 for b in blocks if b["balance_state"] == state)
+                        for state in ("ok", "bad", "no_data", "skip")},
             "elapsed_sec": case["elapsed_sec"],
         },
         "convergence": {
@@ -302,7 +361,7 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
 
 
 def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
-            composition, metrics_count: int) -> str:
+            composition, connections, metrics_count: int) -> str:
     severity = case["severity"] or ""
     severity_text = SEVERITY_TEXT.get(severity, severity or "未知")
     converged = bool(case["converged"])
@@ -370,6 +429,8 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w(f"| `metrics.csv` | 精简指标(概览 / 状态码 / 异常清单) | {metrics_count} 行 |")
     w(f"| `streams.csv` | 流股完整数据 | {case['stream_count']} 行 |")
     w(f"| `blocks.csv` | 设备完整数据 | {case['block_count']} 行 |")
+    if connections:
+        w(f"| `connections.csv` | 设备 ↔ 流股连接关系(拓扑) | {len(connections)} 行 |")
     if columns:
         w(f"| `column_profiles.csv` | 塔逐板剖面 | {sum(stage_counts)} 行 |")
     if composition["rows"]:
@@ -394,6 +455,9 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("| 热负荷 / 功率 | kW | `热负荷kW` / `功率kW` |")
     w("| 换热面积 | m² | `换热面积m²` |")
     w("| 汽化率 | 无量纲 0–1 | `汽化率` |")
+    w("| 质量焓 | kJ/kg | `质量焓kJ/kg`(`HMX_MASS` 的 `MIXED`) |")
+    w("| 摩尔焓 | kJ/kmol | `摩尔焓kJ/kmol`(`HMX` 的 `MIXED`) |")
+    w("| 能量流(m·h) | kW | `能量流kW`(`HMX_FLOW` 的 `MIXED`),**可直接相加** |")
     w("")
     w("为什么必须换算:Aspen 的单位跟着模型的单位集走(本机 `METCBAR`),")
     w("同一个「热负荷」在不同模块可能给 `cal/sec`,泵却给 `kW`,直接并排会误判。")
@@ -418,6 +482,9 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("| 摩尔流量kmol/h | `RES_MOLEFLOW` |")
     w("| 汽化率 | `RES_VFRAC`,0=全液相,1=全气相 |")
     w("| 体积流量m³/h | `RES_VOLFLOW` |")
+    w("| 质量焓kJ/kg | 焓按质量算(`HMX_MASS` 的子节点 `MIXED`),含 Aspen 的任意参考态 |")
+    w("| 摩尔焓kJ/kmol | 焓按摩尔算(`HMX` 的子节点 `MIXED`) |")
+    w("| 能量流kW | **m·h**,`HMX_FLOW` 的子节点 `MIXED`;做焓平衡就用它:ΔH = Σ出 − Σ入 |")
     w("| 原始数据 | 原始值与单位,JSON |")
     w("")
     w("### 4.2 `blocks.csv` —— 单元设备")
@@ -432,7 +499,25 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("| 换热面积m² | `HX_AREAC` |")
     w("| 理论级数 | 塔的 `NSTAGE`(输入) |")
     w("| 顶温℃ / 底温℃ | 塔的第一级 / 最后一级温度 |")
+    w("| ΔH kW | 焓平衡:ΔH = Σ出 − Σ入(流股 `能量流kW`)。正=放热/失焓,负=吸热/得焓 |")
+    w("| 参照kW | 对照值:`热负荷kW`(Heater/Flash2)、`功率kW`(泵/压缩机)、`0`(绝热设备)、"
+      "换热器按冷侧 `HX_DUTY` |")
+    w("| 焓平衡 | `通过` / `超差` / `无法校验`(缺流股焓值或参照值)/ `不校验`(塔、反应器) |")
+    w("| 平衡说明 | 差值、容差、比值等人话;超差时先看这一列 |")
     w("| 提示原文 | Aspen 的 `BLKMSG` 原文(英文),空=没报错 |")
+    w("")
+    w("### 4.2.1 焓平衡判定的口径")
+    w("")
+    w("| 设备 | 参照 | 判据 |")
+    w("| --- | --- | --- |")
+    w("| Heater / Flash2 | `热负荷kW` | \\|ΔH − 热负荷\\| ≤ max(1% × 热负荷, 0.5 kW) |")
+    w("| HeatX | `HX_DUTY` | 只校验**冷侧**:ΔH_cold = HX_DUTY(整体 ΔH 恒为 0) |")
+    w("| Pump / Compr | `功率kW` | 按 ΔH / 功率 ∈ [0.85, 1.05](差的是效率,实测压缩机 0.95) |")
+    w("| Mixer / FSplit / Valve | 0 | \\|ΔH\\| ≤ max(0.5% × 最大焓流, 0.5 kW) |")
+    w("| RadFrac / 反应器 | — | 不校验:进出口焓差不等于设备热负荷 |")
+    w("")
+    w("> 流股焓用的是 `HMX_FLOW`(已经是 m·h,单位 MW)。Aspen 焓有任意参考态,")
+    w("> 绝对值不能跨设备相加;`ΔH = Σ出 − Σ入` 才是可比的量。")
     w("")
     w("### 4.3 `column_profiles.csv` —— 塔逐板剖面")
     w("")
@@ -444,8 +529,26 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("单张表,`类别` 列区分五类:概览 / 状态码 / 判定理由 / 异常模块 / 撕裂流。")
     w("想快速看结论就只读这张表。")
     w("")
+    if connections:
+        w("### 4.5 `connections.csv` —— 设备与流股的连接关系")
+        w("")
+        w("| 列 | 含义 |")
+        w("| --- | --- |")
+        w("| 设备 | 模块名 |")
+        w("| 方向 | `进` = 该流股流入这个模块,`出` = 从它流出 |")
+        w("| 流股 | 流股 ID |")
+        w("| 分侧 | `cold` / `hot`(换热器冷/热侧),其余为空 |")
+        w("| 端口 | 塔的进料端口号(来自 `IN_STRMID` 的元素名),其余为空 |")
+        w("| 进料板 | 塔的进料位置(来自 `Input` 的 `FEED_STAGE`) |")
+        w("| 来源 | `stream`=流股侧 SOURCE/DESTINATION;`strmid`=设备 IN/OUT_STRMID;"
+          "`hx`=换热器分侧字段;`feed_stage`=进料板映射 |")
+        w("")
+        w("> 主流股的连接来自流股侧的 `SOURCE` / `DESTINATION`(值是模块名):")
+        w("> 实测设备侧 `IN_STRMID` 只有塔上有,其余设备没有这个字段。")
+        w("> 边界流股(没有上游 = 进料,没有下游 = 产品)不会出现在 `connections.csv` 里。")
+        w("")
     if composition["rows"]:
-        w("### 4.5 `composition.csv` —— 流股组成")
+        w("### 4.6 `composition.csv` —— 流股组成")
         w("")
         w("| 列 | 含义 |")
         w("| --- | --- |")
@@ -569,6 +672,7 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
         c["block"]: db.read_column_stages(conn, case_id, c["block"]) for c in columns
     }
 
+    connections = db.read_connections(conn, case_id)
     comp_rows = db.read_all_composition(conn, case_id)
     composition = {
         "rows": comp_rows,
@@ -583,19 +687,22 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     metrics_rows = _metrics_rows(case, columns, stage_counts, reasons, codes,
                                  tears, blocks, composition)
     readme = _readme(case, columns, stage_counts, reasons, codes, tears,
-                     blocks, composition, len(metrics_rows))
+                     blocks, composition, connections, len(metrics_rows))
     files: list[tuple[str, bytes]] = [
         ("README.md", _md_bytes(readme)),
         ("metrics.csv", _csv_bytes(["类别", "项目", "值", "单位", "说明"], metrics_rows)),
         ("streams.csv", _streams_csv(streams)),
         ("blocks.csv", _blocks_csv(blocks)),
     ]
+    if connections:
+        files.append(("connections.csv", _connections_csv(connections)))
     if columns:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
     if comp_rows:
         files.append(("composition.csv", _composition_csv(comp_rows)))
     files.append(("case.json", _case_json(case, columns, stage_counts, reasons,
-                                          codes, tears, blocks, composition)))
+                                          codes, tears, blocks, composition,
+                                          connections)))
 
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:

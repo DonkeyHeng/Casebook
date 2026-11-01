@@ -5,7 +5,14 @@ const state = {
   current: null,
   streams: [],
   blocks: [],
-  tab: "streams",
+  tab: "streams",          // 数据页里的子视图:streams / blocks / compare
+  page: "home",            // 当前页面:home / streams / blocks / compare
+  emptyText: "",           // 空态文案(读不到工况列表等错误也走这里)
+  flow: {                  // 流程页:数据 + 布局 + 视图 + 聚焦
+    caseId: null, data: null, layout: null, view: null, focus: null,
+    center: null,          // 被点中的设备(和 2 层邻居分开配色)
+    showLabels: false,
+  },
   filter: "",
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
@@ -183,6 +190,10 @@ function renderStreams() {
     { key: "mole_flow_kmolh", label: "摩尔流量 kmol/h", num: true, digits: 2 },
     { key: "vap_frac", label: "汽化率", num: true, digits: 3 },
     { key: "vol_flow_m3h", label: "体积流量 m³/h", num: true, digits: 1 },
+    // 焓(第 1 步新增):能量流 kW = HMX_FLOW,可直接相加做 ΔH;质量/摩尔焓按单位集换算
+    { key: "enthalpy_kjkg", label: "质量焓 kJ/kg", num: true, digits: 1 },
+    { key: "enthalpy_kjkmol", label: "摩尔焓 kJ/kmol", num: true, digits: 1 },
+    { key: "enthalpy_flow_kw", label: "能量流 kW", num: true, digits: 1 },
   ];
   const rows = rowsForTab();
   const thead = document.querySelector("#table thead");
@@ -214,10 +225,15 @@ function renderBlocks() {
     { key: "status", label: "状态", status: true },
     { key: "duty_kw", label: "热负荷 kW", num: true, digits: 2 },
     { key: "power_kw", label: "功率 kW", num: true, digits: 2 },
+    // 焓平衡自检:ΔH = Σ出 − Σ入(流股能量流),参照 = 热负荷 / 轴功率 / 0(绝热)
+    { key: "dh_kw", label: "ΔH kW", num: true, digits: 2 },
+    { key: "ref_kw", label: "参照 kW", num: true, digits: 2 },
+    { key: "balance_state", label: "焓平衡", balance: true },
     { key: "area_m2", label: "面积 m²", num: true, digits: 2 },
     { key: "nstage", label: "级数", num: true, digits: 0 },
     { key: "top_temp_c", label: "顶温 ℃", num: true, digits: 1 },
     { key: "bottom_temp_c", label: "底温 ℃", num: true, digits: 1 },
+    { key: "balance_note", label: "平衡说明", cls: "msg" },
     { key: "message", label: "说明", cls: "msg" },
   ];
   const rows = rowsForTab();
@@ -228,11 +244,13 @@ function renderBlocks() {
     const isColumn = COLUMN_TYPE.test(row.type || "");
     return `<tr>${cols.map((c) => {
       if (c.status) return `<td>${blockBadge(row.status)}</td>`;
+      if (c.balance) return `<td>${balanceBadge(row.balance_state)}</td>`;
       if (c.key === "name" && isColumn) {
         return `<td class="name"><a href="#" class="col-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;
       }
       const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
-      return `<td class="${c.cls || ""} ${c.num ? "num" : ""}">${value}</td>`;
+      const title = c.key === "balance_note" && row.balance_note ? ` title="${esc(row.balance_note)}"` : "";
+      return `<td class="${c.cls || ""} ${c.num ? "num" : ""}"${title}>${value}</td>`;
     }).join("")}</tr>`;
   }).join("");
 
@@ -242,7 +260,30 @@ function renderBlocks() {
       openColumn(a.dataset.block);
     });
   });
-  document.getElementById("count").textContent = `${rows.length} 行`;
+  // 台账摘要:用全部设备(不受筛选影响)统计焓平衡四态
+  const bs = { ok: 0, bad: 0, no_data: 0, skip: 0 };
+  state.blocks.forEach((b) => {
+    if (b.balance_state && bs[b.balance_state] !== undefined) bs[b.balance_state] += 1;
+  });
+  let count = `${rows.length} 行`;
+  const parts = [];
+  if (bs.ok) parts.push(`通过 ${bs.ok}`);
+  if (bs.bad) parts.push(`超差 ${bs.bad}`);
+  if (bs.no_data) parts.push(`无法校验 ${bs.no_data}`);
+  if (bs.skip) parts.push(`不校验 ${bs.skip}`);
+  if (parts.length) count += ` · 焓平衡 ${parts.join(" / ")}`;
+  document.getElementById("count").textContent = count;
+}
+
+function balanceBadge(bstate) {
+  const map = {
+    ok: ["ok", "通过"],
+    bad: ["err", "超差"],
+    no_data: ["warn", "无法校验"],
+    skip: ["idle", "不校验"],
+  };
+  const [cls, text] = map[bstate] || ["idle", "—"];
+  return `<span class="badge ${cls}">${text}</span>`;
 }
 
 function renderCompare() {
@@ -934,15 +975,527 @@ async function resumeReadIfRunning() {
   }
 }
 
+/* ------------------------------------------------------------ 流程页(拓扑图)
+
+   零依赖手写 SVG:先按"进料可达距离"分层(这份模型是闭环,没有入度 0 的设备,
+   不能用 Kahn),层太多就折行(蛇形,奇偶行反向),再缩放/平移,点设备聚焦上下游 2 层。
+   为什么不用图库:项目约定零构建、依赖越少越好;67 个节点自己算完全够用。 */
+
+const FLOW = {
+  nodeW: 126, nodeH: 40, gapX: 46, gapY: 16, rowGap: 76,
+  chipW: 88, chipH: 22, chipGap: 22,
+  color: { ok: "#15803d", bad: "#b91c1c", no_data: "#b45309", skip: "#9ca3af", "": "#9ca3af" },
+};
+
+function flowAdj(data) {
+  const adj = new Map();
+  data.nodes.forEach((n) => adj.set(n.name, new Set()));
+  data.links.forEach((l) => {
+    if (adj.has(l.from) && adj.has(l.to)) {
+      adj.get(l.from).add(l.to);
+      adj.get(l.to).add(l.from);
+    }
+  });
+  return adj;
+}
+
+function layoutFlow(data, viewAspect = 1.8) {
+  const out = new Map(), into = new Map();
+  data.nodes.forEach((n) => { out.set(n.name, []); into.set(n.name, []); });
+  data.links.forEach((l) => {
+    if (out.has(l.from) && into.has(l.to)) {
+      out.get(l.from).push(l.to);
+      into.get(l.to).push(l.from);
+    }
+  });
+
+  // ---- 分层:从进料 BFS(最短距离),环上的回边不参与分层
+  const depth = new Map();
+  const queue = [];
+  data.feeds.forEach((f) => {
+    if (out.has(f.to) && !depth.has(f.to)) { depth.set(f.to, 0); queue.push(f.to); }
+  });
+  if (!queue.length) {
+    const seed = data.nodes.slice().sort((a, b) => into.get(a.name).length - into.get(b.name).length)[0];
+    if (seed) { depth.set(seed.name, 0); queue.push(seed.name); }
+  }
+  while (queue.length) {
+    const name = queue.shift();
+    const d = depth.get(name);
+    out.get(name).forEach((nxt) => {
+      if (!depth.has(nxt)) { depth.set(nxt, d + 1); queue.push(nxt); }
+    });
+  }
+  let maxDepth = 0;
+  depth.forEach((d) => { maxDepth = Math.max(maxDepth, d); });
+  data.nodes.forEach((n) => { if (!depth.has(n.name)) depth.set(n.name, maxDepth + 1); });
+  depth.forEach((d) => { maxDepth = Math.max(maxDepth, d); });
+
+  const layerLists = [];
+  for (let d = 0; d <= maxDepth; d++) layerLists.push([]);
+  data.nodes.forEach((n) => layerLists[depth.get(n.name)].push(n.name));
+  layerLists.forEach((l) => l.sort());
+
+  // ---- 层内排序:邻居平均位置(重心法),两轮就够,再看不出交叉就那样了
+  const pos = new Map();
+  layerLists.forEach((list) => list.forEach((name, i) => pos.set(name, i)));
+  const bary = (name) => {
+    const nb = [...into.get(name), ...out.get(name)];
+    if (!nb.length) return 0;
+    return nb.reduce((sum, x) => sum + (pos.get(x) ?? 0), 0) / nb.length;
+  };
+  for (let pass = 0; pass < 2; pass++) {
+    for (let li = 1; li < layerLists.length; li++) {
+      layerLists[li].sort((a, b) => bary(a) - bary(b) || a.localeCompare(b));
+      layerLists[li].forEach((name, i) => pos.set(name, i));
+    }
+    for (let li = layerLists.length - 2; li >= 0; li--) {
+      layerLists[li].sort((a, b) => bary(a) - bary(b) || a.localeCompare(b));
+      layerLists[li].forEach((name, i) => pos.set(name, i));
+    }
+  }
+
+  // ---- 折行:整条链太长就按行折(蛇形),行数取"最接近画布长宽比"的那个
+  const layerPitch = FLOW.nodeW + FLOW.gapX;
+  const rowHeightOf = (count) => count * (FLOW.nodeH + FLOW.gapY) - FLOW.gapY;
+  let rows = 1;
+  let perRow = layerLists.length;
+  let best = Infinity;
+  for (let r = 1; r <= 4; r++) {
+    const cols = Math.ceil(layerLists.length / r);
+    const heights = new Array(r).fill(0);
+    layerLists.forEach((list, L) => {
+      const row = Math.min(r - 1, Math.floor(L / cols));
+      heights[row] = Math.max(heights[row], list.length);
+    });
+    const h = heights.reduce((sum, c) => sum + rowHeightOf(c), 0) + FLOW.rowGap * (r - 1);
+    const w = cols * layerPitch;
+    const score = Math.abs(Math.log((w / Math.max(1, h)) / Math.max(0.6, viewAspect)));
+    if (score < best) { best = score; rows = r; perRow = cols; }
+  }
+
+  const rowHeights = new Array(rows).fill(0);
+  layerLists.forEach((list, L) => {
+    const row = Math.min(rows - 1, Math.floor(L / perRow));
+    rowHeights[row] = Math.max(rowHeights[row], rowHeightOf(list.length));
+  });
+  const rowTop = [];
+  let acc = 0;
+  rowHeights.forEach((h) => { rowTop.push(acc); acc += h + FLOW.rowGap; });
+
+  const positions = new Map();
+  layerLists.forEach((list, L) => {
+    const row = Math.min(rows - 1, Math.floor(L / perRow));
+    const colRaw = L % perRow;
+    const col = row % 2 === 0 ? colRaw : perRow - 1 - colRaw;
+    const h = list.length * (FLOW.nodeH + FLOW.gapY) - FLOW.gapY;
+    const y0 = rowTop[row] + (rowHeights[row] - h) / 2;
+    list.forEach((name, i) => {
+      positions.set(name, {
+        x: col * layerPitch,
+        y: y0 + i * (FLOW.nodeH + FLOW.gapY),
+        w: FLOW.nodeW, h: FLOW.nodeH, row, col,
+      });
+    });
+  });
+
+  // ---- 边界:进料贴最左,产品贴产出设备右侧(行尾则放到右边)
+  const feedNodes = data.feeds.map((f) => {
+    const p = positions.get(f.to);
+    if (!p) return null;
+    return {
+      ...f, w: FLOW.chipW, h: FLOW.chipH,
+      x: -FLOW.chipW - FLOW.chipGap,
+      y: p.y + (FLOW.nodeH - FLOW.chipH) / 2,
+    };
+  }).filter(Boolean);
+
+  const prodNodes = data.products.map((p) => {
+    const s = positions.get(p.from);
+    if (!s) return null;
+    const atRowEnd = s.col === perRow - 1;
+    return {
+      ...p, w: FLOW.chipW, h: 18,
+      x: atRowEnd ? s.x + FLOW.nodeW + 26 : s.x + FLOW.nodeW - 26,
+      y: atRowEnd ? s.y + (FLOW.nodeH - 18) / 2 : s.y - 22,
+    };
+  }).filter(Boolean);
+
+  const xs = [...positions.values()].map((p) => [p.x, p.x + p.w]);
+  feedNodes.forEach((f) => xs.push([f.x, f.x + f.w]));
+  prodNodes.forEach((p) => xs.push([p.x, p.x + p.w]));
+  const minX = Math.min(...xs.map((v) => v[0]));
+  const maxX = Math.max(...xs.map((v) => v[1]));
+
+  return {
+    positions, feedNodes, prodNodes, rows, perRow,
+    adj: flowAdj(data),
+    bbox: {
+      x: minX - 24,
+      y: -34,
+      w: maxX - minX + 48,
+      h: acc + 68,
+    },
+  };
+}
+
+function flowSvgEl() { return document.getElementById("flowSvg"); }
+
+function applyFlowView() {
+  const svg = flowSvgEl();
+  const view = state.flow.view;
+  if (!svg || !view) return;
+  svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.w} ${view.h}`);
+}
+
+function flowCanvasAspect() {
+  const wrap = document.getElementById("flowWrap");
+  if (!wrap || !wrap.clientHeight) return 1.8;
+  return wrap.clientWidth / wrap.clientHeight;
+}
+
+/* 把矩形按画布长宽比扩成铺满的视口 —— 否则 preserveAspectRatio 会留白 */
+function fitBoxToAspect(box, aspect) {
+  let { x, y, w, h } = box;
+  if (w / h > aspect) {
+    const nh = w / aspect;
+    y -= (nh - h) / 2;
+    h = nh;
+  } else {
+    const nw = h * aspect;
+    x -= (nw - w) / 2;
+    w = nw;
+  }
+  return { x, y, w, h };
+}
+
+function fitFlow() {
+  fitFlowTo(null);
+}
+
+/* names 为空 = 全图;否则只贴合这些设备(点击聚焦时用)
+   centerName:聚焦时以这台设备为视口中心,并保证至少放大 MIN_FOCUS_ZOOM 倍 */
+function fitFlowTo(names, centerName = null) {
+  const flow = state.flow;
+  const layout = flow.layout;
+  if (!layout) return;
+  let box = layout.bbox;
+  if (names && names.size) {
+    const pts = [];
+    names.forEach((name) => {
+      const p = layout.positions.get(name);
+      if (p) pts.push(p);
+    });
+    layout.feedNodes.forEach((f) => { if (names.has(f.to)) pts.push(f); });
+    layout.prodNodes.forEach((p) => { if (names.has(p.from)) pts.push(p); });
+    if (pts.length) {
+      const padX = 56, padY = 42;
+      const minX = Math.min(...pts.map((p) => p.x)) - padX;
+      const maxX = Math.max(...pts.map((p) => p.x + p.w)) + padX;
+      const minY = Math.min(...pts.map((p) => p.y)) - padY;
+      const maxY = Math.max(...pts.map((p) => p.y + p.h)) + padY;
+      box = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    }
+  }
+  const aspect = flowCanvasAspect();
+  let view = fitBoxToAspect(box, aspect);
+  if (centerName) {
+    const full = fitBoxToAspect(layout.bbox, aspect);
+    const maxW = full.w / 1.9;          // 聚焦至少放大 1.9 倍,免得"点了跟没点一样"
+    if (view.w > maxW) {
+      const p = layout.positions.get(centerName);
+      const cx = p ? p.x + p.w / 2 : box.x + box.w / 2;
+      const cy = p ? p.y + p.h / 2 : box.y + box.h / 2;
+      view = { x: cx - maxW / 2, y: cy - (maxW / aspect) / 2, w: maxW, h: maxW / aspect };
+    }
+  }
+  flow.view = view;
+  applyFlowView();
+}
+
+function zoomFlow(factor, cx = 0.5, cy = 0.5) {
+  const view = state.flow.view;
+  if (!view) return;
+  const nw = view.w / factor;
+  const nh = view.h / factor;
+  if (nw < 80 || nw > 40000) return;
+  view.x += (view.w - nw) * cx;
+  view.y += (view.h - nh) * cy;
+  view.w = nw;
+  view.h = nh;
+  applyFlowView();
+}
+
+function drawFlow() {
+  const svg = flowSvgEl();
+  const flow = state.flow;
+  const layout = flow.layout;
+  const data = flow.data;
+  if (!svg || !layout || !data) return;
+
+  const focus = flow.focus;
+  const at = (name) => layout.positions.get(name);
+  const edgeCls = (a, b) => {
+    if (!focus) return "flow-edge";
+    return focus.has(a) && focus.has(b) ? "flow-edge on" : "flow-edge dim";
+  };
+  const center = flow.center;
+  const nodeCls = (name) => {
+    let cls = "flow-node";
+    if (focus) {
+      cls += name === center ? " center" : focus.has(name) ? " on" : " dim";
+    }
+    return cls;
+  };
+
+  const parts = [`
+    <defs>
+      <marker id="flowArrow" viewBox="0 0 10 10" refX="9" refY="5"
+              markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"
+              stroke="#ffffff" stroke-width="1.8" paint-order="stroke"></path>
+      </marker>
+    </defs>`, `<g class="flow-edges">`];
+
+  // 设备 → 设备
+  data.links.forEach((link) => {
+    const a = at(link.from), b = at(link.to);
+    if (!a || !b) return;
+    const sx = a.x + a.w, sy = a.y + a.h / 2;
+    const tx = b.x, ty = b.y + b.h / 2;
+    let d;
+    if (tx > sx + 16) {
+      const dx = Math.max(30, (tx - sx) * 0.5);
+      d = `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
+    } else {
+      // 回边 / 回流(往后走或同行折返):绕下方,别和正向线叠在一起
+      const dy = Math.max(46, Math.abs(ty - sy) * 0.5 + 22);
+      d = `M ${sx} ${sy} C ${sx + 64} ${sy + dy}, ${tx - 64} ${ty + dy}, ${tx} ${ty}`;
+    }
+    parts.push(`<path class="${edgeCls(link.from, link.to)}" d="${d}" marker-end="url(#flowArrow)"></path>`);
+    if (flow.showLabels) {
+      const label = link.streams.length > 1
+        ? `${link.streams[0]} +${link.streams.length - 1}` : link.streams[0];
+      parts.push(`<text class="flow-label" x="${(sx + tx) / 2}" y="${(sy + ty) / 2 - 4}"
+        text-anchor="middle">${esc(label)}</text>`);
+    }
+  });
+
+  // 进料 / 产品
+  layout.feedNodes.forEach((f) => {
+    const b = at(f.to);
+    if (!b) return;
+    const sx = f.x + f.w, sy = f.y + f.h / 2;
+    const tx = b.x, ty = b.y + b.h / 2;
+    const dx = Math.max(24, (tx - sx) * 0.5);
+    parts.push(`<path class="${edgeCls("__feed__", f.to)}"
+      d="M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}"
+      marker-end="url(#flowArrow)"></path>`);
+  });
+  layout.prodNodes.forEach((p) => {
+    const s = at(p.from);
+    if (!s) return;
+    const sx = s.x + s.w, sy = s.y + s.h / 2;
+    const tx = p.x, ty = p.y + p.h / 2;
+    const dx = Math.max(20, Math.abs(tx - sx) * 0.5);
+    parts.push(`<path class="${edgeCls(p.from, "__prod__")}"
+      d="M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}"
+      marker-end="url(#flowArrow)"></path>`);
+  });
+  parts.push(`</g>`);
+
+  const boundaryParts = [`<g class="flow-boundaries">`];
+
+  layout.feedNodes.forEach((f) => {
+    boundaryParts.push(`<g class="flow-boundary" data-boundary="${esc(f.stream)}"
+        transform="translate(${f.x} ${f.y})">
+        <rect width="${f.w}" height="${f.h}" rx="7"></rect>
+        <text x="${f.w / 2}" y="${f.h / 2 + 3}" text-anchor="middle">进料 ${esc(f.stream)}</text>
+      </g>`);
+  });
+  layout.prodNodes.forEach((p) => {
+    boundaryParts.push(`<g class="flow-boundary" data-boundary="${esc(p.stream)}"
+        transform="translate(${p.x} ${p.y})">
+        <rect width="${p.w}" height="${p.h}" rx="6"></rect>
+        <text x="${p.w / 2}" y="${p.h / 2 + 3}" text-anchor="middle">产品 ${esc(p.stream)}</text>
+      </g>`);
+  });
+  boundaryParts.push(`</g>`);
+  parts.push(`<g class="flow-nodes">`);
+
+  data.nodes.forEach((n) => {
+    const p = at(n.name);
+    if (!p) return;
+    const tip = `${n.name} · ${n.type || "?"}`
+      + (n.dh_kw === null || n.dh_kw === undefined ? "" : ` · ΔH ${fmt(n.dh_kw, 1)} kW`);
+    parts.push(`<g class="${nodeCls(n.name)} st-${n.state || "unknown"}"
+        data-node="${esc(n.name)}" transform="translate(${p.x} ${p.y})">
+        <title>${esc(tip)}</title>
+        <rect class="node-body" width="${p.w}" height="${p.h}" rx="8"></rect>
+        <rect width="4" height="${p.h}" rx="2" class="flow-stripe"></rect>
+        <text x="13" y="${p.h / 2 + 4}">${esc(n.name)}</text>
+      </g>`);
+  });
+  parts.push(`</g>`);
+  parts.push(...boundaryParts);
+  svg.innerHTML = parts.join("");
+}
+
+function renderFlowLegend() {
+  const el = document.getElementById("flowLegend");
+  if (!el) return;
+  const items = [
+    ["ok", "通过"], ["bad", "超差"], ["no_data", "无法校验"], ["skip", "不校验"],
+    ["boundary", "进料 / 产品"],
+  ];
+  el.innerHTML = items.map(([key, text]) => {
+    const color = key === "boundary" ? "#cbd5e1" : FLOW.color[key];
+    return `<span><i style="border-color:${color};background:${key === "boundary" ? "#f8fafc" : "#fff"}"></i>${text}</span>`;
+  }).join("");
+}
+
+function flowNeighbors(name) {
+  const data = state.flow.data;
+  const ins = [], outs = [];
+  data.links.forEach((l) => {
+    if (l.to === name) ins.push(l);
+    if (l.from === name) outs.push(l);
+  });
+  return {
+    ins, outs,
+    feeds: data.feeds.filter((f) => f.to === name),
+    products: data.products.filter((p) => p.from === name),
+  };
+}
+
+function setFlowPanel(name) {
+  const panel = document.getElementById("flowPanel");
+  if (!panel) return;
+  if (!name || !state.flow.data) { panel.classList.add("hidden"); return; }
+  const node = state.flow.data.nodes.find((n) => n.name === name);
+  if (!node) { panel.classList.add("hidden"); return; }
+  const { ins, outs, feeds, products } = flowNeighbors(name);
+  const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+  const list = (items, dir) => items.length
+    ? `<ul>${items.map((l) => `<li>${esc(l.stream)}${
+        l.side ? ` <span class="muted">(${l.side === "cold" ? "冷侧" : "热侧"})</span>` : ""
+      } ${dir} ${esc(l.from === name ? l.to : l.from)}</li>`).join("")}</ul>`
+    : `<p class="muted" style="margin:4px 0 8px">无</p>`;
+
+  document.getElementById("flowPanelTitle").textContent = `${name} · ${node.type || "?"}`;
+  document.getElementById("flowPanelBody").innerHTML = `
+    <div class="flow-panel-grid">
+      <div>
+        ${kv("焓平衡", balanceBadge(node.state))}
+        ${kv("ΔH", node.dh_kw === null || node.dh_kw === undefined ? "—" : `${fmt(node.dh_kw, 2)} kW`)}
+        ${kv("参照", node.ref_kw === null || node.ref_kw === undefined ? "—" : `${fmt(node.ref_kw, 2)} kW`)}
+        ${kv("热负荷 / 功率", `${node.duty_kw === null || node.duty_kw === undefined ? "—" : `${fmt(node.duty_kw, 2)} kW`} / ${node.power_kw === null || node.power_kw === undefined ? "—" : `${fmt(node.power_kw, 2)} kW`}`)}
+        ${kv("理论级数", node.nstage ?? "—")}
+      </div>
+      <div>
+        <div class="flow-panel-head">进料侧(${ins.length + feeds.length})</div>
+        ${list(ins, "←")}
+        ${feeds.length ? `<ul>${feeds.map((f) => `<li>边界进料 ${esc(f.stream)}</li>`).join("")}</ul>` : ""}
+        <div class="flow-panel-head">出料侧(${outs.length + products.length})</div>
+        ${list(outs, "→")}
+        ${products.length ? `<ul>${products.map((p) => `<li>边界产品 ${esc(p.stream)}</li>`).join("")}</ul>` : ""}
+      </div>
+    </div>`;
+  panel.classList.remove("hidden");
+}
+
+function focusFlow(name) {
+  const flow = state.flow;
+  const adj = flow.layout.adj;
+  const seen = new Set([name]);
+  let frontier = [name];
+  for (let hop = 0; hop < 2; hop++) {
+    const next = [];
+    frontier.forEach((cur) => {
+      (adj.get(cur) || []).forEach((nb) => {
+        if (!seen.has(nb)) { seen.add(nb); next.push(nb); }
+      });
+    });
+    frontier = next;
+  }
+  flow.focus = seen;
+  flow.center = name;
+  drawFlow();
+  setFlowPanel(name);
+  requestAnimationFrame(() => requestAnimationFrame(() => fitFlowTo(seen, name)));
+  history.replaceState(null, "", `#flow/${encodeURIComponent(name)}`);
+}
+
+function clearFlowFocus() {
+  state.flow.focus = null;
+  state.flow.center = null;
+  drawFlow();
+  setFlowPanel(null);
+  requestAnimationFrame(() => requestAnimationFrame(fitFlow));
+  if (location.hash.startsWith("#flow/")) history.replaceState(null, "", "#flow");
+}
+
+async function renderFlow() {
+  const svg = flowSvgEl();
+  const empty = document.getElementById("flowEmpty");
+  const c = state.current;
+  const flow = state.flow;
+
+  if (!c) {
+    if (svg) svg.innerHTML = "";
+    empty.textContent = "还没有工况。先读取一个工况,流程图会按它的设备连接关系自动生成。";
+    empty.classList.remove("hidden");
+    setFlowPanel(null);
+    renderFlowLegend();
+    return;
+  }
+  empty.classList.add("hidden");
+  if (flow.caseId !== c.id || !flow.data) {
+    try {
+      flow.data = await api(`/api/cases/${c.id}/flowsheet`);
+      flow.caseId = c.id;
+      flow.focus = null;
+      flow.center = null;
+      flow.view = null;
+      const wrap = document.getElementById("flowWrap");
+      const aspect = wrap && wrap.clientHeight
+        ? wrap.clientWidth / wrap.clientHeight : 1.8;
+      flow.layout = layoutFlow(flow.data, aspect);
+      setFlowPanel(null);
+    } catch (err) {
+      if (svg) svg.innerHTML = "";
+      empty.textContent = `读不到流程图数据:${err.message}`;
+      empty.classList.remove("hidden");
+      return;
+    }
+  }
+  drawFlow();
+  fitFlow();
+  requestAnimationFrame(fitFlow);
+  renderFlowLegend();
+
+  // #flow/设备名:直接聚焦到那台设备(刷新/分享都能还原)
+  const hashParts = location.hash.replace("#", "").split("/");
+  if (hashParts[1]) {
+    const name = decodeURIComponent(hashParts[1]);
+    if (flow.data.nodes.some((n) => n.name === name)) focusFlow(name);
+  }
+}
+
 /* ------------------------------------------------------------ 初始化 */
 
 function showEmpty(text) {
+  const msg = text || "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。";
+  state.emptyText = msg;
   const el = document.getElementById("empty");
-  el.textContent = text || "还没有工况。点右上角「读取当前工况」,从已经打开的 Aspen 里读一次。";
+  el.textContent = msg;
   el.classList.remove("hidden");
+  // 首页是独立页面,数据页隐藏时用户看不到 #empty —— 同步刷一次首页卡片
+  if (state.page === "home") renderHome();
 }
 
 function hideEmpty() {
+  state.emptyText = "";
   document.getElementById("empty").classList.add("hidden");
 }
 
@@ -982,20 +1535,165 @@ async function loadCase(id) {
   if (select.value !== String(id)) select.value = String(id);
   hideEmpty();
   setCaseButtonsEnabled(true);
-  if (state.tab !== "compare") renderTable();
+  setCaseInfo();
   renderBanner();
+  if (state.page === "flow") {
+    state.flow.caseId = null;        // 逼着下次进流程页按新工况重新拉图
+    renderFlow();
+  } else if (state.page === "home") {
+    renderHome();
+  } else if (state.tab !== "compare") {
+    renderTable();
+  }
   resetTableScroll();   // 换工况也从第一行看起
 }
 
-/* 页签只从地址栏恢复一次,之后以点选为准 */
-function applyHashTab() {
+/* ------------------------------------------------------------ 路由与首页 */
+
+const PAGES = ["home", "streams", "blocks", "compare", "flow"];
+const PAGE_TITLE = { streams: "流股", blocks: "设备", compare: "对比", flow: "流程" };
+
+/* 地址栏是唯一真相:#/streams、#/blocks/塔名(直接打开某座塔的剖面) */
+function readHashPage() {
   const hash = location.hash.replace("#", "").split("/")[0];
-  if (!["streams", "blocks", "compare"].includes(hash)) return hash;
-  state.tab = hash;
-  document.querySelectorAll(".tab").forEach((b) =>
-    b.classList.toggle("active", b.dataset.tab === hash));
-  toggleCompareBar(hash === "compare");
-  return hash;
+  return PAGES.includes(hash) ? hash : "home";
+}
+
+function setPage(page, { push = true } = {}) {
+  if (!PAGES.includes(page)) page = "home";
+  state.page = page;
+  document.querySelectorAll(".side-nav .tab").forEach((b) =>
+    b.classList.toggle("active", b.dataset.tab === page));
+
+  const isHome = page === "home";
+  const isFlow = page === "flow";
+  document.getElementById("pageHome").classList.toggle("hidden", !isHome);
+  document.getElementById("pageFlow").classList.toggle("hidden", !isFlow);
+  document.getElementById("pageData").classList.toggle("hidden", isHome || isFlow);
+  if (push && location.hash !== `#${page}`) location.hash = page;
+
+  if (isHome) {
+    renderBanner();
+    renderHome();
+    return;
+  }
+  if (isFlow) {
+    renderFlow();
+    return;
+  }
+  document.getElementById("pageTitle").textContent = PAGE_TITLE[page] || "";
+  setTab(page);          // 复用原有逻辑:渲染表格 / 对比、清筛选、隐藏侧面板
+}
+
+function setCaseInfo() {
+  const el = document.getElementById("caseInfo");
+  const c = state.current;
+  if (!el) return;
+  if (!c) { el.textContent = ""; return; }
+  const s = SEVERITY[c.severity] || SEVERITY.warning;
+  const conn = c.connection_count;
+  // 侧栏只有 220px,一行塞不下 —— 状态一行,数字分两行,免得"连接"被拆两半
+  el.innerHTML = `<span class="badge ${s.cls}">${s.text}</span>`
+    + `<div>${c.stream_count} 流股 · ${c.block_count} 设备</div>`
+    + (conn ? `<div>${conn} 连接</div>` : "");
+}
+
+function balanceCounts() {
+  const counts = { ok: 0, bad: 0, no_data: 0, skip: 0 };
+  state.blocks.forEach((b) => {
+    if (b.balance_state && counts[b.balance_state] !== undefined) counts[b.balance_state] += 1;
+  });
+  return counts;
+}
+
+/* 首页仪表盘:工况信息 + 规模 + 判定 + 焓平衡 + 异常模块 */
+function renderHome() {
+  const cards = document.getElementById("homeCards");
+  const problemsCard = document.getElementById("homeProblemsCard");
+  const problems = document.getElementById("homeProblems");
+  const c = state.current;
+
+  if (!c) {
+    const hint = state.emptyText
+      || "在 Aspen Plus 里打开并 Run 过模型,然后点左上角「读取当前工况」。";
+    cards.innerHTML = `<section class="card wide">
+        <h3>${state.emptyText ? "读不到工况" : "还没有工况"}</h3>
+        <p class="muted" style="margin:0;line-height:1.8;white-space:pre-wrap">${esc(hint)}</p>
+      </section>`;
+    problemsCard.classList.add("hidden");
+    return;
+  }
+
+  const bs = balanceCounts();
+  const checked = bs.ok + bs.bad;
+  const passRate = checked ? Math.round((bs.ok / checked) * 100) : null;
+  const towers = state.blocks.filter((b) => b.nstage !== null && b.nstage !== undefined).length;
+  const s = SEVERITY[c.severity] || SEVERITY.warning;
+
+  const kv = (k, v) => `<div class="kv"><span>${k}</span><span>${v}</span></div>`;
+  const metric = (label, value, cls = "") =>
+    `<div class="metric"><b class="${cls}">${value}</b><span>${label}</span></div>`;
+
+  cards.innerHTML = `
+    <section class="card">
+      <h3>当前工况</h3>
+      ${kv("模型", `<span title="${esc(c.model_path || "")}">${esc(c.model_name || "-")}</span>`)}
+      ${kv("读取时间", esc(c.read_at || "-"))}
+      ${kv("运行 ID", esc(c.run_id || "-"))}
+      ${kv("读取耗时", c.elapsed_sec ? `${c.elapsed_sec} s` : "-")}
+    </section>
+
+    <section class="card">
+      <h3>规模</h3>
+      <div class="metric-row">
+        ${metric("流股", c.stream_count ?? "—")}
+        ${metric("设备", c.block_count ?? "—")}
+        ${metric("连接", c.connection_count ?? "—")}
+        ${metric("塔", towers || "—")}
+      </div>
+      <div class="muted" style="margin-top:10px">
+        <a class="inline-link" href="#flow">查看流程图(点击设备聚焦上下游 2 层) →</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>收敛判定</h3>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <span class="badge ${s.cls}">${s.text}</span>
+        <span class="muted">${c.converged ? "可用于统计对比" : "不建议做定量结论"}</span>
+      </div>
+      ${kv("判定理由", (c.reasons || []).length ? `${(c.reasons || []).length} 条` : "无")}
+      ${(() => {
+        const codes = Object.entries(c.status || {})
+          .filter(([, v]) => v !== null && v !== undefined)
+          .map(([k, v]) => `${k}=${v}`).join(" ") || "—";
+        return `<div class="kv"><span>状态码</span><span title="${esc(codes)}">${esc(codes)}</span></div>`;
+      })()}
+    </section>
+
+    <section class="card">
+      <h3>焓平衡自检</h3>
+      <div class="metric-row">
+        ${metric("通过", bs.ok, "ok-text")}
+        ${metric("超差", bs.bad, bs.bad ? "err-text" : "")}
+        ${metric("无法校验", bs.no_data, "warn-text")}
+        ${metric("不校验", bs.skip)}
+      </div>
+      <div class="muted" style="margin-top:10px">
+        ${passRate === null ? "还没有可校验的设备" : `可校验 ${checked} 台,通过率 ${passRate}%`}
+        ${bs.bad ? `;<a href="#blocks" class="inline-link">去看哪几台超差</a>` : ""}
+      </div>
+    </section>`;
+
+  const bad = state.blocks.filter((b) => b.status === 1 || b.status === 2);
+  if (bad.length) {
+    problems.innerHTML = `<ul class="problem-list">${bad.map((b) =>
+      `<li><b>${esc(b.name)}</b> <span class="muted">${esc(b.type || "")}</span>${
+        b.message ? ` — ${esc(b.message)}` : ""}</li>`).join("")}</ul>`;
+    problemsCard.classList.remove("hidden");
+  } else {
+    problemsCard.classList.add("hidden");
+  }
 }
 
 /* 删除当前工况:不可恢复,所以确认框里把"删的是哪一个"写全(模型名 + 时间 + 规模)*/
@@ -1063,11 +1761,17 @@ function bindEvents() {
     loadCase(Number(e.target.value));
   });
 
-  document.querySelectorAll(".tab").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setTab(btn.dataset.tab);
-      location.hash = btn.dataset.tab;
+  document.querySelectorAll(".side-nav .tab").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      setPage(btn.dataset.tab);
     });
+  });
+
+  // 浏览器前进/后退、手改地址栏 → 跟着切页
+  window.addEventListener("hashchange", () => {
+    const page = readHashPage();
+    if (page !== state.page) setPage(page, { push: false });
   });
 
   document.getElementById("filter").addEventListener("input", (e) => {
@@ -1080,10 +1784,7 @@ function bindEvents() {
   document.getElementById("otherSelect").addEventListener("change", runCompare);
   document.querySelectorAll("#compareScope button").forEach((b) =>
     b.addEventListener("click", () => setCompareScope(b.dataset.scope)));
-  document.getElementById("compareHint").addEventListener("click", () => {
-    setTab("compare");
-    location.hash = "compare";
-  });
+  document.getElementById("compareHint").addEventListener("click", () => setPage("compare"));
   document.getElementById("closeColumn").addEventListener("click", () =>
     document.getElementById("columnPanel").classList.add("hidden"));
   document.getElementById("closeComp").addEventListener("click", () =>
@@ -1104,6 +1805,84 @@ function bindEvents() {
   });
 
   document.getElementById("quitBtn").addEventListener("click", quitApp);
+
+  // ---- 流程页:工具栏 + 缩放平移 + 聚焦 ----
+  document.getElementById("flowFit").addEventListener("click", fitFlow);
+  document.getElementById("flowZoomIn").addEventListener("click", () => zoomFlow(1.25));
+  document.getElementById("flowZoomOut").addEventListener("click", () => zoomFlow(1 / 1.25));
+  const labelsBtn = document.getElementById("flowLabels");
+  labelsBtn.addEventListener("click", () => {
+    state.flow.showLabels = !state.flow.showLabels;
+    labelsBtn.classList.toggle("primary", state.flow.showLabels);
+    if (state.flow.layout) drawFlow();
+  });
+  document.getElementById("flowPanelClose").addEventListener("click", clearFlowFocus);
+  window.addEventListener("resize", () => {
+    if (state.page === "flow") fitFlow();
+  });
+
+  const flowSvg = document.getElementById("flowSvg");
+  if (flowSvg) {
+    /* 交互全部走 pointer 事件,不用 click:
+       拖动结束后浏览器仍会补一个 click,若把"空白处 click"当取消聚焦,
+       用户拖到远处看邻居、一松手就会被拉回全图。改成 pointerup 里按位移判定。 */
+    let drag = null;
+    const DRAG_THRESHOLD = 4;      // 像素:超过就算拖动,不算点击
+
+    flowSvg.addEventListener("wheel", (e) => {
+      if (!state.flow.view) return;
+      e.preventDefault();
+      const rect = flowSvg.getBoundingClientRect();
+      zoomFlow(e.deltaY < 0 ? 1.12 : 1 / 1.12,
+        (e.clientX - rect.left) / rect.width, (e.clientY - rect.top) / rect.height);
+    }, { passive: false });
+
+    flowSvg.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      const node = e.target.closest("[data-node]");
+      drag = {
+        x: e.clientX, y: e.clientY,
+        view: state.flow.view ? { ...state.flow.view } : null,
+        moved: false,
+        node: node ? node.dataset.node : null,
+        onBoundary: !!e.target.closest("[data-boundary]"),
+        fromBackground: e.target === flowSvg || !!e.target.closest("g.flow-edges"),
+      };
+      if (drag.view) flowSvg.classList.add("dragging");
+    });
+
+    window.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      if (!drag.moved && Math.abs(dx) + Math.abs(dy) > DRAG_THRESHOLD) drag.moved = true;
+      if (!drag.view) return;
+      const rect = flowSvg.getBoundingClientRect();
+      state.flow.view.x = drag.view.x - dx * drag.view.w / rect.width;
+      state.flow.view.y = drag.view.y - dy * drag.view.h / rect.height;
+      applyFlowView();
+    });
+
+    const endDrag = (e) => {
+      const d = drag;
+      drag = null;
+      flowSvg.classList.remove("dragging");
+      if (!d) return;
+      if (d.moved) return;                       // 拖动:只平移,不改聚焦
+      if (d.node) { focusFlow(d.node); return; }
+      // 点空白才取消聚焦;点到边界芯片、连线时不误取消
+      if (d.fromBackground && state.flow.focus) clearFlowFocus();
+    };
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", (e) => {
+      drag = null;
+      flowSvg.classList.remove("dragging");
+    });
+    flowSvg.addEventListener("dblclick", fitFlow);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") clearFlowFocus();
+    });
+  }
   document.getElementById("deleteBtn").addEventListener("click", deleteCurrentCase);
 }
 
@@ -1117,21 +1896,23 @@ async function init() {
     return;
   }
 
-  const hash = applyHashTab();
+  const page = readHashPage();
 
   if (!state.cases.length) {
+    setPage(page, { push: false });
     await resumeReadIfRunning();
     return;
   }
 
-  await loadCase(state.cases[0].id);
-  if (state.tab === "compare") {
-    renderTable();
-    await runCompare();
-  }
+  // ?case=19 可以指定打开哪个工况(方便分享链接/回看某个旧工况)
+  const wantCase = Number(new URLSearchParams(location.search).get("case"));
+  const initialCase = state.cases.some((c) => c.id === wantCase) ? wantCase : state.cases[0].id;
+  await loadCase(initialCase);
+  setPage(page, { push: false });
+  if (page === "compare") await runCompare();
 
   const hashParts = location.hash.replace("#", "").split("/");
-  if (hash === "blocks" && hashParts[1]) openColumn(hashParts[1]);
+  if (page === "blocks" && hashParts[1]) openColumn(hashParts[1]);
 
   await resumeReadIfRunning();
 }

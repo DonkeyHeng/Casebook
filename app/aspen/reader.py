@@ -6,7 +6,8 @@
   - model:模型信息
   - convergence:收敛/运行状态 + 撕裂流 + Aspen 原始提示文本
   - streams:流股表(已换算到固定单位)
-  - blocks:设备表(已换算到固定单位)
+  - blocks:设备表(已换算到固定单位,含 `balance` 焓平衡自检结果)
+  - connections:设备 ↔ 流股连接关系(拓扑)
   - components:组分清单
 
 规模提示:1000 条流股约 6000 次 COM 调用,必须放后台线程并给 `progress` 回调。
@@ -19,9 +20,11 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from typing import Callable
 
+from . import balance as balance_rules
 from . import units
 
 # (输出键, Aspen 字段, 量纲)
@@ -33,6 +36,18 @@ STREAM_FIELDS = [
     ("vap_frac", "RES_VFRAC", "fraction"),
     ("vol_flow_m3h", "RES_VOLFLOW", "volume_flow"),
 ]
+
+# 流股焓。实测(2026-11-01,见 data/probe_topology.txt):
+#   * `\Data\Streams\<流>\Output\HMX` 是**目录**,值在 `HMX\MIXED`(J/kmol);
+#     直接读 `HMX` 拿到的是 `1` 这种标志位,所以必须先解析到叶子。
+#   * `HMX_MASS\MIXED` = J/kg、`HMX_FLOW\MIXED` = MW(现成的 m·h,可直接相加)。
+#   * `ENTH_CYCLE` / `L1_ENTH` / `LIQ_ENTH` 这些是自定义/分相/统计量,不能当流股焓。
+# 三个量纲都按 UnitString 换算,不假设单位集(MET 与 ENG 都验证过)。
+ENTHALPY_FIELDS = (
+    ("enthalpy_kjkg", "HMX_MASS", "enthalpy"),
+    ("enthalpy_kjkmol", "HMX", "enthalpy_molar"),
+    ("enthalpy_flow_kw", "HMX_FLOW", "energy_flow"),
+)
 
 # 设备上的标量结果字段(不同设备类型用不同字段)
 BLOCK_DUTY_FIELDS = ("QCALC", "QNET", "HX_DUTY")      # cal/sec
@@ -246,9 +261,27 @@ def read_streams(session, progress: Progress | None = None,
         rec: dict = {"name": sid, "composition": None}
         raw = {}
         for key, field, quantity in STREAM_FIELDS:
-            value, unit = fetch(session, f"{base}\\{field}")
+            value, unit = fetch(session, rf"{base}\{field}")
             rec[key] = units.convert(quantity, value, unit)
             raw[field] = {"value": value, "unit": unit}
+
+        # 焓:HMX 是目录,值在 HMX\MIXED,所以统一走 _enthalpy_leaf 解析到叶子
+        for key, field, quantity in ENTHALPY_FIELDS:
+            value, unit, leaf = _enthalpy_leaf(session, base, field)
+            rec[key] = units.convert(quantity, value, unit)
+            if value is not None:
+                raw[leaf] = {"value": value, "unit": unit}
+        # 没有 HMX_FLOW、但有质量焓时,用 m·h 现算一个能量流(kW),让 ΔH 口径统一
+        if rec.get("enthalpy_flow_kw") is None:
+            rec["enthalpy_flow_kw"] = _flow_kw_from_mass(rec.get("enthalpy_kjkg"),
+                                                        rec.get("mass_flow_kgh"))
+
+        # 上下游:连接关系的通用来源(设备侧 IN_STRMID 常常不存在)
+        upstream, _ = fetch(session, rf"{base}\SOURCE")
+        downstream, _ = fetch(session, rf"{base}\DESTINATION")
+        rec["source"] = str(upstream).strip() if upstream not in (None, "") else ""
+        rec["destination"] = str(downstream).strip() if downstream not in (None, "") else ""
+
         rec["raw"] = raw
         if include_composition:
             rec["composition"] = read_composition(session, sid)
@@ -257,6 +290,162 @@ def read_streams(session, progress: Progress | None = None,
             progress(n, total, sid)
     return out
 
+
+def _enthalpy_leaf(session, base: str, field: str) -> tuple[object, str, str]:
+    """读一个焓字段,并把目录解析到叶子(HMX → HMX\\MIXED)。
+
+    实测:直接读 `HMX` 拿到的是 `1` 这种标志位,真正的值(和单位)在 `HMX\\MIXED`。
+
+    Returns:
+        (值, 单位, 叶子路径后缀);读不到时 (None, "", field)。
+    """
+    node = session.find(rf"{base}\{field}")
+    if node is None:
+        return None, "", field
+    children = child_names(node)
+    if not children:
+        return (*fetch(session, rf"{base}\{field}"), field)
+    child = "MIXED" if "MIXED" in children else (children[0] if len(children) == 1 else None)
+    if child is None:      # 分相目录(LIQ/VAP 多个子节点),没有"混合"值,不猜
+        return None, "", field
+    leaf = f"{field}\\{child}"
+    return (*fetch(session, rf"{base}\{leaf}"), leaf)
+
+
+def _flow_kw_from_mass(enthalpy_kjkg, mass_flow_kgh):
+    """质量焓(kJ/kg)× 质量流量(kg/h)→ kW。"""
+    if enthalpy_kjkg is None or mass_flow_kgh is None:
+        return None
+    return enthalpy_kjkg * mass_flow_kgh / 3600.0
+
+
+def _looks_index(text: str) -> bool:
+    return bool(re.fullmatch(r"\d+(\.\d+)?", str(text or "").strip()))
+
+
+def element_pairs(session, path: str) -> list[tuple[str, object]]:
+    """读数组节点的 (元素名, 元素值)。节点不存在或不是数组返回 []。"""
+    node = session.find(path)
+    if node is None:
+        return []
+    pairs = []
+    try:
+        els = node.Elements
+        for i in range(int(els.Count)):
+            try:
+                el = els.Item(i)
+            except Exception:
+                continue
+            try:
+                name = str(el.Name)
+            except Exception:
+                name = ""
+            try:
+                value = el.Value
+            except Exception:
+                value = None
+            pairs.append((name, value))
+    except Exception:
+        return []
+    return pairs
+
+
+# ---------------------------------------------------------------- 连接关系
+
+def read_connections(session, streams: list[dict],
+                     blocks: list[dict] | None = None) -> list[dict]:
+    """读"设备 ↔ 流股"的连接关系:一行 = (设备, 方向 in/out, 流股)。
+
+    为什么不能只用 IN_STRMID
+    -----------------------
+    实测(2026-11-01,见 data/probe_topology.txt):67 台设备里**只有 8 台塔**有
+    `Output\\IN_STRMID`,其余 59 台根本没有这个字段。真正通用的来源是流股侧的
+    `\\Data\\Streams\\<流>\\Output\\SOURCE / DESTINATION`(值是块名,94/98 与 89/98 有值)。
+
+    所以按三级来源合并,同一 (设备, 方向, 流股) 只留一行,并记下来自哪里:
+      1. source="stream"   —— 流股 SOURCE / DESTINATION(主来源,最通用)
+      2. source="strmid"   —— 设备 IN_STRMID / OUT_STRMID(塔上有,用它与流股侧互校)
+      3. source="hx"       —— HeatX 分侧字段(Input FCOLD/FHOT,Output COLDIN/COLDOUT/HOTIN/HOTOUT)
+    塔的 `Input\\FEED_STAGE`(Name=流股名、Value=板号)合并成行里的 stage。
+    """
+    known = {str(s["name"]).lower(): s["name"] for s in streams}
+    rows: list[dict] = []
+    index: dict[tuple[str, str, str], dict] = {}
+
+    def add(block, direction: str, stream, *, side: str = "", port: str = "",
+            stage=None, source: str = "stream") -> None:
+        block = str(block or "").strip()
+        stream = str(stream or "").strip()
+        if not block or not stream:
+            return
+        key = (block, direction, stream)
+        row = index.get(key)
+        if row is None:
+            row = {"block": block, "direction": direction, "stream": stream,
+                   "side": "", "port": "", "stage": None, "source": source, "seq": 0}
+            index[key] = row
+            rows.append(row)
+        if side and not row["side"]:
+            row["side"] = side
+        if port and not row["port"]:
+            row["port"] = str(port)
+        if stage is not None and row["stage"] is None:
+            row["stage"] = stage
+
+    # ---- 1) 流股侧 SOURCE / DESTINATION(通用来源)
+    for stream in streams:
+        sid = stream["name"]
+        upstream = (stream.get("source") or "").strip()
+        downstream = (stream.get("destination") or "").strip()
+        if downstream:
+            add(downstream, "in", sid, source="stream")
+        if upstream:
+            add(upstream, "out", sid, source="stream")
+
+    block_names = [b["name"] for b in (blocks or [])]
+    if not block_names:
+        block_names = child_names(session.find(r"\Data\Blocks"))
+
+    # ---- 2) 设备 IN_STRMID / OUT_STRMID(存在的设备合并进来)
+    for bid in block_names:
+        base = rf"\Data\Blocks\{bid}\Output"
+        for direction, field in (("in", "IN_STRMID"), ("out", "OUT_STRMID")):
+            for port, value in element_pairs(session, rf"{base}\{field}"):
+                text = str(value or "").strip()
+                stream = known.get(text.lower()) or known.get(port.strip().lower())
+                if not stream:
+                    continue
+                add(bid, direction, stream,
+                    port=port if _looks_index(port) else "", source="strmid")
+
+    # ---- 3) HeatX 分侧字段 + 塔进料板号
+    for bid in block_names:
+        base = rf"\Data\Blocks\{bid}"
+        for direction, side, paths in (
+            ("in", "cold", ("Output\\COLDIN", "Input\\FCOLD")),
+            ("out", "cold", ("Output\\COLDOUT", "Input\\FCOLD")),
+            ("in", "hot", ("Output\\HOTIN", "Input\\FHOT")),
+            ("out", "hot", ("Output\\HOTOUT", "Input\\FHOT")),
+        ):
+            for path in paths:
+                value, _unit = fetch(session, rf"{base}\{path}")
+                stream = known.get(str(value or "").strip().lower())
+                if stream:
+                    add(bid, direction, stream, side=side, source="hx")
+                    break
+        for stream_name, stage in element_pairs(session, rf"{base}\Input\FEED_STAGE"):
+            target = known.get(str(stream_name).strip().lower())
+            if not target:
+                continue
+            try:
+                stage_no = int(float(stage))
+            except (TypeError, ValueError):
+                continue
+            add(bid, "in", target, stage=stage_no, source="feed_stage")
+
+    for i, row in enumerate(rows):
+        row["seq"] = i
+    return rows
 
 def read_composition(session, stream: str) -> list[dict]:
     """液相 X / 气相 Y 摩尔分数(按组分展开)。"""
@@ -452,6 +641,16 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
             if item and item.get("value") is not None and s.get(key) is None:
                 gaps.append({"scope": "stream", "name": s["name"],
                              "field": field, "unit": item.get("unit") or ""})
+        # 焓的原始键是叶子路径(如 HMX\MIXED),所以按前缀找
+        for key, field, _quantity in ENTHALPY_FIELDS:
+            if s.get(key) is not None:
+                continue
+            for raw_key, item in raw.items():
+                if raw_key == field or raw_key.startswith(field + "\\"):
+                    if item and item.get("value") is not None:
+                        gaps.append({"scope": "stream", "name": s["name"],
+                                     "field": raw_key, "unit": item.get("unit") or ""})
+                    break
 
     for b in blocks:
         raw = b.get("raw") or {}
@@ -500,6 +699,12 @@ def read_case(session, include_composition: bool = False,
     convergence = read_convergence(session, blocks)
     # 再补一刀:模型可能根本没运行过 —— 那种情况"没有任何信号",不能当 ok
     mark_empty(convergence, value_coverage(streams), convergence.get("run", {}).get("RUNID"))
+    phase("读取连接关系")
+    connections = read_connections(session, streams, blocks)
+    phase("焓平衡自检")
+    results = balance_rules.compute(streams, blocks, connections)
+    for block in blocks:
+        block["balance"] = results.get(block["name"])
     phase("读取塔板剖面")
     profiles = read_column_profiles(session, blocks) if include_profiles else []
 
@@ -520,12 +725,16 @@ def read_case(session, include_composition: bool = False,
         "streams": streams,
         "blocks": blocks,
         "columns": profiles,
+        "connections": connections,
+        "balance": results,
         "components": components,
         "unit_gaps": unit_gaps(streams, blocks),
         "stats": {
             "stream_count": len(streams),
             "block_count": len(blocks),
             "column_count": len(profiles),
+            "connection_count": len(connections),
+            "balance_summary": balance_rules.summarize(results),
             "elapsed_sec": round(time.time() - t0, 1),
         },
     }

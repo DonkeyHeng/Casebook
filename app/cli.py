@@ -78,6 +78,14 @@ def cmd_read(args) -> int:
     print(f"  读取时间  {case['model']['read_at']}")
     print(f"  运行 ID   {conv['run'].get('RUNID')}  ({conv['run'].get('ITDATE')})")
     print(f"  流股/设备 {case['stats']['stream_count']} / {case['stats']['block_count']}")
+    conns = case.get("connections") or []
+    sides = sum(1 for c in conns if c.get("side"))
+    print(f"  连接关系  {len(conns)} 条(设备 ↔ 流股)"
+          + (f",换热器分侧 {sides} 条" if sides else ""))
+    bal = (case.get("stats") or {}).get("balance_summary") or {}
+    if bal:
+        print(f"  焓平衡    通过 {bal.get('ok', 0)} / 超差 {bal.get('bad', 0)}"
+              f" / 无法校验 {bal.get('no_data', 0)} / 不校验 {bal.get('skip', 0)}")
     print(f"  耗时      {case['stats']['elapsed_sec']} s")
     print()
 

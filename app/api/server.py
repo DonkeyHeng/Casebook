@@ -13,6 +13,8 @@
     GET  /api/cases/{id}/streams     流股表
     GET  /api/cases/{id}/streams/{流股}/composition   单条流股的组成(按需从 Aspen 读)
     GET  /api/cases/{id}/blocks      设备表
+    GET  /api/cases/{id}/connections 设备 ↔ 流股连接关系(拓扑:进出流股 / 换热器分侧 / 塔进料板)
+    GET  /api/cases/{id}/flowsheet   流程图数据(节点 = 设备、边 = 设备间流股、边界流股)
     GET  /api/cases/{id}/export.xlsx      导出 Excel(给人看)
     GET  /api/cases/{id}/export.ai.zip    导出 AI 分析包(Markdown + CSV,给 AI 读)
 
@@ -40,7 +42,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from app.store import db
+from app.store import db, flowsheet
 from app.api import read_job
 from app.api import window as win
 
@@ -270,6 +272,9 @@ class Handler(BaseHTTPRequestHandler):
 
             if len(parts) == 3:                       # /api/cases/{id}
                 payload = _row_to_dict(case)
+                # 首页仪表盘要用的两项:连接条数、焓平衡四态台数
+                payload["connection_count"] = len(db.read_connections(conn, case_id))
+                payload["balance_summary"] = db.balance_summary(conn, case_id)
                 for key in ("reasons_json", "status_json", "tear_json",
                             "block_errors", "block_warnings"):
                     if payload.get(key):
@@ -289,6 +294,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts[3] == "blocks":
                 self._json([_row_to_dict(r) for r in db.read_blocks(conn, case_id)])
+                return
+            if parts[3] == "connections":
+                self._json([_row_to_dict(r) for r in db.read_connections(conn, case_id)])
+                return
+            if parts[3] == "flowsheet":
+                payload = flowsheet.build(
+                    [dict(r) for r in db.read_connections(conn, case_id)],
+                    [dict(r) for r in db.read_blocks(conn, case_id)],
+                )
+                self._json(payload)
                 return
             if parts[3] == "columns":
                 if len(parts) == 4:
@@ -370,8 +385,10 @@ class Handler(BaseHTTPRequestHandler):
         streams = db.read_streams(conn, case_id)
         blocks = db.read_blocks(conn, case_id)
         columns = db.list_columns(conn, case_id)
+        connections = db.read_connections(conn, case_id)
 
         status_text = {0: "正常", 1: "错误", 2: "告警"}
+        balance_text = {"ok": "通过", "bad": "超差", "no_data": "无法校验", "skip": "不校验"}
 
         wb = openpyxl.Workbook()
 
@@ -402,6 +419,10 @@ class Handler(BaseHTTPRequestHandler):
             ("是否可用于统计对比", "是" if case["converged"] else "否"),
             ("流股数", case["stream_count"]),
             ("设备数", case["block_count"]),
+            ("连接关系数", len(connections)),
+            ("焓平衡 通过/超差/无法校验/不校验", "/".join(
+                str(sum(1 for b in blocks if b["balance_state"] == st))
+                for st in ("ok", "bad", "no_data", "skip"))),
             ("结论", "\n".join(f"- {r}" for r in reasons) or "无异常"),
         ]
         for key, value in summary:
@@ -417,10 +438,12 @@ class Handler(BaseHTTPRequestHandler):
         ws = wb.create_sheet("流股")
         fill_sheet(
             ws,
-            ["流股", "温度 ℃", "压力 bar", "质量流量 kg/h", "摩尔流量 kmol/h", "汽化率", "体积流量 m³/h"],
+            ["流股", "温度 ℃", "压力 bar", "质量流量 kg/h", "摩尔流量 kmol/h", "汽化率",
+             "体积流量 m³/h", "质量焓 kJ/kg", "摩尔焓 kJ/kmol", "能量流 kW"],
             [(s["name"], s["temperature_c"], s["pressure_bar"], s["mass_flow_kgh"],
-              s["mole_flow_kmolh"], s["vap_frac"], s["vol_flow_m3h"]) for s in streams],
-            [18, 12, 12, 16, 18, 10, 16],
+              s["mole_flow_kmolh"], s["vap_frac"], s["vol_flow_m3h"],
+              s["enthalpy_kjkg"], s["enthalpy_kjkmol"], s["enthalpy_flow_kw"]) for s in streams],
+            [18, 12, 12, 16, 18, 10, 16, 16, 18, 16],
         )
 
         # --- 设备 ---
@@ -428,11 +451,24 @@ class Handler(BaseHTTPRequestHandler):
         fill_sheet(
             ws,
             ["设备", "类型", "状态", "热负荷 kW", "功率 kW", "换热面积 m²",
-             "理论级数", "顶温 ℃", "底温 ℃", "提示"],
+             "理论级数", "顶温 ℃", "底温 ℃", "ΔH kW", "参照 kW", "焓平衡", "平衡说明", "提示"],
             [(b["name"], b["type"], status_text.get(b["status"], ""), b["duty_kw"],
               b["power_kw"], b["area_m2"], b["nstage"], b["top_temp_c"],
-              b["bottom_temp_c"], b["message"]) for b in blocks],
-            [14, 12, 8, 14, 12, 14, 10, 12, 12, 60],
+              b["bottom_temp_c"], b["dh_kw"], b["ref_kw"],
+              balance_text.get(b["balance_state"], ""), b["balance_note"],
+              b["message"]) for b in blocks],
+            [14, 12, 8, 14, 12, 14, 10, 12, 12, 14, 14, 10, 46, 60],
+        )
+
+        # --- 连接关系 ---
+        ws = wb.create_sheet("连接")
+        fill_sheet(
+            ws,
+            ["设备", "方向", "流股", "分侧", "端口", "进料板", "来源"],
+            [(c["block"], "进" if c["direction"] == "in" else "出", c["stream"],
+              c["side"] or "", c["port"] or "", c["stage"], c["source"] or "")
+             for c in connections],
+            [14, 8, 18, 10, 10, 10, 14],
         )
 
         # --- 塔剖面 ---

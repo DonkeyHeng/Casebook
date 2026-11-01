@@ -12,16 +12,19 @@
     python -m tools.repair_cases            # 只看会改什么(dry-run,不写库)
     python -m tools.repair_cases --apply    # 真的写库
 
-只改三样东西:`severity` / `converged` / `reasons_json`(重算判定),以及
-`unit_gaps` / `unit_gaps_json`(重算单位缺口),外加把能换算的数值回填。
+只改这些:判定(`severity` / `converged` / `reasons_json`)、单位缺口
+(`unit_gaps` / `unit_gaps_json`)、能换算的数值回填,以及**焓平衡自检**
+(`blocks` 的 `dh_kw` / `ref_kw` / `ref_kind` / `balance_state` / `balance_note`)。
 **不碰**流股名、设备名、剖面、组成。
+
+焓平衡只在有 `connections` 的工况上重算(2026-11-01 之前读的工况没有拓扑数据)。
 """
 from __future__ import annotations
 
 import argparse
 import json
 
-from app.aspen import reader, units
+from app.aspen import balance, reader, units
 from app.store import db
 
 # 流股列 ← raw_json 里的字段 + 量纲
@@ -91,6 +94,18 @@ def repair_case(conn, case, apply: bool) -> dict:
     # ---- 3) 重算单位缺口(用回填之后的数值)
     gaps = reader.unit_gaps(streams, blocks)
 
+    # ---- 4) 重算焓平衡(只对存了连接的工况;老工况没有拓扑,跳过不动)
+    connections = [dict(r) for r in db.read_connections(conn, cid)]
+    balance_changed = 0
+    if connections:
+        results = balance.compute(streams, blocks, connections)
+        for b in blocks:
+            new = results.get(b["name"]) or {}
+            if (b.get("balance_state") != new.get("balance_state")
+                    or b.get("dh_kw") != new.get("dh_kw")):
+                balance_changed += 1
+            b["balance"] = new
+
     changed = []
     if case["severity"] != verdict["severity"]:
         changed.append(f"判定 {case['severity']} → {verdict['severity']}")
@@ -100,6 +115,8 @@ def repair_case(conn, case, apply: bool) -> dict:
         changed.append(f"单位缺口 {case['unit_gaps'] or 0} → {gaps['count']}")
     if filled_streams or filled_blocks:
         changed.append(f"回填 {filled_streams} 个流股字段 / {filled_blocks} 个设备字段")
+    if balance_changed:
+        changed.append(f"焓平衡 {balance_changed} 台设备结论有变")
 
     if apply:
         conn.executemany(
@@ -110,8 +127,16 @@ def repair_case(conn, case, apply: bool) -> dict:
              for s in streams],
         )
         conn.executemany(
-            "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=? WHERE case_id=? AND name=?",
-            [(b["duty_kw"], b["power_kw"], b["area_m2"], cid, b["name"]) for b in blocks],
+            "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?,"
+            " dh_kw=?, ref_kw=?, ref_kind=?, balance_state=?, balance_note=?"
+            " WHERE case_id=? AND name=?",
+            [(b["duty_kw"], b["power_kw"], b["area_m2"],
+              (b.get("balance") or {}).get("dh_kw"),
+              (b.get("balance") or {}).get("ref_kw"),
+              (b.get("balance") or {}).get("ref_kind"),
+              (b.get("balance") or {}).get("balance_state"),
+              (b.get("balance") or {}).get("balance_note"),
+              cid, b["name"]) for b in blocks],
         )
         conn.execute(
             "UPDATE cases SET severity=?, converged=?, reasons_json=?,"
