@@ -12,6 +12,7 @@ metrics.csv          精简指标:概览 / 状态码 / 异常清单,一张表看
 streams.csv          流股完整数据(已归一单位)+ 原始值与原始单位
 blocks.csv           设备完整数据 + 模块状态 + Aspen 原文提示
 column_profiles.csv  塔逐板剖面(没有塔就没有这个文件)
+composition.csv      已读过组成的流股(按需读,可能没有这个文件)
 case.json            机器可读的同一份元数据(给程序解析用)
 
 三条硬约定
@@ -104,8 +105,8 @@ def _cell(text) -> str:
 
 # ---------------------------------------------------------------- 各文件
 
-def _metrics_rows(case, columns, stage_counts, reasons, codes, tears,
-                  blocks) -> list[list]:
+def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
+                  composition) -> list[list]:
     rows: list[list] = []
 
     def add(category, item, value="", unit="", note=""):
@@ -124,6 +125,8 @@ def _metrics_rows(case, columns, stage_counts, reasons, codes, tears,
     add("概览", "塔数", len(columns), "座", "有逐板剖面的 RadFrac/Absorber")
     add("概览", "读取耗时", _num(case["elapsed_sec"]), "s", "本程序从 Aspen 读一遍的耗时")
     add("概览", "撕裂流条数", len(tears), "条", "闭环回路的撕裂流,误差见下")
+    add("概览", "已读组成的流股数", len(composition["streams"]), "条",
+        "组成按需读,不是全量;见 composition.csv")
     add("概览", "收敛判定", SEVERITY_TEXT.get(severity, severity), "",
         "ok=收敛 / warning=有告警 / error=有错误")
     add("概览", "能否用于统计对比", "是" if case["converged"] else "否", "",
@@ -217,8 +220,18 @@ def _profiles_csv(stages_by_block) -> bytes:
     )
 
 
+def _composition_csv(rows) -> bytes:
+    out = []
+    for r in rows:
+        out.append([r["stream"], r["component"], _num(r["x_liq"]), _num(r["y_vap"])])
+    return _csv_bytes(
+        ["流股", "组分", "液相摩尔分数x", "气相摩尔分数y"],
+        out,
+    )
+
+
 def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
-               components_read) -> bytes:
+               composition) -> bytes:
     files = {
         "README.md": "说明书 + 数据字典(先读这个)",
         "metrics.csv": "精简指标:概览 / 状态码 / 异常清单",
@@ -228,6 +241,8 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
     }
     if columns:
         files["column_profiles.csv"] = "塔逐板剖面"
+    if composition["rows"]:
+        files["composition.csv"] = "已读流股的逐组分摩尔分数"
 
     payload = {
         "generator": "aspen-insight",
@@ -265,9 +280,11 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
             {"block": c["block"], "stage_count": c["stage_count"]}
             for c in columns
         ],
-        "components": {
-            "read": bool(components_read),
-            "names": components_read if isinstance(components_read, list) else [],
+        "composition": {
+            "streams": composition["streams"],
+            "components": composition["components"],
+            "file": "composition.csv" if composition["rows"] else None,
+            "note": "组成按需读取:只包含在网页上点开过的流股,不是全量",
         },
         "notes": [
             "空值表示该模型里没有这个字段/读不到,不等于 0",
@@ -279,7 +296,7 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
 
 
 def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
-            components_read, metrics_count: int) -> str:
+            composition, metrics_count: int) -> str:
     severity = case["severity"] or ""
     severity_text = SEVERITY_TEXT.get(severity, severity or "未知")
     converged = bool(case["converged"])
@@ -343,6 +360,8 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w(f"| `blocks.csv` | 设备完整数据 | {case['block_count']} 行 |")
     if columns:
         w(f"| `column_profiles.csv` | 塔逐板剖面 | {sum(stage_counts)} 行 |")
+    if composition["rows"]:
+        w(f"| `composition.csv` | 已读流股的逐组分摩尔分数 | {len(composition['rows'])} 行 |")
     w(f"| `case.json` | 机器可读元数据(同样的信息,便于程序解析) | — |")
     w("")
     w("CSV 一律 **UTF-8 带 BOM、逗号分隔、首行是列名**。")
@@ -413,6 +432,22 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("单张表,`类别` 列区分五类:概览 / 状态码 / 判定理由 / 异常模块 / 撕裂流。")
     w("想快速看结论就只读这张表。")
     w("")
+    if composition["rows"]:
+        w("### 4.5 `composition.csv` —— 流股组成")
+        w("")
+        w("| 列 | 含义 |")
+        w("| --- | --- |")
+        w("| 流股 | 流股 ID |")
+        w("| 组分 | 组分 ID(Aspen 里定义的名称) |")
+        w("| 液相摩尔分数x | 该组分在液相中的摩尔分数,同一流股内合计 ≈ 1 |")
+        w("| 气相摩尔分数y | 该组分在气相中的摩尔分数,同一流股内合计 ≈ 1 |")
+        w("")
+        w(f"本包覆盖 **{len(composition['streams'])} 条流股**:"
+          + "、".join(f"`{s}`" for s in composition["streams"]) + "。")
+        w("")
+        w("> 组成是**按需读**的:只有在网页上点开过的流股才在这里,")
+        w("> 不是全部流股。纯液相流股的 y 列可能整列为 0 或空,不代表缺数据。")
+        w("")
 
     # --- 5 ---
     w("## 5. 这次运行的状态(读自 Aspen 运行状态页)")
@@ -468,12 +503,14 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("")
     w("- **空值 = 读不到**,不是 0。Aspen 树里找不到节点时,程序读出来是空,")
     w("  表示「这个模型没有这个字段」或「该字段不可读」,不要当 0 参与计算。")
-    w("- **组成(各组分摩尔分数)默认没有读**。18 组分 × 2 相 × 每条流股的调用量是")
-    w("  基础字段的 6 倍(9 s → 41 s),所以默认跳过。")
-    if components_read:
-        w(f"- 本工况已读组分:`{_cell('、'.join(components_read))}`。")
+    w("- **组成(各组分摩尔分数)是按需读的**。18 组分 × 2 相 × 每条流股的调用量是")
+    w("  基础字段的 6 倍(121 条流股从 9 s 变成 41 s),所以默认不读。")
+    if composition["rows"]:
+        w(f"- 本工况已经读过 {len(composition['streams'])} 条流股的组成,见 `composition.csv`;")
+        w("  其余流股没有组成数据(缺失 ≠ 为零)。")
     else:
-        w("- 需要组成时,用命令行重读一次(会慢到约 41 s):`python -m app.cli --read --composition`。")
+        w("- 本工况**没有读过任何流股的组成**。需要时在网页上点流股名(单条约 0.3 秒),")
+        w("  或在命令行用 `python -m app.cli --read --composition` 全量重读一次(约 41 s)。")
     w("- **流程拓扑不在包内**:只有流股和设备列表,没有「谁连到谁」的连接关系。")
     w("- **能量流(热流/功流)未覆盖**:两个测试模型全是物流,字段形态还没实测,不臆造。")
     w("- 设备状态码来自 `Output\\BLKSTAT`,错误原文来自 `Output\\BLKMSG`;")
@@ -515,20 +552,21 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
         c["block"]: db.read_column_stages(conn, case_id, c["block"]) for c in columns
     }
 
-    comp_rows = conn.execute(
-        "SELECT DISTINCT component FROM stream_components WHERE case_id = ? ORDER BY component",
-        (case_id,),
-    ).fetchall()
-    components_read = [r["component"] for r in comp_rows]
+    comp_rows = db.read_all_composition(conn, case_id)
+    composition = {
+        "rows": comp_rows,
+        "streams": db.list_composed_streams(conn, case_id),
+        "components": sorted({r["component"] for r in comp_rows}),
+    }
 
     reasons = _json(case["reasons_json"], [])
     codes = _json(case["status_json"], {})
     tears = _json(case["tear_json"], [])
 
     metrics_rows = _metrics_rows(case, columns, stage_counts, reasons, codes,
-                                 tears, blocks)
+                                 tears, blocks, composition)
     readme = _readme(case, columns, stage_counts, reasons, codes, tears,
-                     blocks, components_read, len(metrics_rows))
+                     blocks, composition, len(metrics_rows))
     files: list[tuple[str, bytes]] = [
         ("README.md", _md_bytes(readme)),
         ("metrics.csv", _csv_bytes(["类别", "项目", "值", "单位", "说明"], metrics_rows)),
@@ -537,8 +575,10 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     ]
     if columns:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
+    if comp_rows:
+        files.append(("composition.csv", _composition_csv(comp_rows)))
     files.append(("case.json", _case_json(case, columns, stage_counts, reasons,
-                                          codes, tears, blocks, components_read)))
+                                          codes, tears, blocks, composition)))
 
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:

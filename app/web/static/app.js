@@ -134,9 +134,21 @@ function renderStreams() {
   const tbody = document.querySelector("#table tbody");
   thead.innerHTML = `<tr>${cols.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr>`;
   tbody.innerHTML = rows.map((row) => `<tr>${cols.map((c) => {
+    if (c.key === "name") {
+      // 流股名可点:按需看这条流股的组分(18 组分很贵,不能全量读)
+      return `<td class="name"><a href="#" class="stream-link" data-stream="${esc(row.name)}"
+                 title="看这条流股的组分">${esc(row.name)}</a></td>`;
+    }
     const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
     return `<td class="${c.cls || ""} ${c.num ? "num" : ""}">${value}</td>`;
   }).join("")}</tr>`).join("");
+
+  tbody.querySelectorAll(".stream-link").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openComposition(a.dataset.stream);
+    });
+  });
   document.getElementById("count").textContent = `${rows.length} 行`;
 }
 
@@ -359,6 +371,7 @@ function highlightRow(idx) {
 
 async function openColumn(block) {
   const panel = document.getElementById("columnPanel");
+  document.getElementById("compPanel").classList.add("hidden");  // 两个抽屉不叠着
   document.getElementById("columnTitle").textContent = `塔剖面 · ${block}`;
   panel.classList.remove("hidden");
 
@@ -407,6 +420,68 @@ async function openColumn(block) {
   </tr>`).join("");
 }
 
+/* ------------------------------------------------------------ 流股组成 */
+
+/* 摩尔分数可能是 1e-9 量级的痕量:固定 6 位小数会全变成 0.000000,
+   所以小的改用科学计数法,大的保留 6 位。 */
+function fmtFrac(v) {
+  if (v === null || v === undefined) return "—";
+  if (typeof v !== "number") return esc(v);
+  if (v !== 0 && Math.abs(v) < 1e-4) return v.toExponential(2);
+  return v.toFixed(6);
+}
+
+const compState = { seq: 0 };
+
+async function openComposition(stream) {
+  const panel = document.getElementById("compPanel");
+  document.getElementById("columnPanel").classList.add("hidden");
+  document.getElementById("compTitle").textContent = `流股组成 · ${stream}`;
+  document.getElementById("compBody").innerHTML =
+    '<p class="comp-note">正在读取…(工况里存过就直接取;没存过会去当前打开的 Aspen 现读一次,约 0.3 秒)</p>';
+  panel.classList.remove("hidden");
+
+  // 连点不同流股时,只认最后一次请求的结果,避免慢的响应盖掉新的
+  const seq = ++compState.seq;
+  let data;
+  try {
+    data = await api(`/api/cases/${state.current.id}/streams/${encodeURIComponent(stream)}/composition`);
+  } catch (err) {
+    if (seq !== compState.seq) return;
+    document.getElementById("compBody").innerHTML =
+      `<div class="comp-error">${esc(err.message)}</div>`;
+    return;
+  }
+  if (seq !== compState.seq) return;
+  renderComposition(data);
+}
+
+function renderComposition(data) {
+  const body = document.getElementById("compBody");
+  const note = data.source === "live"
+    ? '<p class="comp-note live">刚从当前打开的 Aspen 读出来,已存入本工况(下次打开直接取,不再连 Aspen)。</p>'
+    : '<p class="comp-note">来自本工况已存的数据。</p>';
+
+  const rows = (data.components || []).map((c) => {
+    const zero = (v) => (v === 0 ? " comp-zero" : "");
+    return `<tr>
+      <td class="name">${esc(c.component)}</td>
+      <td class="num${zero(c.x_liq)}">${fmtFrac(c.x_liq)}</td>
+      <td class="num${zero(c.y_vap)}">${fmtFrac(c.y_vap)}</td>
+    </tr>`;
+  }).join("");
+
+  body.innerHTML = `${note}
+    <div class="table-wrap small">
+      <table>
+        <thead><tr><th>组分</th><th class="num">液相摩尔分数 x</th><th class="num">气相摩尔分数 y</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <p class="comp-sum">共 ${data.count} 个组分 · 合计 x = ${fmt(data.sum_x, 4)} · 合计 y = ${fmt(data.sum_y, 4)}${
+      data.run_id ? ` · 运行 ID ${esc(data.run_id)}` : ""}</p>`;
+}
+
 /* ------------------------------------------------------------ 对比 */
 
 function fillCompareSelects() {
@@ -453,6 +528,7 @@ function setTab(tab) {
     b.classList.toggle("active", b.dataset.tab === tab));
   toggleCompareBar(tab === "compare");
   document.getElementById("columnPanel").classList.add("hidden");
+  document.getElementById("compPanel").classList.add("hidden");
   renderBanner();
   if (tab === "compare") {
     fillCompareSelects();
@@ -732,6 +808,8 @@ function bindEvents() {
   });
   document.getElementById("closeColumn").addEventListener("click", () =>
     document.getElementById("columnPanel").classList.add("hidden"));
+  document.getElementById("closeComp").addEventListener("click", () =>
+    document.getElementById("compPanel").classList.add("hidden"));
 
   document.getElementById("readBtn").addEventListener("click", startRead);
 

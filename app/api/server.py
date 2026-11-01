@@ -11,6 +11,7 @@
     GET  /api/cases                  工况列表
     GET  /api/cases/{id}             单个工况详情(含收敛状态与原因)
     GET  /api/cases/{id}/streams     流股表
+    GET  /api/cases/{id}/streams/{流股}/composition   单条流股的组成(按需从 Aspen 读)
     GET  /api/cases/{id}/blocks      设备表
     GET  /api/cases/{id}/export.xlsx      导出 Excel(给人看)
     GET  /api/cases/{id}/export.ai.zip    导出 AI 分析包(Markdown + CSV,给 AI 读)
@@ -239,6 +240,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if parts[3] == "streams":
+                # /api/cases/{id}/streams/{流股}/composition —— 单条流股的组成(按需)
+                if len(parts) >= 6 and parts[5] == "composition":
+                    self._stream_composition(conn, case_id, parts[4])
+                    return
                 self._json([_row_to_dict(r) for r in db.read_streams(conn, case_id)])
                 return
             if parts[3] == "blocks":
@@ -261,6 +266,28 @@ class Handler(BaseHTTPRequestHandler):
             self._error("未知接口", 404)
         finally:
             conn.close()
+
+    # ------------------------------------------------------------ 流股组成按需读
+
+    def _stream_composition(self, conn, case_id: int, stream: str) -> None:
+        """GET /api/cases/{id}/streams/{流股}/composition
+
+        先看工况库里存过没有;没存过就去当前打开的 Aspen 现读一条(约 0.3 s)并缓存。
+        组成不跟着主读取一起读 —— 全量读会让 121 条流股从 9 s 变 41 s。
+        """
+        from app.api import composition
+
+        case = db.get_case(conn, case_id)
+        if case is None:
+            self._error(f"没有 id={case_id} 的工况", 404)
+            return
+        try:
+            payload = composition.get(conn, case, stream)
+        except composition.CompositionError as exc:
+            # 409:不是接口有问题,是"现在这个状态给不了",原因原样显示给用户
+            self._json({"error": str(exc), "stream": stream}, 409)
+            return
+        self._json(payload)
 
     # ------------------------------------------------------------ AI 分析包导出
 

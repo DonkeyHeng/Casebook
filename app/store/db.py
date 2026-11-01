@@ -280,6 +280,54 @@ def list_columns(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
     ).fetchall()
 
 
+# ---------------------------------------------------------------- 流股组成(按需读)
+
+def read_stream_composition(conn: sqlite3.Connection, case_id: int,
+                            stream: str) -> list[sqlite3.Row]:
+    """某条流股已存的组成;没读过返回空列表(不区分"0 组分")。"""
+    return conn.execute(
+        "SELECT component, x_liq, y_vap FROM stream_components "
+        "WHERE case_id = ? AND stream = ? ORDER BY component",
+        (case_id, stream),
+    ).fetchall()
+
+
+def save_stream_composition(conn: sqlite3.Connection, case_id: int, stream: str,
+                            rows: list[dict]) -> int:
+    """把一条流股的组成写进工况库(重复写就覆盖),返回写入条数。
+
+    只有"点开看过"的流股才会走到这里 —— 组成默认不读,全量读会让耗时从 9 s 涨到 41 s。
+    """
+    if not rows:
+        return 0
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO stream_components (case_id, stream, component, x_liq, y_vap)
+        VALUES (?,?,?,?,?)
+        """,
+        [(case_id, stream, r["component"], r.get("x_liq"), r.get("y_vap")) for r in rows],
+    )
+    conn.commit()
+    return len(rows)
+
+
+def list_composed_streams(conn: sqlite3.Connection, case_id: int) -> list[str]:
+    """这个工况里已经读过组成的流股名。"""
+    return [r["stream"] for r in conn.execute(
+        "SELECT DISTINCT stream FROM stream_components WHERE case_id = ? ORDER BY stream",
+        (case_id,),
+    )]
+
+
+def read_all_composition(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
+    """整个工况已存的组成(按流股、组分排序),给 AI 分析包用。"""
+    return conn.execute(
+        "SELECT stream, component, x_liq, y_vap FROM stream_components "
+        "WHERE case_id = ? ORDER BY stream, component",
+        (case_id,),
+    ).fetchall()
+
+
 def delete_case(conn: sqlite3.Connection, case_id: int) -> None:
     conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
     conn.commit()
