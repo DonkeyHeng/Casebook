@@ -86,7 +86,7 @@ aspen-insight/
     column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
     make_icon.py          从源图生成 .ico(圆形抠底 + 7 个尺寸)
     stop.py               按端口停止服务
-  assets/aspen-insight.ico  图标:桌面快捷方式 + 网页 favicon 共用
+  assets/app-icon.ico  图标:桌面快捷方式 + 网页 favicon 共用
   docs/aspen-field-map.md 真实字段路径地图(实测)
   model/                  Aspen 模型与它的运行文件(见 model/README.md)
   data/cases.db           本地工况库(运行时生成,不入库)
@@ -134,16 +134,16 @@ python probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
 
 ## 图标
 
-<img src="assets/aspen-insight_256.png" width="120" alt="aspen-insight 图标">
+<img src="assets/app-icon_256.png" width="120" alt="aspen-insight 图标">
 
-`assets/aspen-insight.ico` 同时用在两处:**桌面快捷方式的图标**、**网页的 favicon**
+`assets/app-icon.ico` 同时用在两处:**桌面快捷方式的图标**、**网页的 favicon**
 (所以浏览器"应用窗口"在任务栏里也是这张脸)。
 
 源图是根目录的 `Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg`(2048²,白底圆形徽章)。
 要改图标就重跑:
 
 ```bash
-python tools/make_icon.py "Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg" assets/aspen-insight.ico
+python tools/make_icon.py "Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg" assets/app-icon.ico
 ```
 
 脚本按**圆的几何**把圆外白底抠成透明 —— 不做全局"白→透明",否则徽章上

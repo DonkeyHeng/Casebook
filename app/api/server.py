@@ -1,4 +1,4 @@
-"""本地 HTTP 服务:后端 API + 静态前端。
+﻿"""本地 HTTP 服务:后端 API + 静态前端。
 
 启动:
     python -m app.api                 # 默认 http://127.0.0.1:8000
@@ -51,7 +51,7 @@ DEFAULT_LOG = "data/server.log"
 STATE_PATH = os.path.join(PROJECT_ROOT, "data", "window.json")
 
 # 桌面快捷方式用的图标,同时当作网页 favicon —— 应用窗口在任务栏里才会是这张脸
-ICON_PATH = os.path.join(PROJECT_ROOT, "assets", "aspen-insight.ico")
+ICON_PATH = os.path.join(PROJECT_ROOT, "assets", "app-icon.ico")
 
 # 页面标题(窗口标题也是它),用来定位应用窗口;改 <title> 时要同步改这里
 WINDOW_KEY = "aspen-insight · 工况数据"

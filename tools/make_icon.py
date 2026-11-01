@@ -1,4 +1,4 @@
-"""把 Gemini 生成的圆形徽章做成 Windows 图标(.ico)。
+﻿"""把 Gemini 生成的圆形徽章做成 Windows 图标(.ico)。
 
 为什么不是"直接另存为 ico"
 ------------------------
@@ -21,7 +21,7 @@ Pillow 会把**每个尺寸都写成 PNG 压缩条目**。浏览器(Chromium 读
 所以这里手写 ICO:所有尺寸都用 32bpp BMP + AND 掩码,兼容性最好。
 
 用法:
-    python tools/make_icon.py "Gemini_Generated_Image_xxx.jpg" assets/aspen-insight.ico
+    python tools/make_icon.py "Gemini_Generated_Image_xxx.jpg" assets/app-icon.ico
 """
 from __future__ import annotations
 
