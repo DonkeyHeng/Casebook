@@ -100,28 +100,33 @@ function renderBanner() {
   if (!c) { el.className = "banner hidden"; return; }
 
   const s = SEVERITY[c.severity] || SEVERITY.warning;
-  const reasons = (c.reasons || [])
-    .map((r) => `<div class="reason">· ${esc(r)}</div>`).join("");
+  const list = c.reasons || [];
+  const reasons = list.map((r) => `<div class="reason">· ${esc(r)}</div>`).join("");
+  const hasReasons = list.length > 0;
 
-  el.className = `banner ${s.cls}` + (state.bannerCollapsed ? " collapsed" : "");
+  el.className = `banner ${s.cls}` + (state.bannerCollapsed && hasReasons ? " collapsed" : "");
   el.innerHTML = `
     <div class="banner-head">
       <span class="banner-title">
         <strong>${s.text}</strong>　流股 ${c.stream_count} 条 / 设备 ${c.block_count} 个${
           c.run_id ? `　运行 ID ${esc(c.run_id)}` : ""}
       </span>
-      <button class="banner-toggle" id="bannerToggle" type="button"
+      ${hasReasons ? `<button class="banner-toggle" id="bannerToggle" type="button"
               title="${state.bannerCollapsed ? "展开问题清单" : "收起问题清单"}">
         ${state.bannerCollapsed ? "展开 ▾" : "收起 ▴"}
-      </button>
+      </button>` : ""}
     </div>
     <div class="banner-verdict">${esc(bannerVerdict(c))}</div>
-    <div class="banner-body">${reasons}</div>`;
+    ${hasReasons ? `<div class="banner-body">${reasons}</div>` : ""}`;
 
-  document.getElementById("bannerToggle").addEventListener("click", () => {
-    state.bannerCollapsed = !state.bannerCollapsed;
-    renderBanner();
-  });
+  // 没有理由就不给「展开」—— 点开是空的,比没有按钮更让人困惑
+  const toggle = document.getElementById("bannerToggle");
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      state.bannerCollapsed = !state.bannerCollapsed;
+      renderBanner();
+    });
+  }
 }
 
 /* 横幅里那句"所以能不能用" —— 只说结论,不复述状态码。
