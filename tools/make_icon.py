@@ -13,11 +13,19 @@
 3. 多尺寸:16/24/32/48/64/128/256 各存一份。
    Windows 会按显示场景挑合适的那张,只放一张 256 的话 16px 下会糊成一团。
 
+为什么自己拼 ICO 字节,不用 Pillow 的 ico 保存
+-------------------------------------------
+Pillow 会把**每个尺寸都写成 PNG 压缩条目**。浏览器(Chromium 读 favicon)没问题,
+但资源管理器给**快捷方式**取图标走的是老 GDI 路径,只认 BMP(DIB)条目 ——
+结果是:网页 favicon 正常,桌面图标却是一块白方块(2026-11-01 实际踩到)。
+所以这里手写 ICO:所有尺寸都用 32bpp BMP + AND 掩码,兼容性最好。
+
 用法:
     python tools/make_icon.py "Gemini_Generated_Image_xxx.jpg" assets/aspen-insight.ico
 """
 from __future__ import annotations
 
+import struct
 import sys
 
 from PIL import Image
@@ -72,6 +80,71 @@ def load_and_cut(path: str) -> Image.Image:
     return im
 
 
+def _dib_entry(img: Image.Image) -> bytes:
+    """一张 RGBA 图 → 一个 ICO 内的 BMP(DIB)条目。
+
+    结构 = BITMAPINFOHEADER(biHeight 写两倍) + XOR 位图(BGRA,自下而上)
+         + AND 掩码(1 bit/像素,1=透明,行按 32 位对齐)。
+    """
+    w, h = img.size
+    px = img.load()
+
+    xor = bytearray()
+    mask = bytearray()
+    mask_row_bytes = ((w + 31) // 32) * 4
+
+    for y in range(h - 1, -1, -1):          # 自下而上
+        row = bytearray()
+        bits = bytearray()
+        cur = 0
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            row += bytes((b, g, r, a))      # BGRA
+            if a == 0:
+                cur |= 0x80 >> (x % 8)      # 全透明 → 掩码置 1
+            if x % 8 == 7:
+                bits.append(cur)
+                cur = 0
+        if w % 8:
+            bits.append(cur)
+        bits += b"\x00" * (mask_row_bytes - len(bits))
+        xor += row
+        mask += bits
+
+    header = struct.pack(
+        "<IiiHHIIiiII",
+        40,            # biSize
+        w, h * 2,      # biWidth / biHeight(XOR + AND 两张图叠起来)
+        1, 32,         # biPlanes / biBitCount
+        0,             # biCompression = BI_RGB
+        len(xor) + len(mask),
+        0, 0, 0, 0,
+    )
+    return header + bytes(xor) + bytes(mask)
+
+
+def save_ico(images: list[Image.Image], dst: str) -> None:
+    """把若干尺寸打包成 ICO(全部 BMP 条目)。"""
+    blobs = [_dib_entry(im) for im in images]
+    count = len(blobs)
+    offset = 6 + 16 * count
+    out = bytearray(struct.pack("<HHH", 0, 1, count))   # reserved / type=1(icon) / 条目数
+    for im, blob in zip(images, blobs):
+        w, h = im.size
+        out += struct.pack(
+            "<BBBBHHII",
+            w % 256, h % 256,   # 256 要写成 0
+            0, 0,               # 调色板数 / 保留
+            1, 32,              # planes / bpp
+            len(blob), offset,
+        )
+        offset += len(blob)
+    for blob in blobs:
+        out += blob
+    with open(dst, "wb") as fh:
+        fh.write(out)
+
+
 def main() -> int:
     if len(sys.argv) < 3:
         print(__doc__)
@@ -81,14 +154,13 @@ def main() -> int:
     master = load_and_cut(src)
     print(f"裁切后 {master.size[0]}×{master.size[1]}")
 
-    # 先缩到 256 再写 ICO:Pillow 会从这张按需生成各尺寸,边缘比从 2048 直接采样更一致
-    big = master.resize((256, 256), Image.LANCZOS)
-    big.save(dst, format="ICO", sizes=[(s, s) for s in SIZES if s <= 256])
-    print(f"已写出 {dst}")
+    images = [master.resize((s, s), Image.LANCZOS) for s in SIZES]
+    save_ico(images, dst)
+    print(f"已写出 {dst}({len(images)} 个尺寸,全部 BMP 条目)")
 
     # 顺带导一张 256 的 PNG:预览/文档用,也方便检查透明边缘
     png = dst.rsplit(".", 1)[0] + "_256.png"
-    big.save(png)
+    images[-1].save(png)
     print(f"预览图 {png}")
     return 0
 
