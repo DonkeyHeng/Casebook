@@ -170,7 +170,7 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
       * **软信号**(最多判 warning):UOSSTAT / PER_ERROR / RSTAT 非 0、模块 status=2
     """
     hard: list[str] = []      # 真·错误
-    soft: list[str] = []      # 只是"有东西非零"
+    soft: list[str] = []      # 值得提示,但数据仍可用
 
     text = str(errtxt or "")
     if "completed with errors" in text:
@@ -179,14 +179,6 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
     # CVSTAT = 收敛块状态:它非 0 才是真出错(CVSTAT=1 时 .sum 里会出现 $OLVER 报错)
     if codes.get("CVSTAT") not in (0, None):
         hard.append(f"CVSTAT={codes.get('CVSTAT')}(收敛块出错)")
-
-    for key in ("RSTAT", "UOSSTAT"):
-        if codes.get(key) not in (0, None):
-            soft.append(f"{key}={codes.get(key)}(非 0,含告警)")
-
-    per_error = codes.get("PER_ERROR")
-    if isinstance(per_error, (int, float)) and per_error > 1e-6:
-        soft.append(f"PER_ERROR={per_error}(有非零状态项)")
 
     block_errors, block_warnings = [], []
     for b in blocks or []:
@@ -200,6 +192,14 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
         hard.append(f"{b['name']} 报错:{b.get('message') or '未知原因'}")
     for b in block_warnings:
         soft.append(f"{b['name']} 告警:{b.get('message') or '未知原因'}")
+
+    # 有模块状态非零,却一个都没定位到 —— 这种"有情况但没细节"才值得提示
+    if codes.get("UOSSTAT") not in (0, None) and not block_warnings:
+        soft.append(f"UOSSTAT={codes.get('UOSSTAT')} —— 有模块状态非零,但没读到具体是哪个模块")
+
+    # 注意:RSTAT / PER_ERROR **只记录、不参与判定**。
+    # 实测(2026-11-01):一个 CVSTAT=0、UOSSTAT=0、78 个模块全 status=0 的样本模型,
+    # PER_ERROR 仍然是 1;而真有模块报错的模型 PER_ERROR 也是 1 —— 完全没有区分度。
 
     for tear in tears:
         err, tol = tear.get("error"), tear.get("tolerance")
