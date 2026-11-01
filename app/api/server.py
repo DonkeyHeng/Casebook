@@ -50,6 +50,9 @@ DEFAULT_DB = "data/cases.db"
 DEFAULT_LOG = "data/server.log"
 STATE_PATH = os.path.join(PROJECT_ROOT, "data", "window.json")
 
+# 桌面快捷方式用的图标,同时当作网页 favicon —— 应用窗口在任务栏里才会是这张脸
+ICON_PATH = os.path.join(PROJECT_ROOT, "assets", "aspen-insight.ico")
+
 # 页面标题(窗口标题也是它),用来定位应用窗口;改 <title> 时要同步改这里
 WINDOW_KEY = "aspen-insight · 工况数据"
 
@@ -486,8 +489,26 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             conn.close()
 
+    def _icon(self) -> None:
+        """网页 favicon:复用桌面快捷方式那张 .ico(没有就回 204,页面照常能用)。"""
+        if not os.path.isfile(ICON_PATH):
+            self.send_response(204)
+            self.end_headers()
+            return
+        with open(ICON_PATH, "rb") as fh:
+            body = fh.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/x-icon")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _static(self, path: str) -> None:
-        if path in ("/favicon.ico", "/apple-touch-icon.png"):
+        if path == "/favicon.ico":
+            self._icon()
+            return
+        if path == "/apple-touch-icon.png":
             self.send_response(204)
             self.end_headers()
             return
