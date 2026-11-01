@@ -242,6 +242,16 @@ Aspen 的 `.sum` 文件里有 `DSET RUN-STATUS ERRTXT ...`,但在数据树里
 
 > 所以**不要指望从树里读到一句完整的中文结论**,必须逐模块读 `BLKSTAT/BLKMSG` 再汇总。
 
+> **控制面板本身读不到**(2026-11-01 复核):`doc.Engine.ControlPanel` 在附加态报错,
+> 模型目录里的 `_<runid>.sum` 只有收敛摘要(`TEAR-SUMMARY` + `COMPSTAT`),
+> `.sor` / `.sin` 里也搜不到 "completed with warnings" 那句话。
+>
+> **但不需要它**:控制面板里那句
+> `The following Unit Operation blocks were completed with warnings: M0302 E0204 R0301`
+> 的模块清单,和逐模块 `BLKSTAT=2` 的集合**逐字相同**(实测同一模型,顺序都一致)。
+> 也就是说 `BLKSTAT/BLKMSG` 就是控制面板的结构化版本 ——
+> **判"能不能用",只信这两样;别拿 `UOSSTAT`/`PER_ERROR`/撕裂流数值去推翻它**。
+
 ### 6.4 撕裂流误差
 
 `\Data\Results Summary\Conv-Sum\TEAR-SUMMARY\Output\` 是**按编号展开的数组**:
@@ -269,8 +279,13 @@ model-full 有 6 条撕裂流,误差分别为 `1.1e-14 / 0.0 / 1.6e-08 / 2.8e-06
 > `The following Unit Operation blocks were completed with warnings: M0302 E0204 R0301`,
 > `CVSTAT=0` —— **Aspen 自己不认为这条回路没收敛**。
 >
-> 原因大概率是 `ERR` / `ERR_TOL` 的可比性随变量类型变化,`INFO-VAR` 这种"信息变量"
-> 尤其不可比。所以:**撕裂流的数字只作为提示列出来,不能替 Aspen 下结论**。
+> **为什么不能比**:同一模型留下的 `_<runid>.sum` 里,`CNV_TEAR` 每条记录是
+> `流股号 ERR 数值A 数值B 变量名 "#" 收敛块` 三段数字,而这台机器上
+> **数值B 恒等于 数值A × 10⁴**(逐条核对:1.84e-05/1.84e-01、6.42e-05/6.42e-01、
+> 3.93e-06/3.93e-02……)。也就是说你以为的"容差"只是另一个残差的固定缩放,
+> **不是独立的收敛判据**,拿 `ERR` 去比它等于比了个寂寞。
+>
+> 结论:**撕裂流的数字只作为提示列出来,不能替 Aspen 下结论**。
 > 判"能不能用"仍然只看模块级 `BLKSTAT` 和 `CVSTAT`。
 
 ---
