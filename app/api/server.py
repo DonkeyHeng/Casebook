@@ -1,4 +1,4 @@
-﻿"""本地 HTTP 服务:后端 API + 静态前端。
+"""本地 HTTP 服务:后端 API + 静态前端。
 
 启动:
     python -m app.api                 # 默认 http://127.0.0.1:8000
@@ -430,7 +430,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _compare(self, query: dict) -> None:
-        """GET /api/compare?base=1&other=2 —— 逐流股对比两个工况。"""
+        """GET /api/compare?base=1&other=2 —— 逐流股 / 逐设备对比两个工况。"""
         try:
             base_id = int(query["base"][0])
             other_id = int(query["other"][0])
@@ -440,6 +440,8 @@ class Handler(BaseHTTPRequestHandler):
 
         fields = ["temperature_c", "pressure_bar", "mass_flow_kgh",
                   "mole_flow_kmolh", "vap_frac", "vol_flow_m3h"]
+        # 设备要比的字段:负荷/功率/级数/顶底温;状态单独按"变没变"处理
+        block_fields = ["duty_kw", "power_kw", "nstage", "top_temp_c", "bottom_temp_c"]
 
         conn = db.open_db(self.db_path)
         try:
@@ -471,19 +473,53 @@ class Handler(BaseHTTPRequestHandler):
                     "delta": delta,
                 })
 
+            # ---- 设备 ----
+            b_left = {r["name"]: _row_to_dict(r) for r in db.read_blocks(conn, base_id)}
+            b_right = {r["name"]: _row_to_dict(r) for r in db.read_blocks(conn, other_id)}
+            block_rows, b_common, b_changed = [], 0, 0
+            for name in sorted(set(b_left) | set(b_right)):
+                a, b = b_left.get(name), b_right.get(name)
+                delta = {}
+                for f in block_fields:
+                    va = a.get(f) if a else None
+                    vb = b.get(f) if b else None
+                    delta[f] = round(vb - va, 6) if isinstance(va, (int, float)) and isinstance(vb, (int, float)) else None
+                status_a = a.get("status") if a else None
+                status_b = b.get("status") if b else None
+                if a and b:
+                    b_common += 1
+                    if (any(d not in (None, 0) for d in delta.values())
+                            or status_a != status_b):
+                        b_changed += 1
+                block_rows.append({
+                    "name": name,
+                    "type": (a or b or {}).get("type"),
+                    "base": {f: a.get(f) for f in block_fields} if a else None,
+                    "other": {f: b.get(f) for f in block_fields} if b else None,
+                    "delta": delta,
+                    "status": {"base": status_a, "other": status_b},
+                })
+
             self._json({
                 "base": {"id": base["id"], "model_name": base["model_name"],
                          "read_at": base["read_at"], "severity": base["severity"]},
                 "other": {"id": other["id"], "model_name": other["model_name"],
                           "read_at": other["read_at"], "severity": other["severity"]},
                 "fields": fields,
+                "block_fields": block_fields,
                 "streams": rows,
+                "blocks": block_rows,
                 "summary": {
                     "total": len(rows),
                     "common": common,
                     "changed": changed,
                     "only_base": sorted(set(left) - set(right)),
                     "only_other": sorted(set(right) - set(left)),
+                    "block_total": len(block_rows),
+                    "block_common": b_common,
+                    "block_changed": b_changed,
+                    "block_only_base": sorted(set(b_left) - set(b_right)),
+                    "block_only_other": sorted(set(b_right) - set(b_left)),
                 },
             })
         finally:

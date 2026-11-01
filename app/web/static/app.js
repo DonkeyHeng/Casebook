@@ -8,7 +8,7 @@ const state = {
   tab: "streams",
   filter: "",
   bannerCollapsed: false,
-  compare: { baseId: null, otherId: null, data: null },
+  compare: { baseId: null, otherId: null, data: null, scope: "streams" },
   column: null,
 };
 
@@ -17,6 +17,15 @@ const COMPARE_FIELDS = [
   { key: "pressure_bar", label: "压力 bar", digits: 3 },
   { key: "mass_flow_kgh", label: "流量 kg/h", digits: 1 },
   { key: "vap_frac", label: "汽化率", digits: 3 },
+];
+
+/* 设备对比只放 5 个字段:再加顶底温就 18 列了,再多看不过来 */
+const BLOCK_COMPARE_FIELDS = [
+  { key: "duty_kw", label: "热负荷 kW", digits: 2 },
+  { key: "power_kw", label: "功率 kW", digits: 2 },
+  { key: "nstage", label: "级数", digits: 0 },
+  { key: "top_temp_c", label: "顶温 ℃", digits: 1 },
+  { key: "bottom_temp_c", label: "底温 ℃", digits: 1 },
 ];
 
 const COLUMN_TYPE = /RadFrac|Absorber/;
@@ -201,6 +210,11 @@ function renderCompare() {
     return;
   }
 
+  if (state.compare.scope === "blocks") {
+    renderCompareBlocks(thead, tbody, data);
+    return;
+  }
+
   const head = ["流股"];
   COMPARE_FIELDS.forEach((f) => head.push(`${f.label} A`, `${f.label} B`, "Δ"));
   thead.innerHTML = `<tr>${head.map((h, i) =>
@@ -228,6 +242,51 @@ function renderCompare() {
     `${rows.length} 行 · 共同 ${s.common} · 有变化 ${s.changed}`
     + (s.only_base.length ? ` · 仅 A ${s.only_base.length}` : "")
     + (s.only_other.length ? ` · 仅 B ${s.only_other.length}` : "");
+}
+
+/* 设备对比:负荷/功率/级数/顶底温 各出一组 A/B/Δ,状态单独一列(变了就直接显示 A → B) */
+function renderCompareBlocks(thead, tbody, data) {
+  const head = ["设备", "类型", "状态"];
+  BLOCK_COMPARE_FIELDS.forEach((f) => head.push(`${f.label} A`, `${f.label} B`, "Δ"));
+  thead.innerHTML = `<tr>${head.map((h, i) =>
+    `<th class="${i === 0 ? "cmp-name" : i < 3 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
+
+  const q = state.filter.trim().toLowerCase();
+  const rows = (data.blocks || []).filter((r) => !q || r.name.toLowerCase().includes(q));
+
+  tbody.innerHTML = rows.map((r) => {
+    const sa = r.status ? r.status.base : null;
+    const sb = r.status ? r.status.other : null;
+    const statusCell = (sa === null || sa === undefined) && (sb === null || sb === undefined)
+      ? '<td class="muted">—</td>'
+      : sa !== sb
+        ? `<td>${sa === null || sa === undefined ? "—" : blockBadge(sa)}
+             <span class="muted">→</span>
+             ${sb === null || sb === undefined ? "—" : blockBadge(sb)}</td>`
+        : `<td>${blockBadge(sb)}</td>`;
+
+    const cells = [
+      `<td class="name cmp-name">${esc(r.name)}</td>`,
+      `<td>${esc(r.type || "")}</td>`,
+      statusCell,
+    ];
+    BLOCK_COMPARE_FIELDS.forEach((f) => {
+      const a = r.base ? r.base[f.key] : null;
+      const b = r.other ? r.other[f.key] : null;
+      const d = r.delta[f.key];
+      const cls = d === null || d === undefined || d === 0 ? "" : "changed";
+      cells.push(`<td class="num">${fmt(a, f.digits)}</td>`);
+      cells.push(`<td class="num">${fmt(b, f.digits)}</td>`);
+      cells.push(`<td class="num ${cls}">${fmtDelta(d, f.digits)}</td>`);
+    });
+    return `<tr>${cells.join("")}</tr>`;
+  }).join("");
+
+  const s = data.summary;
+  document.getElementById("count").textContent =
+    `${rows.length} 行 · 共同 ${s.block_common} · 有变化 ${s.block_changed}`
+    + (s.block_only_base.length ? ` · 仅 A ${s.block_only_base.length}` : "")
+    + (s.block_only_other.length ? ` · 仅 B ${s.block_only_other.length}` : "");
 }
 
 function renderTable() {
@@ -568,12 +627,34 @@ async function runCompare() {
     return;
   }
   state.compare.data = await api(`/api/compare?base=${baseId}&other=${otherId}`);
-  const s = state.compare.data.summary;
-  document.getElementById("compareSummary").textContent =
-    `共同流股 ${s.common} 条,有变化 ${s.changed} 条`
-    + (s.only_base.length ? `,仅 A:${s.only_base.slice(0, 5).join(" ")}` : "")
-    + (s.only_other.length ? `,仅 B:${s.only_other.slice(0, 5).join(" ")}` : "");
+  updateCompareSummary();
   renderCompare();
+}
+
+/* 顶部那行摘要跟着 流股 / 设备 切换,不然看设备表时还写着"共同流股 N 条" */
+function updateCompareSummary() {
+  const el = document.getElementById("compareSummary");
+  const data = state.compare.data;
+  if (!data) { el.textContent = ""; return; }
+  const s = data.summary;
+  if (state.compare.scope === "blocks") {
+    el.textContent = `共同设备 ${s.block_common} 个,有变化 ${s.block_changed} 个`
+      + (s.block_only_base.length ? `,仅 A:${s.block_only_base.slice(0, 5).join(" ")}` : "")
+      + (s.block_only_other.length ? `,仅 B:${s.block_only_other.slice(0, 5).join(" ")}` : "");
+  } else {
+    el.textContent = `共同流股 ${s.common} 条,有变化 ${s.changed} 条`
+      + (s.only_base.length ? `,仅 A:${s.only_base.slice(0, 5).join(" ")}` : "")
+      + (s.only_other.length ? `,仅 B:${s.only_other.slice(0, 5).join(" ")}` : "");
+  }
+}
+
+function setCompareScope(scope) {
+  state.compare.scope = scope === "blocks" ? "blocks" : "streams";
+  document.querySelectorAll("#compareScope button").forEach((b) =>
+    b.classList.toggle("active", b.dataset.scope === state.compare.scope));
+  updateCompareSummary();
+  renderCompare();
+  resetTableScroll();
 }
 
 /* ------------------------------------------------------------ 页签 */
@@ -594,6 +675,9 @@ function setTab(tab) {
   document.getElementById("compPanel").classList.add("hidden");
   renderBanner();
   if (tab === "compare") {
+    // 筛选框在对比页是隐藏的,不清空就会"看不见地"把对比行筛掉
+    state.filter = "";
+    document.getElementById("filter").value = "";
     fillCompareSelects();
     runCompare();
   } else {
@@ -603,11 +687,13 @@ function setTab(tab) {
 }
 
 /* 对比入口:平时是工具栏右上角一个小图标;进对比页后,同一行换成两个下拉框。
-   整行高度不变,所以切页签时下面的内容不会上下跳。 */
+   整行高度不变,所以切页签时下面的内容不会上下跳。
+   左边原本放筛选框的位置,在对比页换成「流股 / 设备」开关。 */
 function toggleCompareBar(isCompare) {
   document.getElementById("compareHint").classList.toggle("hidden", isCompare);
   document.getElementById("compareControls").classList.toggle("hidden", !isCompare);
   document.getElementById("filter").classList.toggle("hidden", isCompare);
+  document.getElementById("compareScope").classList.toggle("hidden", !isCompare);
   document.getElementById("count").classList.toggle("hidden", isCompare);
 }
 
@@ -867,6 +953,8 @@ function bindEvents() {
 
   document.getElementById("baseSelect").addEventListener("change", runCompare);
   document.getElementById("otherSelect").addEventListener("change", runCompare);
+  document.querySelectorAll("#compareScope button").forEach((b) =>
+    b.addEventListener("click", () => setCompareScope(b.dataset.scope)));
   document.getElementById("compareHint").addEventListener("click", () => {
     setTab("compare");
     location.hash = "compare";

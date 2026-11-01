@@ -345,6 +345,37 @@ td.name { font-weight: 550; }
 /* ---------- 对比页 ---------- */
 td.changed { color: var(--accent); font-weight: 600; }
 
+/* 流股 / 设备 切换:占住"筛选框"在对比页腾出来的位置,整行高度不变 */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.segmented button {
+  border: 0;
+  background: transparent;
+  padding: 5px 16px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+.segmented button + button { border-left: 1px solid var(--line); }
+.segmented button.active { background: var(--accent); color: #fff; font-weight: 550; }
+
+/* 对比表比较宽(设备那张有 18 列):设备名吸在左边,横向滚动时不会跟丢 */
+.cmp-name {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--panel);
+  box-shadow: 1px 0 0 var(--line);
+}
+tbody tr:hover .cmp-name { background: #f8fafc; }
+thead .cmp-name { background: #f9fafb; z-index: 3; }
+
 /* ---------- 塔剖面面板(右侧抽屉) ---------- */
 .column-panel {
   position: fixed;
