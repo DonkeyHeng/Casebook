@@ -346,6 +346,17 @@ tbody td {
 tbody tr:hover { background: #f8fafc; }
 tbody tr:last-child td { border-bottom: none; }
 
+/* 报错设备的波及范围:整行淡色 + 左侧一条色条。
+   数字本身不变色 —— 要能读清"这一行的数是不可用的",而不是"这行坏了" */
+tbody tr.row-err { background: #fff7f7; }
+tbody tr.row-err td:first-child { box-shadow: inset 3px 0 0 #ef4444; }
+tbody tr.row-warn { background: #fffdf5; }
+tbody tr.row-warn td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+tbody tr.row-err:hover { background: #ffeeee; }
+tbody tr.row-warn:hover { background: #fff8e6; }
+.impact-chip { text-decoration: none; }
+.impact-chip:hover { filter: brightness(.95); }
+
 td.num, th.num { text-align: right; }
 td.name { font-weight: 550; }
 

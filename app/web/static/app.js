@@ -16,6 +16,7 @@ const state = {
   filter: "",
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
+  impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
   column: null,
 };
 
@@ -26,13 +27,14 @@ const COMPARE_FIELDS = [
   { key: "vap_frac", label: "汽化率", digits: 3 },
 ];
 
-/* 设备对比只放 5 个字段:再加顶底温就 18 列了,再多看不过来 */
+/* 设备对比只放 6 个字段:热负荷/功率/级数/顶底温 + ΔH(焓平衡自检的原始量) */
 const BLOCK_COMPARE_FIELDS = [
   { key: "duty_kw", label: "热负荷 kW", digits: 2 },
   { key: "power_kw", label: "功率 kW", digits: 2 },
   { key: "nstage", label: "级数", digits: 0 },
   { key: "top_temp_c", label: "顶温 ℃", digits: 1 },
   { key: "bottom_temp_c", label: "底温 ℃", digits: 1 },
+  { key: "dh_kw", label: "ΔH kW", digits: 2 },
 ];
 
 const COLUMN_TYPE = /RadFrac|Absorber/;
@@ -184,6 +186,8 @@ function rowsForTab() {
 function renderStreams() {
   const cols = [
     { key: "name", label: "流股", cls: "name" },
+    // 报错设备碰过的流股在这里标出来:数据不可用 / 仅告警(点徽标跳到那台设备)
+    { key: "impact", label: "受影响", impact: true },
     { key: "temperature_c", label: "温度 ℃", num: true, digits: 2 },
     { key: "pressure_bar", label: "压力 bar", num: true, digits: 3 },
     { key: "mass_flow_kgh", label: "质量流量 kg/h", num: true, digits: 1 },
@@ -196,18 +200,24 @@ function renderStreams() {
     { key: "enthalpy_flow_kw", label: "能量流 kW", num: true, digits: 1 },
   ];
   const rows = rowsForTab();
+  const hits = impactMap();
   const thead = document.querySelector("#table thead");
   const tbody = document.querySelector("#table tbody");
   thead.innerHTML = `<tr>${cols.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr>`;
-  tbody.innerHTML = rows.map((row) => `<tr>${cols.map((c) => {
-    if (c.key === "name") {
-      // 流股名可点:按需看这条流股的组分(18 组分很贵,不能全量读)
-      return `<td class="name"><a href="#" class="stream-link" data-stream="${esc(row.name)}"
-                 title="看这条流股的组分">${esc(row.name)}</a></td>`;
-    }
-    const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
-    return `<td class="${c.cls || ""} ${c.num ? "num" : ""}">${value}</td>`;
-  }).join("")}</tr>`).join("");
+  tbody.innerHTML = rows.map((row) => {
+    const hit = hits.get(row.name);
+    const rowCls = hit ? (hit.severity === "error" ? " row-err" : " row-warn") : "";
+    return `<tr class="${rowCls.trim()}">${cols.map((c) => {
+      if (c.impact) return `<td>${impactChip(hit)}</td>`;
+      if (c.key === "name") {
+        // 流股名可点:按需看这条流股的组分(18 组分很贵,不能全量读)
+        return `<td class="name"><a href="#" class="stream-link" data-stream="${esc(row.name)}"
+                   title="看这条流股的组分">${esc(row.name)}</a></td>`;
+      }
+      const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
+      return `<td class="${c.cls || ""} ${c.num ? "num" : ""}">${value}</td>`;
+    }).join("")}</tr>`;
+  }).join("");
 
   tbody.querySelectorAll(".stream-link").forEach((a) => {
     a.addEventListener("click", (e) => {
@@ -215,7 +225,11 @@ function renderStreams() {
       openComposition(a.dataset.stream);
     });
   });
-  document.getElementById("count").textContent = `${rows.length} 行`;
+  let count = `${rows.length} 行`;
+  const sm = state.impact && state.impact.summary;
+  if (sm && sm.error) count += ` · ${sm.error} 条受报错影响`;
+  else if (sm && sm.warning) count += ` · ${sm.warning} 条仅告警`;
+  document.getElementById("count").textContent = count;
 }
 
 function renderBlocks() {
@@ -286,6 +300,29 @@ function balanceBadge(bstate) {
   return `<span class="badge ${cls}">${text}</span>`;
 }
 
+/* ------------------------------------------------------------ 报错波及范围 */
+
+/* 流股名 → {severity, blocks[]};没有报错/告警设备时就是空 Map */
+function impactMap() {
+  const map = new Map();
+  const rows = (state.impact && state.impact.streams) || [];
+  rows.forEach((s) => map.set(s.stream, s));
+  return map;
+}
+
+/* "受影响"那一格的徽标:点了直接跳到流程页并聚焦到出问题的设备 */
+function impactChip(item) {
+  if (!item) return '<span class="muted">—</span>';
+  const first = item.blocks[0];
+  const names = item.blocks.map((b) =>
+    `${b.block}(${b.direction === "in" ? "进" : "出"})`).join("、");
+  const isErr = item.severity === "error";
+  return `<a class="badge ${isErr ? "err" : "warn"} impact-chip"
+     href="#flow/${encodeURIComponent(first.block)}"
+     title="${esc(`${isErr ? "数据不可用" : "仅告警,可用但需注明"}:受 ${names} 影响`)}"
+     >${isErr ? "不可用" : "告警"}</a>`;
+}
+
 function renderCompare() {
   const thead = document.querySelector("#table thead");
   const tbody = document.querySelector("#table tbody");
@@ -331,31 +368,40 @@ function renderCompare() {
     + (s.only_other.length ? ` · 仅 B ${s.only_other.length}` : "");
 }
 
-/* 设备对比:负荷/功率/级数/顶底温 各出一组 A/B/Δ,状态单独一列(变了就直接显示 A → B) */
+/* 设备对比:负荷/功率/级数/顶底温/ΔH 各出一组 A/B/Δ;状态与焓平衡各一列(变了就显示 A → B) */
 function renderCompareBlocks(thead, tbody, data) {
-  const head = ["设备", "类型", "状态"];
+  const head = ["设备", "类型", "状态", "焓平衡"];
   BLOCK_COMPARE_FIELDS.forEach((f) => head.push(`${f.label} A`, `${f.label} B`, "Δ"));
   thead.innerHTML = `<tr>${head.map((h, i) =>
-    `<th class="${i === 0 ? "cmp-name" : i < 3 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
+    `<th class="${i === 0 ? "cmp-name" : i < 4 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
 
   const q = state.filter.trim().toLowerCase();
   const rows = (data.blocks || []).filter((r) => !q || r.name.toLowerCase().includes(q));
 
+  /* 判定不能相减,只能并排:一致就只显示一个徽标,变了才 A → B */
+  const pairCell = (a, b, render) => {
+    if ((a === null || a === undefined) && (b === null || b === undefined)) {
+      return '<td class="muted">—</td>';
+    }
+    if (a !== b) {
+      return `<td>${a === null || a === undefined ? "—" : render(a)}
+        <span class="muted">→</span>
+        ${b === null || b === undefined ? "—" : render(b)}</td>`;
+    }
+    return `<td>${render(b)}</td>`;
+  };
+
   tbody.innerHTML = rows.map((r) => {
     const sa = r.status ? r.status.base : null;
     const sb = r.status ? r.status.other : null;
-    const statusCell = (sa === null || sa === undefined) && (sb === null || sb === undefined)
-      ? '<td class="muted">—</td>'
-      : sa !== sb
-        ? `<td>${sa === null || sa === undefined ? "—" : blockBadge(sa)}
-             <span class="muted">→</span>
-             ${sb === null || sb === undefined ? "—" : blockBadge(sb)}</td>`
-        : `<td>${blockBadge(sb)}</td>`;
+    const ba = r.balance ? r.balance.base : null;
+    const bb = r.balance ? r.balance.other : null;
 
     const cells = [
       `<td class="name cmp-name">${esc(r.name)}</td>`,
       `<td>${esc(r.type || "")}</td>`,
-      statusCell,
+      pairCell(sa, sb, blockBadge),
+      pairCell(ba, bb, balanceBadge),
     ];
     BLOCK_COMPARE_FIELDS.forEach((f) => {
       const a = r.base ? r.base[f.key] : null;
@@ -1482,6 +1528,127 @@ async function renderFlow() {
   }
 }
 
+/* ------------------------------------------------------------ 流程图导出 */
+
+/* 导出的 SVG 是独立文件,读不到 style.css —— 所以把流程图用到的规则原样内联一份。
+   改 style.css 里 .flow-* 的颜色时记得同步这里(否则"屏幕上"和"导出的图"会不一样)。 */
+const FLOW_EXPORT_CSS = `
+  .flow-edge { fill: none; stroke: #94a3b8; stroke-width: 1.2; }
+  .flow-edge.dim { opacity: .1; }
+  .flow-edge.on { stroke: #2563eb; stroke-width: 2; }
+  .flow-label { font-size: 9.5px; fill: #6b7280; paint-order: stroke; stroke: #fff; stroke-width: 2.5px; }
+  .flow-node rect { fill: #fff; stroke: #cbd5e1; stroke-width: 1.2; }
+  .flow-node .node-body { fill: #fff; fill-opacity: .82; }
+  .flow-node .flow-stripe { fill: #9ca3af; stroke: none; }
+  .flow-node text { font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+    font-size: 14.5px; font-weight: 600; fill: #1f2328; }
+  .flow-node.st-ok rect { stroke: #86efac; }
+  .flow-node.st-ok .flow-stripe { fill: #15803d; }
+  .flow-node.st-bad rect { stroke: #fca5a5; }
+  .flow-node.st-bad .flow-stripe { fill: #b91c1c; }
+  .flow-node.st-no_data rect { stroke: #fcd34d; }
+  .flow-node.st-no_data .flow-stripe { fill: #b45309; }
+  .flow-node.st-skip rect { stroke: #d1d5db; }
+  .flow-node.st-skip .flow-stripe { fill: #cbd5e1; }
+  .flow-node.dim { opacity: .18; }
+  .flow-node.on .node-body { stroke: #93c5fd; stroke-width: 1.6; fill-opacity: .92; }
+  .flow-node.center .node-body { fill: #eff6ff; fill-opacity: 1; stroke: #2563eb; stroke-width: 2.6; }
+  .flow-node.center .flow-stripe { fill: #2563eb; }
+  .flow-node.center text { fill: #2563eb; font-weight: 700; }
+  .flow-boundary rect { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .flow-boundary text { font-size: 10.5px; fill: #6b7280; }
+`;
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/* 把当前视图(缩放/聚焦后的样子)做成一个能单独打开的 SVG 文本 */
+function flowExportSvg() {
+  const svg = flowSvgEl();
+  const view = state.flow.view;
+  if (!svg || !view || !state.flow.layout) return null;
+
+  const clone = svg.cloneNode(true);
+  clone.setAttribute("xmlns", SVG_NS);
+  clone.setAttribute("width", Math.round(view.w));
+  clone.setAttribute("height", Math.round(view.h));
+
+  const style = document.createElementNS(SVG_NS, "style");
+  style.textContent = FLOW_EXPORT_CSS;
+  // 白底:SVG 默认透明,贴进 Word/PPT 会变成看不清的"白线浮在白纸"
+  const bg = document.createElementNS(SVG_NS, "rect");
+  bg.setAttribute("x", view.x);
+  bg.setAttribute("y", view.y);
+  bg.setAttribute("width", view.w);
+  bg.setAttribute("height", view.h);
+  bg.setAttribute("fill", "#ffffff");
+  clone.insertBefore(bg, clone.firstChild);
+  clone.insertBefore(style, clone.firstChild);
+
+  return {
+    text: new XMLSerializer().serializeToString(clone),
+    width: Math.round(view.w),
+    height: Math.round(view.h),
+  };
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+function flowFileName(ext) {
+  const c = state.current;
+  const day = new Date().toISOString().slice(0, 10);
+  return `flow-case${c ? c.id : "x"}-${day}.${ext}`;
+}
+
+function flowExportMissing() {
+  alert("流程页还没有图。先读取一个工况,等流程图出来再导出。");
+}
+
+function exportFlowSvg() {
+  const out = flowExportSvg();
+  if (!out) { flowExportMissing(); return; }
+  downloadBlob(new Blob([out.text], { type: "image/svg+xml;charset=utf-8" }),
+    flowFileName("svg"));
+}
+
+/* PNG 走"SVG → Image → canvas → toBlob",不引第三方库;
+   2 倍像素是为了贴进报告/PPT 时不发虚 */
+function exportFlowPng() {
+  const out = flowExportSvg();
+  if (!out) { flowExportMissing(); return; }
+  const blob = new Blob([out.text], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const img = new Image();
+  img.onload = () => {
+    const scale = 2;
+    const canvas = document.createElement("canvas");
+    canvas.width = out.width * scale;
+    canvas.height = out.height * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+    canvas.toBlob((png) => {
+      if (png) downloadBlob(png, flowFileName("png"));
+      else alert("导出 PNG 失败:浏览器没能把这张图转成 PNG。可以改用「导出 SVG」。");
+    }, "image/png");
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    alert("导出 PNG 失败:浏览器渲染这张图时出错。可以改用「导出 SVG」。");
+  };
+  img.src = url;
+}
+
 /* ------------------------------------------------------------ 初始化 */
 
 function showEmpty(text) {
@@ -1523,14 +1690,17 @@ async function refreshCases(preferId = null) {
 }
 
 async function loadCase(id) {
-  const [detail, streams, blocks] = await Promise.all([
+  const [detail, streams, blocks, impact] = await Promise.all([
     api(`/api/cases/${id}`),
     api(`/api/cases/${id}/streams`),
     api(`/api/cases/${id}/blocks`),
+    // 波及范围是锦上添花:接口不通(老版本服务)不该拖垮整页
+    api(`/api/cases/${id}/impact`).catch(() => null),
   ]);
   state.current = detail;
   state.streams = streams;
   state.blocks = blocks;
+  state.impact = impact;
   const select = document.getElementById("caseSelect");
   if (select.value !== String(id)) select.value = String(id);
   hideEmpty();
@@ -1668,6 +1838,15 @@ function renderHome() {
           .filter(([, v]) => v !== null && v !== undefined)
           .map(([k, v]) => `${k}=${v}`).join(" ") || "—";
         return `<div class="kv"><span>状态码</span><span title="${esc(codes)}">${esc(codes)}</span></div>`;
+      })()}
+      ${(() => {
+        const sm = state.impact && state.impact.summary;
+        if (!sm || !sm.total) return "";
+        const parts = [];
+        if (sm.error) parts.push(`<b class="err-text">${sm.error}</b> 条不可用`);
+        if (sm.warning) parts.push(`<b class="warn-text">${sm.warning}</b> 条仅告警`);
+        return `<div class="kv"><span>受影响流股</span><span>${parts.join(" · ")}
+          <a href="#streams" class="inline-link">看流股表</a></span></div>`;
       })()}
     </section>
 
@@ -1817,6 +1996,8 @@ function bindEvents() {
     if (state.flow.layout) drawFlow();
   });
   document.getElementById("flowPanelClose").addEventListener("click", clearFlowFocus);
+  document.getElementById("flowExportSvg").addEventListener("click", exportFlowSvg);
+  document.getElementById("flowExportPng").addEventListener("click", exportFlowPng);
   window.addEventListener("resize", () => {
     if (state.page === "flow") fitFlow();
   });

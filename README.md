@@ -25,15 +25,15 @@ Aspen Plus 数据读取与分析工具。通过 COM 附着到已运行的 Aspen 
 
 | 页面 | 内容 |
 | --- | --- |
-| 首页 | 左栏第一项:工况信息、收敛横幅、规模(流股 / 设备 / 连接 / 塔)、**焓平衡四态**、异常模块;<br>导出 Excel / AI 分析包 / 删除工况也在这一页 |
+| 首页 | 左栏第一项:工况信息、收敛横幅、规模(流股 / 设备 / 连接 / 塔)、**焓平衡四态**、异常模块、**受影响流股数**(报错设备碰过几条);<br>导出 Excel / AI 分析包 / 删除工况也在这一页 |
 | 读取当前工况 | 左栏顶部蓝色按钮,**任何页面都能点**。点一下 = 附着到已打开的 Aspen、读全流程、存库、自动切到新工况。<br>读取约 10–30 s(1000 流股约 76 s),进度条里会显示**正在读哪个模型文件**;<br>失败时直接在页面上给中文提示(Aspen 没开 / 权限不一致 / 在沙箱里跑) |
 | 单位诊断 | 读完会告诉你**有多少字段因为单位不认识被留空**(老模型可能是 ENG:℉/psia/Btu·h⁻¹),<br>这类 `—` 不是模型没结果,是换算表没覆盖;有缺口时提示不自动消失 |
-| 流股 | 全部流股的温度/压力/质量流量/摩尔流量/汽化率/体积流量(已统一单位);**点流股名 → 看组成** |
+| 流股 | 全部流股的温度/压力/质量流量/摩尔流量/汽化率/体积流量(已统一单位);**点流股名 → 看组成**;<br>「受影响」列标出被报错设备碰过的流股(不可用 / 仅告警),点徽标跳到那台设备 |
 | 流股组成 | 右侧抽屉:每个组分的液相 x / 气相 y 摩尔分数 + 合计(正常应 ≈ 1)。<br>没读过时从当前打开的 Aspen 现读这一条(实测 0.26 s)并存入工况,之后直接取、不再连 Aspen |
 | 设备 | 全部设备,按"错误 → 告警 → 正常"排序,带 Aspen 原始提示;塔名可点开剖面;<br>**焓平衡四列**:ΔH / 参照 / 焓平衡(通过·超差·无法校验·不校验)/ 平衡说明 |
 | 焓平衡自检 | `ΔH = Σ出 − Σ入`(流股能量流)对设备热负荷 / 轴功率:Heater 1%、绝热设备 0.5%、压缩机和泵按效率比、换热器按冷侧;<br>塔和反应器不校验。口径在 `app/aspen/balance.py`,改规则后 `python -m tools.repair_cases --apply` 即可回算 |
-| 流程 | 设备连接图:全图自动分层(链路太长自动折行),滚轮缩放 / 拖动平移 / 双击适应窗口;<br>**点设备聚焦上下游 2 层**并弹出该设备的进出流股与焓平衡;<br>`#flow/设备名` 可直达某台设备;入口是左栏「流程」 |
-| 对比 | 任选两个工况,左上角「流股 / 设备」开关切换对比对象(两张表都显示 A 值 / B 值 / 差值);<br>设备对比看热负荷、功率、级数、顶温、底温,外加状态列(变了就显示 `正常 → 错误`);<br>设备名固定在左侧,列多横向滚也不会跟丢;入口是工具栏右上角的 **⇄** 图标 |
+| 流程 | 设备连接图:全图自动分层(链路太长自动折行),滚轮缩放 / 拖动平移 / 双击适应窗口;<br>**点设备聚焦上下游 2 层**并弹出该设备的进出流股与焓平衡;<br>`#flow/设备名` 可直达某台设备;**「导出 SVG / 导出 PNG」把当前视图存成图片**(白底、样式内联,可直接贴报告);入口是左栏「流程」 |
+| 对比 | 任选两个工况,左上角「流股 / 设备」开关切换对比对象(两张表都显示 A 值 / B 值 / 差值);<br>设备对比看热负荷、功率、级数、顶温、底温、**ΔH**,外加状态列(变了就显示 `正常 → 错误`)和**焓平衡列**(`通过 → 超差`);<br>设备名固定在左侧,列多横向滚也不会跟丢;入口是工具栏右上角的 **⇄** 图标 |
 | 塔剖面 | 右侧抽屉:逐板温度、压力、液/气流量、热负荷,含温度曲线和流量曲线;<br>**鼠标移到曲线上任意位置 → 浮出该级全部数值**,两张图共用一条准线,下方表格同步高亮对应行 |
 | 导出 Excel | 首页右上角「导出 Excel」→ 一个工作簿五张表:概要 / 流股(含焓)/ 设备(含 ΔH)/ 连接 / 塔剖面(给人看) |
 | AI 分析包 | 首页右上角「AI 分析包」→ 一个 zip,里面是 `README.md`(数据字典 + 这次运行的状态)、<br>`metrics.csv`(精简指标,含「焓平衡」一类)、`streams.csv` / `blocks.csv` / `connections.csv` /<br>`column_profiles.csv` / `composition.csv`(完整数据;后两个没有就不生成)、`case.json`。<br>纯文本、空值留空、单位已归一、原始值与原始单位保留(给 AI 读) |
@@ -88,13 +88,17 @@ aspen-insight/
       connect.py          附着(ROT → GetObject),失败给人话提示
       units.py            单位归一(C/bar/kg·h⁻¹/kW…)
       reader.py           读流股/组成/设备/收敛,并做三档判定
+      balance.py          焓平衡自检:ΔH vs 热负荷/轴功率(纯函数,可回算)
     store/
-      db.py               SQLite 工况库(cases/streams/stream_components/blocks/column_stages)
+      db.py               SQLite 工况库(cases/streams/stream_components/blocks/column_stages/connections)
+      flowsheet.py        连接关系 → 流程图数据(纯函数)
+      impact.py           报错设备 → 受影响流股(纯函数,「不可用 / 仅告警」)
   tools/
     bench.py              性能基准(测 COM 调用成本与规模曲线)
     column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
     make_icon.py          从源图生成 .ico(圆形抠底 + 7 个尺寸)
     repair_cases.py       按最新规则/单位表重算历史工况(不用回 Aspen 重读)
+    selftest.py           判定 / 焓平衡 / 波及范围的回归自测(不需要 Aspen)
     stop.py               按端口停止服务
   assets/app-icon.ico    图标源件(favicon 用它;桌面快捷方式用部署到 %LOCALAPPDATA% 的副本)
   docs/aspen-field-map.md 真实字段路径地图(实测)
@@ -136,9 +140,14 @@ python -m app.api               # 打开 http://127.0.0.1:8000
 # 3) 工具
 python -m tools.bench                  # 性能基准
 python -m tools.column_diag T0202      # 塔逐板剖面 + 异常标记
+python -m tools.selftest --db data/cases.db   # 判定/焓平衡回归自测(不需要 Aspen)
 python tools/stop.py 8000              # 停止服务(等价于桌面"停止"快捷方式)
 python probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
 ```
+
+> **改了 `judge()` 判定规则、`balance.py` 容差或单位表之后,先跑 `python -m tools.selftest --db data/cases.db`。**
+> 它会用 4 份真实工况当固定样本,校验"该 ok 的 ok、7 个告警不判 error、空模型判 empty、焓平衡逐台可重算";
+> 不过就说明规则被改坏了,或者改了规则但没跑 `python -m tools.repair_cases --apply`。
 
 > COM 必须在真实桌面会话执行;DSH 沙箱里 ROT 为空,会误报"Aspen 没开"。
 
@@ -181,6 +190,7 @@ python tools/make_icon.py "Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg" assets/a
 | GET | `/api/compare?base=1&other=2` | 逐流股 + 逐设备对比两个工况(A / B / 差值 / 状态变化) |
 | GET | `/api/cases/{id}/connections` | 设备 ↔ 流股连接关系(方向 / 换热器冷热侧 / 塔进料板 / 来源) |
 | GET | `/api/cases/{id}/flowsheet` | 流程图数据(节点 = 设备、边 = 设备间流股、边界进料 / 产品) |
+| GET | `/api/cases/{id}/impact` | 报错设备的波及范围(哪些流股的数据不可用 / 仅告警) |
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股/设备/连接/塔剖面/组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看) |

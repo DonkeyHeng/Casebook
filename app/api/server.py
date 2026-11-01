@@ -15,6 +15,7 @@
     GET  /api/cases/{id}/blocks      设备表
     GET  /api/cases/{id}/connections 设备 ↔ 流股连接关系(拓扑:进出流股 / 换热器分侧 / 塔进料板)
     GET  /api/cases/{id}/flowsheet   流程图数据(节点 = 设备、边 = 设备间流股、边界流股)
+    GET  /api/cases/{id}/impact      报错设备的波及范围(哪些流股的数据不能用)
     GET  /api/cases/{id}/export.xlsx      导出 Excel(给人看)
     GET  /api/cases/{id}/export.ai.zip    导出 AI 分析包(Markdown + CSV,给 AI 读)
 
@@ -42,7 +43,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
-from app.store import db, flowsheet
+from app.store import db, flowsheet, impact
 from app.api import read_job
 from app.api import window as win
 
@@ -305,6 +306,13 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 self._json(payload)
                 return
+            if parts[3] == "impact":
+                # 报错设备的进出口流股 —— 直接从 connections 反查,不用再连 Aspen
+                self._json(impact.build(
+                    [dict(r) for r in db.read_connections(conn, case_id)],
+                    [dict(r) for r in db.read_blocks(conn, case_id)],
+                ))
+                return
             if parts[3] == "columns":
                 if len(parts) == 4:
                     self._json([_row_to_dict(r) for r in db.list_columns(conn, case_id)])
@@ -514,8 +522,9 @@ class Handler(BaseHTTPRequestHandler):
 
         fields = ["temperature_c", "pressure_bar", "mass_flow_kgh",
                   "mole_flow_kmolh", "vap_frac", "vol_flow_m3h"]
-        # 设备要比的字段:负荷/功率/级数/顶底温;状态单独按"变没变"处理
-        block_fields = ["duty_kw", "power_kw", "nstage", "top_temp_c", "bottom_temp_c"]
+        # 设备要比的字段:负荷/功率/级数/顶底温 + ΔH(焓平衡自检);状态与焓平衡按"变没变"处理
+        block_fields = ["duty_kw", "power_kw", "nstage", "top_temp_c", "bottom_temp_c",
+                        "dh_kw", "ref_kw"]
 
         conn = db.open_db(self.db_path)
         try:
@@ -560,10 +569,13 @@ class Handler(BaseHTTPRequestHandler):
                     delta[f] = round(vb - va, 6) if isinstance(va, (int, float)) and isinstance(vb, (int, float)) else None
                 status_a = a.get("status") if a else None
                 status_b = b.get("status") if b else None
+                balance_a = a.get("balance_state") if a else None
+                balance_b = b.get("balance_state") if b else None
                 if a and b:
                     b_common += 1
                     if (any(d not in (None, 0) for d in delta.values())
-                            or status_a != status_b):
+                            or status_a != status_b
+                            or balance_a != balance_b):
                         b_changed += 1
                 block_rows.append({
                     "name": name,
@@ -572,6 +584,8 @@ class Handler(BaseHTTPRequestHandler):
                     "other": {f: b.get(f) for f in block_fields} if b else None,
                     "delta": delta,
                     "status": {"base": status_a, "other": status_b},
+                    # 焓平衡判定不能相减,只能并排看:A 通过 → B 超差 才算"变了"
+                    "balance": {"base": balance_a, "other": balance_b},
                 })
 
             self._json({
