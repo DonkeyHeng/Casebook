@@ -34,6 +34,7 @@ Aspen Plus 数据读取与分析工具。通过 COM 附着到已运行的 Aspen 
 | 塔剖面 | 右侧抽屉:逐板温度、压力、液/气流量、热负荷,含温度曲线和流量曲线;<br>**鼠标移到曲线上任意位置 → 浮出该级全部数值**,两张图共用一条准线,下方表格同步高亮对应行 |
 | 导出 Excel | 右上角「导出 Excel」→ 一个工作簿四张表:概要 / 流股 / 设备 / 塔剖面(给人看) |
 | AI 分析包 | 右上角「AI 分析包」→ 一个 zip,里面是 `README.md`(数据字典 + 这次运行的状态)、<br>`metrics.csv`(精简指标)、`streams.csv` / `blocks.csv` / `column_profiles.csv` / `composition.csv`(完整数据;<br>后两个没有就不生成)、`case.json`。纯文本、空值留空、单位已归一、原始值与原始单位保留(给 AI 读) |
+| 删除工况 | 右上角红色「删除工况」:二次确认框里写明模型名 / 读取时间 / 规模,避免删错;<br>明细(流股/设备/塔剖面/组成)一起删,删完自动切到剩下的最新工况 |
 | 退出 | 右上角「退出」:二次确认后停掉后台服务并关闭窗口(默认用浏览器"应用窗口"模式打开,所以关得掉);<br>也可以用桌面 `aspen-insight 停止` 快捷方式 |
 | 窗口记忆 | 记住上次的窗口大小、位置、是否最大化,下次打开原样恢复;点窗口右上角 ✕ 会自动停服务 |
 | 问题横幅 | 第一行就是**结论**:"本次运行有 2 个模块报错 —— 不建议用它算收率 / 能耗 / 做工况对比";<br>下面才是明细(状态码 + 模块报错原文),右边缘「收起 / 展开」只收起明细、结论仍在;对比页也保留这块高度,切页签顶部不跳 |
@@ -175,6 +176,7 @@ python tools/make_icon.py "Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg" assets/a
 | POST | `/api/read` | 起一次后台读取;已有任务在跑时返回 409 |
 | GET | `/api/read/status` | 读取进度/结果(前端每 0.6 s 轮询) |
 | GET | `/api/compare?base=1&other=2` | 逐流股 + 逐设备对比两个工况(A / B / 差值 / 状态变化) |
+| DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股/设备/塔剖面/组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看) |
 | GET | `/api/cases/{id}/export.ai.zip` | 导出 AI 分析包(给 AI 读) |

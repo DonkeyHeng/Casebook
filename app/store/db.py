@@ -349,6 +349,15 @@ def read_all_composition(conn: sqlite3.Connection, case_id: int) -> list[sqlite3
     ).fetchall()
 
 
-def delete_case(conn: sqlite3.Connection, case_id: int) -> None:
+def delete_case(conn: sqlite3.Connection, case_id: int) -> dict:
+    """删掉一个工况及其全部明细,返回各表删除的行数。
+
+    明细表显式删除,不依赖 `ON DELETE CASCADE`(外键 pragma 在不同连接上未必生效)。
+    """
+    counts: dict[str, int] = {}
+    for table in ("stream_components", "column_stages", "blocks", "streams"):
+        cur = conn.execute(f"DELETE FROM {table} WHERE case_id = ?", (case_id,))
+        counts[table] = cur.rowcount
     conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
     conn.commit()
+    return counts

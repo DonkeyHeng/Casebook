@@ -181,6 +181,44 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        """DELETE /api/cases/{id} —— 删掉一个工况及其明细(页面上的「删除工况」)。"""
+        path = unquote(urlparse(self.path).path)
+        parts = [p for p in path.split("/") if p]
+        try:
+            if len(parts) == 3 and parts[:2] == ["api", "cases"]:
+                self._delete_case(parts[2])
+                return
+            self._error("未知接口", 404)
+        except BrokenPipeError:
+            pass
+        except Exception as exc:
+            self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
+
+    def _delete_case(self, raw_id: str) -> None:
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+
+        conn = db.open_db(self.db_path)
+        try:
+            case = db.get_case(conn, case_id)
+            if case is None:
+                self._error(f"没有 id={case_id} 的工况", 404)
+                return
+            removed = db.delete_case(conn, case_id)
+            self._json({
+                "ok": True,
+                "deleted": case_id,
+                "model_name": case["model_name"],
+                "read_at": case["read_at"],
+                "removed": removed,
+            })
+        finally:
+            conn.close()
+
     def _start_read(self) -> None:
         """POST /api/read —— 起一个后台读取任务,立刻返回当前状态。
 

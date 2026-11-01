@@ -41,6 +41,16 @@ async function api(path) {
   return res.json();
 }
 
+/* DELETE 单独一个:api() 只做 GET,别为了它把方法参数塞进去到处传 */
+async function apiDelete(path) {
+  const res = await fetch(path, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `请求失败:${res.status}`);
+  }
+  return res.json();
+}
+
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -920,10 +930,11 @@ function hideEmpty() {
   document.getElementById("empty").classList.add("hidden");
 }
 
-/* 没有工况时两个导出按钮点了也没反应,不如直接禁用,免得像"坏了" */
-function setExportEnabled(on) {
+/* 没有工况时三个按钮点了也没反应,不如直接禁用,免得像"坏了" */
+function setCaseButtonsEnabled(on) {
   document.getElementById("exportBtn").disabled = !on;
   document.getElementById("aiPackBtn").disabled = !on;
+  document.getElementById("deleteBtn").disabled = !on;
 }
 
 async function refreshCases(preferId = null) {
@@ -939,7 +950,7 @@ async function refreshCases(preferId = null) {
 
   fillCompareSelects();
   if (!state.cases.length) showEmpty();
-  setExportEnabled(!!state.current && state.cases.length > 0);
+  setCaseButtonsEnabled(!!state.current && state.cases.length > 0);
 }
 
 async function loadCase(id) {
@@ -954,7 +965,7 @@ async function loadCase(id) {
   const select = document.getElementById("caseSelect");
   if (select.value !== String(id)) select.value = String(id);
   hideEmpty();
-  setExportEnabled(true);
+  setCaseButtonsEnabled(true);
   if (state.tab !== "compare") renderTable();
   renderBanner();
   resetTableScroll();   // 换工况也从第一行看起
@@ -969,6 +980,47 @@ function applyHashTab() {
     b.classList.toggle("active", b.dataset.tab === hash));
   toggleCompareBar(hash === "compare");
   return hash;
+}
+
+/* 删除当前工况:不可恢复,所以确认框里把"删的是哪一个"写全(模型名 + 时间 + 规模)*/
+async function deleteCurrentCase() {
+  const c = state.current;
+  if (!c) return;
+
+  const msg = `删除工况 #${c.id}?\n\n`
+    + `模型:${c.model_name || "-"}\n`
+    + `读取时间:${c.read_at || "-"}\n`
+    + `规模:${c.stream_count} 流股 / ${c.block_count} 设备\n\n`
+    + "明细(流股/设备/塔剖面/组成)会一起删除,不可恢复 —— 要用得重新读一次 Aspen。";
+  if (!confirm(msg)) return;
+
+  const btn = document.getElementById("deleteBtn");
+  btn.disabled = true;
+  btn.textContent = "删除中…";
+  try {
+    await apiDelete(`/api/cases/${c.id}`);
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = "删除工况";
+    alert(`删除失败:${err.message}`);
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = "删除工况";
+
+  // 删完切到剩下的最新工况;一条都不剩就回到空态
+  state.current = null;
+  state.streams = [];
+  state.blocks = [];
+  await refreshCases(null);
+  if (state.cases.length) {
+    await loadCase(state.cases[0].id);
+  } else {
+    renderBanner();
+    renderTable();
+    showEmpty();
+    setCaseButtonsEnabled(false);
+  }
 }
 
 /* 退出:停服务并关掉窗口(应用窗口模式下 window.close() 生效) */
@@ -1036,6 +1088,7 @@ function bindEvents() {
   });
 
   document.getElementById("quitBtn").addEventListener("click", quitApp);
+  document.getElementById("deleteBtn").addEventListener("click", deleteCurrentCase);
 }
 
 async function init() {
