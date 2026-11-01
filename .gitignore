@@ -34,3 +34,10 @@ venv/
 *.sqlite3
 *.log
 data/window.json
+
+# 标准规范 PDF(21 MB,只在本地查;规则已摘进 docs/pipe-class-codes.md)
+管路选型/
+*.pdf
+
+# 第三方安装包(如"中联水泵选型安装包.exe",232 MB)
+*.exe
