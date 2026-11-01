@@ -1,4 +1,4 @@
-﻿"""把 Gemini 生成的圆形徽章做成 Windows 图标(.ico)。
+r"""把 Gemini 生成的圆形徽章做成 Windows 图标(.ico)。
 
 为什么不是"直接另存为 ico"
 ------------------------
@@ -22,16 +22,39 @@ Pillow 会把**每个尺寸都写成 PNG 压缩条目**。浏览器(Chromium 读
 
 用法:
     python tools/make_icon.py "Gemini_Generated_Image_xxx.jpg" assets/app-icon.ico
+
+图标为什么要**再复制一份到 %LOCALAPPDATA%**
+----------------------------------------
+实测(2026-11-01):同一个 .ico,放在项目目录 `<projects-root>\...\assets\` 下,
+资源管理器取不到 —— 桌面快捷方式显示通用的白色文件图标;
+复制到 `%LOCALAPPDATA%\aspen-insight\` 后立刻正常。
+
+疑因:项目目录带 DSH 沙箱加的 Deny ACE(`Everyone: DeleteSubdirectoriesAndFiles`),
+Explorer 走那条"从 .lnk 的 IconLocation 取图标"的路径时失败。
+（GDI+、ExtractIconEx、SHDefExtractIcon 在我的进程里都读得出来,唯独 Explorer 不认,极难查。）
+
+结论:**桌面快捷方式必须指向项目目录之外的副本**,所以这个脚本会顺手部署一份。
 """
 from __future__ import annotations
 
+import os
+import shutil
 import struct
 import sys
 
 from PIL import Image
 
-# 这些尺寸覆盖:桌面小图标(16)、列表(24/32)、中等(48)、大图标(64/128)、超大(256)
-SIZES = [16, 24, 32, 48, 64, 128, 256]
+# 尺寸只做到 128。
+#
+# 256×256 惯例上要存成 PNG 压缩条目,存成 BMP 是非标准写法(单张就 270 KB)。
+# 实测那条不是白页的原因(曾误判过),但既然没有 256 时 Windows 会拿 128 放大、
+# 观感差别很小,就先保持 6 个尺寸,少一个变量。
+SIZES = [16, 24, 32, 48, 64, 128]
+
+# 桌面快捷方式用这份副本(项目目录里那份只给网页 favicon 用)
+DEPLOY_DIR = os.path.join(
+    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "aspen-insight"
+)
 
 
 def load_and_cut(path: str) -> Image.Image:
@@ -162,6 +185,18 @@ def main() -> int:
     png = dst.rsplit(".", 1)[0] + "_256.png"
     images[-1].save(png)
     print(f"预览图 {png}")
+
+    # 部署一份到项目目录之外 —— 桌面快捷方式必须指向这一份,否则 Explorer 取不到图标。
+    # 部署失败不影响图标生成(比如在沙箱里跑,写用户目录会被拒),所以只警告。
+    try:
+        os.makedirs(DEPLOY_DIR, exist_ok=True)
+        deployed = os.path.join(DEPLOY_DIR, os.path.basename(dst))
+        shutil.copyfile(dst, deployed)
+        print(f"已部署到 {deployed}")
+        print("  桌面快捷方式的 IconLocation 要指向这个路径(项目目录里那份只给 favicon 用)")
+    except OSError as exc:
+        print(f"⚠️ 没能部署到 {DEPLOY_DIR}:{exc}")
+        print(f"   桌面快捷方式需要图标放在项目目录之外,请手动把 {dst} 复制过去")
     return 0
 
 

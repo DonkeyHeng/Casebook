@@ -86,7 +86,7 @@ aspen-insight/
     column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
     make_icon.py          从源图生成 .ico(圆形抠底 + 7 个尺寸)
     stop.py               按端口停止服务
-  assets/app-icon.ico  图标:桌面快捷方式 + 网页 favicon 共用
+  assets/app-icon.ico    图标源件(favicon 用它;桌面快捷方式用部署到 %LOCALAPPDATA% 的副本)
   docs/aspen-field-map.md 真实字段路径地图(实测)
   model/                  Aspen 模型与它的运行文件(见 model/README.md)
   data/cases.db           本地工况库(运行时生成,不入库)
@@ -136,21 +136,31 @@ python probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
 
 <img src="assets/app-icon_256.png" width="120" alt="aspen-insight 图标">
 
-`assets/app-icon.ico` 同时用在两处:**桌面快捷方式的图标**、**网页的 favicon**
-(所以浏览器"应用窗口"在任务栏里也是这张脸)。
+图标用在两处:**桌面快捷方式**和**网页 favicon**(所以浏览器"应用窗口"在任务栏里也是这张脸)。
 
-源图是根目录的 `Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg`(2048²,白底圆形徽章)。
-要改图标就重跑:
+注意它们用的是**两份拷贝**:
+
+| 谁用 | 路径 |
+| --- | --- |
+| 桌面快捷方式 | `%LOCALAPPDATA%\aspen-insight\app-icon.ico`(**必须放在项目目录之外**) |
+| 网页 favicon | 仓库里的 `assets/app-icon.ico` |
+
+为什么快捷方式不能指项目目录:实测同一个文件放在项目目录下,资源管理器取不到图标,
+桌面会显示成通用的白色文件图标;复制到用户目录后立刻正常。
+
+源图是根目录的 `Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg`(2048²,白底圆形徽章)。改图标就重跑:
 
 ```bash
 python tools/make_icon.py "Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg" assets/app-icon.ico
 ```
 
-脚本按**圆的几何**把圆外白底抠成透明 —— 不做全局"白→透明",否则徽章上
-"DEEPSEEK / ASPEN PLUS"的白色笔画会被一起镂空;然后生成 16/24/32/48/64/128/256 七个尺寸。
+脚本做三件事:按**圆的几何**把圆外白底抠成透明(不做全局"白→透明",否则徽章上
+"DEEPSEEK / ASPEN PLUS"的白字会被一起镂空)、生成 16/24/32/48/64/128 六个尺寸、
+把成品部署一份到 `%LOCALAPPDATA%\aspen-insight\`。
 
-> 快捷方式里存的是**绝对路径**。项目目录一旦搬家,图标会变回默认样式,
-> 重新设一次 `IconLocation` 即可(`WScript.Shell` → `CreateShortcut` → `.Save()`)。
+> 快捷方式里存的是**绝对路径**。项目搬家或部署副本被删,图标会变回默认样式,
+> 重跑上面的命令、再把 `IconLocation` 指过去即可
+> (`WScript.Shell` → `CreateShortcut` → `.Save()`)。
 
 ### 接口(给排错用)
 
