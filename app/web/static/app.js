@@ -141,20 +141,16 @@ function bannerVerdict(c) {
     return "没有报错 —— 这份数据可以用来做定量分析(算收率、比能耗、做工况对比)。";
   }
   if (c.severity === "warning") {
-    return warns
-      ? `有 ${warns} 个模块告警、没有报错 —— 数据可用,引用时注明告警项即可。`
-      : "有告警、没有报错 —— 数据可用,引用时注明告警项即可。";
+    const bits = [];
+    if (warns) bits.push(`${warns} 个模块告警`);
+    if (badTears.length) bits.push(`${badTears.length} 条撕裂流误差超过容差`);
+    const what = bits.length ? bits.join(" + ") : "有情况需要核对";
+    return `${what}、没有报错 —— 数据可用,引用时注明即可。`;
   }
-  // error:说清楚到底错在哪(模块 / 撕裂流 / 收敛块),别只丢一句"状态码显示有错误"
+  // error:说清楚到底错在哪。撕裂流已经不参与 error 判定(见 reader.judge 的注释),
+  // 剩下的硬信号只有模块级 BLKSTAT=1 和 CVSTAT≠0。
   if (errors) {
     return `本次运行有 ${errors} 个模块报错 —— 不建议用它算收率 / 能耗 / 做工况对比;其余流股只作定性参考。`;
-  }
-  if (badTears.length) {
-    const worst = badTears.slice().sort(
-      (a, b) => (b.error / b.tolerance) - (a.error / a.tolerance))[0];
-    const times = Math.round(worst.error / worst.tolerance);
-    return `${badTears.length} 条撕裂流没有收敛(闭环回路没算平,最差的是 ${worst.stream},`
-      + `误差是容差的 ${times} 倍)—— 物料平衡对不上,不建议用它做定量结论。`;
   }
   return "收敛块自己报了错(CVSTAT 非 0)—— 不建议用这份数据做定量结论。";
 }

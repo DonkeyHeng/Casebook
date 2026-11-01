@@ -201,10 +201,19 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
     # 实测(2026-11-01):一个 CVSTAT=0、UOSSTAT=0、78 个模块全 status=0 的样本模型,
     # PER_ERROR 仍然是 1;而真有模块报错的模型 PER_ERROR 也是 1 —— 完全没有区分度。
 
+    # 撕裂流:只作提示,**不判 error**。
+
+    # T3 的 INFO-VAR 误差 1.656 > 容差 0.0393,而 Aspen 控制面板只报
+    # "The following Unit Operation blocks were completed with warnings: M0302 E0204 R0301",
+    # CVSTAT=0 —— **Aspen 自己不认为这条回路没收敛**。
+    # 原因大概率是 ERR/ERR_TOL 的可比性随变量类型变化(INFO-VAR 这种"信息变量"尤其),
+    # 所以只能列出原始数值让人自己判断,不能替 Aspen 下结论。
     for tear in tears:
         err, tol = tear.get("error"), tear.get("tolerance")
         if isinstance(err, (int, float)) and tol and err > tol:
-            hard.append(f"撕裂流 {tear.get('stream')} 未收敛(误差 {err} > {tol})")
+            soft.append(
+                f"撕裂流 {tear.get('stream')}({tear.get('variable')})误差 {err} > 容差 {tol}"
+                " —— Aspen 控制面板没有报错,请自行核对这条回路的收敛设置")
 
     reasons = hard + soft
     if hard:
