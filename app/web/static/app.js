@@ -78,6 +78,7 @@ const SEVERITY = {
   ok: { cls: "ok", text: "收敛" },
   warning: { cls: "warn", text: "有告警" },
   error: { cls: "err", text: "有错误" },
+  empty: { cls: "empty", text: "没有结果" },
 };
 
 function badge(severity) {
@@ -137,6 +138,9 @@ function bannerVerdict(c) {
   const badTears = (c.tear || []).filter(
     (t) => typeof t.error === "number" && t.tolerance && t.error > t.tolerance);
 
+  if (c.severity === "empty") {
+    return "模型里没有任何结果 —— 这份文件没在 Aspen 里运行过(或结果为空),先把仿真跑完再读取。";
+  }
   if (c.severity === "ok") {
     return "没有报错 —— 这份数据可以用来做定量分析(算收率、比能耗、做工况对比)。";
   }

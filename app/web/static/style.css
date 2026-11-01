@@ -113,6 +113,7 @@ select {
 .read-status.done    { color: var(--ok);  border-color: #bbf7d0; background: #f0fdf4; }
 .read-status.done.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
 .read-status.done.err  { color: var(--err);  border-color: #fecaca; background: #fef2f2; }
+.read-status.done.empty { color: #374151; border-color: #d1d5db; background: #f3f4f6; }
 
 /* 失败提示是多行文本(哪几项要检查),必须原样换行显示 */
 .read-status.error {
@@ -196,6 +197,8 @@ select {
 .banner.err, .banner.error { background: #fef2f2; border-color: #fecaca; color: var(--err); }
 .banner.warn, .banner.warning { background: #fffbeb; border-color: #fde68a; color: var(--warn); }
 .banner.ok { background: #f0fdf4; border-color: #bbf7d0; color: var(--ok); }
+/* 没 Run 过的模型:灰色 —— 既不是"好",也不是"模型有错" */
+.banner.empty { background: #f3f4f6; border-color: #d1d5db; color: #374151; }
 
 .banner-head {
   display: flex;

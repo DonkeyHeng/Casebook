@@ -67,16 +67,16 @@ def repair_case(conn, case, apply: bool) -> dict:
         raw = _json(b.get("raw_json"), {})
         b["raw"] = raw
         for key, fields, quantity in BLOCK_COLUMNS:
-            if b.get(key) is not None:
-                continue
+            # 总是重算:换算因子可能改过(2026-11-01:cal 从 4.184 改成 4.1868 IT 卡)
             for field in fields:
                 item = raw.get(field)
                 if not item or item.get("value") is None:
                     continue
                 new = units.convert(quantity, item["value"], item.get("unit") or "")
                 if new is not None:
-                    b[key] = new
-                    filled_blocks += 1
+                    if b.get(key) != new:
+                        b[key] = new
+                        filled_blocks += 1
                     break
 
     # ---- 2) 重算判定
@@ -85,6 +85,8 @@ def repair_case(conn, case, apply: bool) -> dict:
     verdict = reader.judge(codes, case["errtxt"], tears,
                            [{"name": b["name"], "status": b["status"],
                              "message": b["message"]} for b in blocks])
+    # 没 Run 过的模型单独一档(和 read_case 里同一套规则)
+    reader.mark_empty(verdict, reader.value_coverage(streams), case["run_id"])
 
     # ---- 3) 重算单位缺口(用回填之后的数值)
     gaps = reader.unit_gaps(streams, blocks)

@@ -32,7 +32,7 @@ import zipfile
 
 from app.store import db
 
-SEVERITY_TEXT = {"ok": "收敛", "warning": "有告警", "error": "有错误"}
+SEVERITY_TEXT = {"ok": "收敛", "warning": "有告警", "error": "有错误", "empty": "没有结果"}
 STATUS_TEXT = {0: "正常", 1: "错误", 2: "告警"}
 
 # 状态码含义来自实测(docs/aspen-field-map.md 第 6 节),不是查文档猜的。
@@ -334,7 +334,13 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     # --- 1 ---
     w("## 1. 先读这一节:这份数据能不能用")
     w("")
-    if converged:
+    if severity == "empty":
+        w("**这份工况没有任何结果** —— 读取时 Aspen 里的模型还没有运行过(或结果为空)。")
+        w("")
+        w("> 数据包里的数值列基本全是空的,先别拿它做分析。")
+        w("> 请先在 Aspen 里 Run 一次,再重新读取一次工况。")
+        w("")
+    elif converged:
         w("这次运行**没有报错**,流股与设备结果可以用于定量分析。")
     elif severity == "warning":
         w("这次运行**有告警**(模块本身没有报错)。")

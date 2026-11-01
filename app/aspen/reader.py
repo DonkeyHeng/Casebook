@@ -391,6 +391,48 @@ def read_column_profiles(session, blocks: list[dict] | None = None) -> list[dict
     return out
 
 
+# ---------------------------------------------------------------- 结果完整性
+
+# 流股上"有结果才会有值"的字段
+STREAM_VALUE_KEYS = ("temperature_c", "pressure_bar", "mass_flow_kgh",
+                     "mole_flow_kmolh", "vap_frac", "vol_flow_m3h")
+
+# 低于这个覆盖率就当"模型没有结果"(实测未运行的模型是 0%)
+EMPTY_COVERAGE = 0.1
+
+
+def value_coverage(streams: list[dict]) -> float:
+    """流股数值的填空率:0 = 一条值都没有(模型没跑过)。"""
+    total = len(streams) * len(STREAM_VALUE_KEYS)
+    if not total:
+        return 1.0
+    filled = sum(1 for s in streams for k in STREAM_VALUE_KEYS if s.get(k) is not None)
+    return filled / total
+
+
+def mark_empty(convergence: dict, coverage: float, run_id=None) -> dict:
+    """没 Run 过的模型:单独判成 "empty",不能给绿勾。
+
+    2026-11-01 实测:打开一个从没 Run 过的 .bkp 直接读 ——
+    Run-Status 的 8 个状态码全 None、run_id 拿不到、630 个流股字段 **0% 有值**,
+    但旧逻辑是"没有信号 = 没有问题",于是判成 ok / 可用于定量分析:
+    一张全空的表配一个"收敛"的绿勾,比报错更误导人。
+    """
+    if convergence.get("severity") == "error":
+        return convergence          # 已经有硬错误,不用再叠一层
+    if coverage >= EMPTY_COVERAGE:
+        return convergence
+
+    hint = "Run-Status 为空" if not str(run_id or "").strip() else "Run-Status 有值但数值读不到"
+    convergence["severity"] = "empty"
+    convergence["converged"] = False
+    convergence["reasons"] = [
+        f"模型没有结果(流股数值只有 {coverage:.0%} 可读,{hint})"
+        " —— 请先在 Aspen 里 Run 一次,再重新读取"
+    ] + list(convergence.get("reasons") or [])
+    return convergence
+
+
 # ---------------------------------------------------------------- 单位诊断
 
 def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
@@ -456,6 +498,8 @@ def read_case(session, include_composition: bool = False,
     # 收敛判定要用到模块级状态,所以必须放在 blocks 之后
     phase("判定收敛状态")
     convergence = read_convergence(session, blocks)
+    # 再补一刀:模型可能根本没运行过 —— 那种情况"没有任何信号",不能当 ok
+    mark_empty(convergence, value_coverage(streams), convergence.get("run", {}).get("RUNID"))
     phase("读取塔板剖面")
     profiles = read_column_profiles(session, blocks) if include_profiles else []
 
