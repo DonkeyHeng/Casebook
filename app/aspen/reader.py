@@ -364,6 +364,47 @@ def read_column_profiles(session, blocks: list[dict] | None = None) -> list[dict
     return out
 
 
+# ---------------------------------------------------------------- 单位诊断
+
+def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
+    """统计"有原始值、但单位不认识导致换算不出来"的字段。
+
+    为什么单独统计:老模型的单位集未必是 `METCBAR`(可能是 ENG:℉ / psia / lb·h⁻¹ / Btu·h⁻¹)。
+    `units.convert` 遇到不认识的单位一律返回 None(宁缺勿错),表格上就是一列 `—`。
+    用户看到大片空值时,必须能分清是"模型没结果"还是"工具不认识这个单位" ——
+    这两件事的处置完全不同。
+    """
+    gaps: list[dict] = []
+
+    for s in streams:
+        raw = s.get("raw") or {}
+        for key, field, _quantity in STREAM_FIELDS:
+            item = raw.get(field)
+            if item and item.get("value") is not None and s.get(key) is None:
+                gaps.append({"scope": "stream", "name": s["name"],
+                             "field": field, "unit": item.get("unit") or ""})
+
+    for b in blocks:
+        raw = b.get("raw") or {}
+        for key, fields in (("duty_kw", BLOCK_DUTY_FIELDS),
+                            ("power_kw", BLOCK_POWER_FIELDS),
+                            ("area_m2", BLOCK_AREA_FIELDS)):
+            if b.get(key) is not None:
+                continue
+            for field in fields:
+                item = raw.get(field)
+                if item and item.get("value") is not None:
+                    gaps.append({"scope": "block", "name": b["name"],
+                                 "field": field, "unit": item.get("unit") or ""})
+                    break
+
+    return {
+        "count": len(gaps),
+        "units": sorted({g["unit"] for g in gaps if g["unit"]}),
+        "samples": gaps[:20],
+    }
+
+
 # ---------------------------------------------------------------- 总入口
 
 def read_case(session, include_composition: bool = False,
@@ -409,6 +450,7 @@ def read_case(session, include_composition: bool = False,
         "blocks": blocks,
         "columns": profiles,
         "components": components,
+        "unit_gaps": unit_gaps(streams, blocks),
         "stats": {
             "stream_count": len(streams),
             "block_count": len(blocks),

@@ -96,8 +96,20 @@ select {
 .read-status.running { color: #1d4ed8; border-color: #bfdbfe; background: #f5f9ff; }
 .read-status.running.stalled { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
 
-/* 卡住提示:独占一行,不能把进度条挤变形 */
+/* 卡住提示 / 单位警告:独占一行,不能把进度条挤变形 */
 .read-hint { flex: 1 0 100%; line-height: 1.75; font-size: 12.5px; }
+.read-hint.warn { color: var(--warn); }
+
+/* 正在读的模型文件名:同时开着几个模型时,靠它发现"读错对象了" */
+.read-model {
+  flex: 0 1 auto;
+  max-width: 260px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: .75;
+}
 .read-status.done    { color: var(--ok);  border-color: #bbf7d0; background: #f0fdf4; }
 .read-status.done.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
 .read-status.done.err  { color: var(--err);  border-color: #fecaca; background: #fef2f2; }

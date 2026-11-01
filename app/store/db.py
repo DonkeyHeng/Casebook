@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS cases (
     tear_json     TEXT,          -- 撕裂流误差
     block_errors  TEXT,          -- 报错模块名(JSON 列表)
     block_warnings TEXT,         -- 告警模块名(JSON 列表)
+    unit_gaps     INTEGER,       -- 有原始值但单位不认识、被迫留空的字段数
+    unit_gaps_json TEXT,         -- 上述字段的明细(JSON:单位清单 + 前 20 条样本)
     stream_count  INTEGER,
     block_count   INTEGER,
     elapsed_sec   REAL
@@ -108,7 +110,22 @@ def open_db(path: str) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+# 老库升级:CREATE TABLE IF NOT EXISTS 不会给已有表加列,只能逐个补
+_ADDED_COLUMNS = (
+    ("unit_gaps", "INTEGER"),
+    ("unit_gaps_json", "TEXT"),
+)
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    have = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
+    for name, ddl in _ADDED_COLUMNS:
+        if name not in have:
+            conn.execute(f"ALTER TABLE cases ADD COLUMN {name} {ddl}")
 
 
 # ---------------------------------------------------------------- 写入
@@ -119,14 +136,16 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     model = case.get("model", {})
     run = conv.get("run", {})
     stats = case.get("stats", {})
+    gaps = case.get("unit_gaps") or {}
 
     cur = conn.execute(
         """
         INSERT INTO cases (model_path, model_name, read_at, run_id, run_date, run_user,
                            aspen_version, severity, converged, reasons_json, errtxt,
                            status_json, tear_json, block_errors, block_warnings,
+                           unit_gaps, unit_gaps_json,
                            stream_count, block_count, elapsed_sec)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             model.get("path"),
@@ -144,6 +163,8 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
             json.dumps(conv.get("tears", []), ensure_ascii=False),
             json.dumps(conv.get("block_errors", []), ensure_ascii=False),
             json.dumps(conv.get("block_warnings", []), ensure_ascii=False),
+            gaps.get("count"),
+            json.dumps(gaps, ensure_ascii=False),
             stats.get("stream_count"),
             stats.get("block_count"),
             stats.get("elapsed_sec"),

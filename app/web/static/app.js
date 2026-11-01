@@ -772,12 +772,15 @@ function renderReadRunning(snap) {
          可能是 Aspen 正在忙、弹出了对话框,或者许可证在排队。
          请看一眼 Aspen 窗口;实在不行点右上角「退出」重开后再读。</span>`
     : "";
+  // 同时开着几个模型时,attach() 取的是 ROT 里第一个 —— 显示出来才能发现读错了对象
+  const model = snap.model_path ? baseName(snap.model_path) : "";
 
   el.className = `read-status running${stalled ? " stalled" : ""}`;
   el.innerHTML = `
     <span class="read-dot"></span>
     <span class="read-text">${parts.join(" · ")}</span>
     <span class="read-progress"><span class="read-bar" style="width:${pct}%"></span></span>
+    ${model ? `<span class="read-model" title="${esc(snap.model_path)}">${esc(model)}</span>` : ""}
     <span class="read-time">${elapsed.toFixed(1)} s</span>
     ${hint}`;
   el.classList.remove("hidden");
@@ -788,18 +791,35 @@ function fmtSeconds(sec) {
   return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
 }
 
+/* 从完整路径取文件名(Windows 反斜杠 / 正斜杠都认) */
+function baseName(path) {
+  return String(path || "").split(/[\\/]/).pop() || "";
+}
+
 function renderReadDone(snap) {
   const el = readStatusEl();
   const sev = SEVERITY[snap.severity] || SEVERITY.warning;
+  const gaps = Number(snap.unit_gaps || 0);
+  const units = (snap.unit_units || []).filter(Boolean);
+  const model = snap.model_path ? baseName(snap.model_path) : "";
+
+  // 老模型的单位集可能不是 METCBAR,换算不了就只能留空 —— 必须说清楚,别让人以为模型没结果
+  const gapHint = gaps > 0
+    ? `<span class="read-hint warn">⚠️ 有 ${gaps} 个字段的原始单位不认识、已留空${
+        units.length ? `(${esc(units.join("、"))})` : "(单位为空)"}。
+        表里的「—」可能是这个原因,不代表模型没结果。</span>`
+    : "";
+
   el.className = `read-status done ${sev.cls}`;
   el.innerHTML = `
-    <span class="read-text">已读入工况 #${esc(snap.case_id)}:${esc(snap.stream_count ?? "-")} 流股 /
-      ${esc(snap.block_count ?? "-")} 设备 · ${sev.text} ·
-      ${Number(snap.elapsed_sec || 0).toFixed(1)} s</span>
+    <span class="read-text">已读入工况 #${esc(snap.case_id)}${model ? `(${esc(model)})` : ""}:
+      ${esc(snap.stream_count ?? "-")} 流股 / ${esc(snap.block_count ?? "-")} 设备 ·
+      ${sev.text} · ${Number(snap.elapsed_sec || 0).toFixed(1)} s</span>
+    ${gapHint}
     <button class="read-close" type="button" title="关闭">✕</button>`;
   el.querySelector(".read-close").addEventListener("click", () => hideReadStatus());
   el.classList.remove("hidden");
-  hideReadStatus(READ_DONE_HIDE_MS);
+  if (!gaps) hideReadStatus(READ_DONE_HIDE_MS);   // 有单位警告就不自动消失,让人看清
 }
 
 async function startRead() {

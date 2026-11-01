@@ -48,6 +48,8 @@ _IDLE: dict = {
     "block_count": None,
     "severity": "",
     "converged": None,
+    "unit_gaps": 0,          # 有原始值但单位不认识、被迫留空的字段数
+    "unit_units": [],        # 上面那些字段涉及的原始单位
 }
 
 _state: dict = dict(_IDLE)
@@ -142,6 +144,7 @@ def _run(db_path: str) -> None:
 
         conv = case.get("convergence", {})
         stats = case.get("stats", {})
+        gaps = case.get("unit_gaps") or {}
         _update(
             state="done",
             phase="完成",
@@ -150,6 +153,8 @@ def _run(db_path: str) -> None:
             block_count=stats.get("block_count"),
             severity=conv.get("severity", ""),
             converged=bool(conv.get("converged")),
+            unit_gaps=gaps.get("count", 0),
+            unit_units=gaps.get("units", []),
             finished_at=time.time(),
             elapsed_sec=round(time.time() - (_state.get("started_at") or time.time()), 1),
         )

@@ -150,6 +150,11 @@ def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
         add("撕裂流", tear.get("stream") or "", _num(tear.get("error")), "",
             f"{tear.get('variable') or ''} · 容差 {tear.get('tolerance')}")
 
+    gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case.keys() else {}
+    add("数据质量", "单位不认识而留空的字段数", gaps.get("count") or 0, "个",
+        "这些字段是换算表没覆盖,不是模型没结果:"
+        + ("、".join(gaps.get("units") or []) or "无"))
+
     add("数据规模", "塔剖面级数合计", sum(stage_counts), "级",
         "、".join(f"{c['block']}({c['stage_count']})" for c in columns) or "无")
     return rows
@@ -503,6 +508,11 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("")
     w("- **空值 = 读不到**,不是 0。Aspen 树里找不到节点时,程序读出来是空,")
     w("  表示「这个模型没有这个字段」或「该字段不可读」,不要当 0 参与计算。")
+    unit_gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case.keys() else {}
+    if unit_gaps.get("count"):
+        w(f"- **本次有 {unit_gaps['count']} 个字段因为单位不认识被留空**"
+          f"(原始单位:{'、'.join(f'`{u}`' for u in unit_gaps.get('units') or []) or '空'})。")
+        w("  这类空值不是模型的问题,是工具的换算表没覆盖 —— 用的时候请换回原始数据列自己算。")
     w("- **组成(各组分摩尔分数)是按需读的**。18 组分 × 2 相 × 每条流股的调用量是")
     w("  基础字段的 6 倍(121 条流股从 9 s 变成 41 s),所以默认不读。")
     if composition["rows"]:

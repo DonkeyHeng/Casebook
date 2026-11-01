@@ -587,7 +587,20 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
     ThreadingHTTPServer.allow_reuse_address = False
     try:
         httpd = ThreadingHTTPServer((host, port), handler)
-    except OSError:
+    except OSError as exc:
+        # 绑定失败有两种原因,处理方式完全不同,不能都当成"已经在运行":
+        #   10048 = 端口确实被占(多半是服务已在跑)→ 聚焦已有窗口
+        #   10013 = 系统拒绝监听(端口被排除/被安全软件拦)→ 必须弹窗说明,
+        #           否则 pythonw 下双击"毫无反应",用户根本不知道发生了什么
+        if getattr(exc, "winerror", None) == 10013:
+            msg = (f"端口 {port} 无法监听(系统拒绝):{exc}\n\n"
+                   "常见原因:该端口落在 Windows 的排除端口段里(Hyper-V / WSL 会保留一些端口),\n"
+                   "或者被安全软件拦截。换个端口即可,例如:\n"
+                   f"    python -m app.api --port {port + 20}\n"
+                   "(桌面快捷方式的「目标」里也要跟着改。)")
+            _say(msg)
+            _alert(msg)
+            return
         # 已经在跑了:把已有窗口提到前台,不重复起第二个服务/第二个窗口
         _say(f"端口 {port} 已被占用 —— 服务应该已经在运行,打开 {url}")
         existing = win.find_window(WINDOW_KEY)
