@@ -105,12 +105,32 @@ function renderBanner() {
         ${state.bannerCollapsed ? "展开 ▾" : "收起 ▴"}
       </button>
     </div>
+    <div class="banner-verdict">${esc(bannerVerdict(c))}</div>
     <div class="banner-body">${reasons}</div>`;
 
   document.getElementById("bannerToggle").addEventListener("click", () => {
     state.bannerCollapsed = !state.bannerCollapsed;
     renderBanner();
   });
+}
+
+/* 横幅里那句"所以能不能用" —— 只说结论,不复述状态码。
+   放在 .banner-body 外面,折叠时它仍然可见:收起的只是明细,结论不该被收起。 */
+function bannerVerdict(c) {
+  const errors = (c.block_errors || []).length;
+  const warns = (c.block_warnings || []).length;
+
+  if (c.severity === "ok") {
+    return "没有报错 —— 这份数据可以用来做定量分析(算收率、比能耗、做工况对比)。";
+  }
+  if (c.severity === "warning") {
+    return warns
+      ? `有 ${warns} 个模块告警、没有报错 —— 数据可用,引用时注明告警项即可。`
+      : "有告警、没有报错 —— 数据可用,引用时注明告警项即可。";
+  }
+  return errors
+    ? `本次运行有 ${errors} 个模块报错 —— 不建议用它算收率 / 能耗 / 做工况对比;其余流股只作定性参考。`
+    : "运行状态码显示有错误(但没有具体模块报错)—— 不建议用这份数据做定量结论。";
 }
 
 /* ------------------------------------------------------------ 表格 */
@@ -703,6 +723,9 @@ function toggleCompareBar(isCompare) {
    POST /api/read 起一个后台任务 → 每 0.6 s 问一次 /api/read/status → 完成后自动切到新工况。 */
 const READ_POLL_MS = 600;
 const READ_DONE_HIDE_MS = 9000;
+/* 读到这个秒数还没结束就提示"可能卡住了" —— 121 流股约 25 s,1000 流股约 76 s,
+   2 分钟以上基本只有两种情况:Aspen 在忙/弹了对话框,或者许可证在排队。 */
+const READ_STALL_SEC = 120;
 const readState = { timer: null, hideTimer: null, busy: false };
 
 function readStatusEl() {
@@ -738,17 +761,31 @@ function renderReadRunning(snap) {
   const total = Number(snap.total || 0);
   const done = Number(snap.done || 0);
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const elapsed = Number(snap.elapsed_sec || 0);
   const parts = [esc(snap.phase || "读取中")];
   if (total) parts.push(`${done}/${total}`);
   if (snap.label) parts.push(esc(snap.label));
 
-  el.className = "read-status running";
+  const stalled = elapsed >= READ_STALL_SEC;
+  const hint = stalled
+    ? `<span class="read-hint">已经读了 ${fmtSeconds(elapsed)},比正常慢很多 ——
+         可能是 Aspen 正在忙、弹出了对话框,或者许可证在排队。
+         请看一眼 Aspen 窗口;实在不行点右上角「退出」重开后再读。</span>`
+    : "";
+
+  el.className = `read-status running${stalled ? " stalled" : ""}`;
   el.innerHTML = `
     <span class="read-dot"></span>
     <span class="read-text">${parts.join(" · ")}</span>
     <span class="read-progress"><span class="read-bar" style="width:${pct}%"></span></span>
-    <span class="read-time">${Number(snap.elapsed_sec || 0).toFixed(1)} s</span>`;
+    <span class="read-time">${elapsed.toFixed(1)} s</span>
+    ${hint}`;
   el.classList.remove("hidden");
+}
+
+function fmtSeconds(sec) {
+  const s = Math.round(sec);
+  return s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`;
 }
 
 function renderReadDone(snap) {

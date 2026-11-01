@@ -83,6 +83,7 @@ select {
 .read-status {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;      /* 卡住时的提示要能换到第二行 */
   gap: 12px;
   margin: 12px 20px 0;
   padding: 8px 14px;
@@ -93,6 +94,10 @@ select {
   line-height: 1.65;
 }
 .read-status.running { color: #1d4ed8; border-color: #bfdbfe; background: #f5f9ff; }
+.read-status.running.stalled { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
+
+/* 卡住提示:独占一行,不能把进度条挤变形 */
+.read-hint { flex: 1 0 100%; line-height: 1.75; font-size: 12.5px; }
 .read-status.done    { color: var(--ok);  border-color: #bbf7d0; background: #f0fdf4; }
 .read-status.done.warn { color: var(--warn); border-color: #fde68a; background: #fffbeb; }
 .read-status.done.err  { color: var(--err);  border-color: #fecaca; background: #fef2f2; }
@@ -206,6 +211,9 @@ select {
 .banner-body { margin-top: 6px; }
 .banner.collapsed .banner-body { display: none; }
 .reason { line-height: 1.75; }
+
+/* 结论句:折叠时也保留 —— 收起的只是明细,不是"能不能用"这个判断 */
+.banner-verdict { margin-top: 4px; font-weight: 550; line-height: 1.7; }
 
 .toolbar {
   display: flex;
