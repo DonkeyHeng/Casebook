@@ -374,6 +374,7 @@ async function openColumn(block) {
   document.getElementById("compPanel").classList.add("hidden");  // 两个抽屉不叠着
   document.getElementById("columnTitle").textContent = `塔剖面 · ${block}`;
   panel.classList.remove("hidden");
+  panel.scrollTop = 0;   // 看另一座塔时别带着上一座的滚动位置
 
   const rows = await api(`/api/cases/${state.current.id}/columns/${encodeURIComponent(block)}`);
   state.column = { block, rows };
@@ -577,6 +578,13 @@ async function runCompare() {
 
 /* ------------------------------------------------------------ 页签 */
 
+/* 三个页签共用同一个滚动容器(#tableWrap),换内容时必须把滚动条拨回顶部,
+   否则会带着上一个页签的位置 —— 新表看起来像"从中间开始",第一行都看不到。 */
+function resetTableScroll() {
+  const wrap = document.getElementById("tableWrap");
+  if (wrap) wrap.scrollTop = 0;
+}
+
 function setTab(tab) {
   state.tab = tab;
   document.querySelectorAll(".tab").forEach((b) =>
@@ -591,6 +599,7 @@ function setTab(tab) {
   } else {
     renderTable();
   }
+  resetTableScroll();
 }
 
 /* 对比入口:平时是工具栏右上角一个小图标;进对比页后,同一行换成两个下拉框。
@@ -805,6 +814,7 @@ async function loadCase(id) {
   setExportEnabled(true);
   if (state.tab !== "compare") renderTable();
   renderBanner();
+  resetTableScroll();   // 换工况也从第一行看起
 }
 
 /* 页签只从地址栏恢复一次,之后以点选为准 */
