@@ -6,7 +6,7 @@ model-full/*
 
 # Aspen 运行中间文件(在任何目录都可能出现,统一忽略)
 _*.*
-!__init__.py
+!*.py
 *.apw
 *.bkp
 *.apwz
