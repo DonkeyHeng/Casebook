@@ -63,6 +63,6 @@ exit /b 1
 
 :up
 echo Service started: http://127.0.0.1:8000
-rem the server opens its own app window; opening a browser tab here would duplicate it
-echo The app window should be opening. If it does not appear, open the URL above manually.
+rem the server opens the page itself (a browser tab by default); opening one here would duplicate it
+echo The page should open in your browser. If it does not, open the URL above manually.
 endlocal

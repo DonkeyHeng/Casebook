@@ -723,7 +723,7 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--no-browser", action="store_true", help="启动后不自动打开界面")
-    ap.add_argument("--tab", action="store_true", help="用普通浏览器标签页打开(默认应用窗口)")
+    ap.add_argument("--app", action="store_true", help="用无地址栏的应用窗口打开(默认用普通浏览器标签页)")
     ap.add_argument("--log", default=DEFAULT_LOG, help=f"无控制台时的日志文件(默认 {DEFAULT_LOG})")
     args = ap.parse_args()
 
@@ -732,7 +732,7 @@ def main() -> int:
     try:
         serve(args.db, args.host, args.port,
               open_browser=not args.no_browser,
-              app_window=not args.tab)
+              app_window=args.app)
     except Exception as exc:
         traceback.print_exc()
         _alert(f"aspen-insight 启动失败:\n{type(exc).__name__}: {exc}\n\n详情见 {args.log}")

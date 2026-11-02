@@ -8,6 +8,7 @@ const state = {
   tab: "streams",          // 数据页里的子视图:streams / blocks / compare
   page: "home",            // 当前页面:home / streams / blocks / compare
   emptyText: "",           // 空态文案(读不到工况列表等错误也走这里)
+  emptyIsError: false,     // 空态是「出错」还是「本来就还没有工况」
   flow: {                  // 流程页:数据 + 布局 + 视图 + 聚焦
     caseId: null, data: null, layout: null, view: null, focus: null,
     center: null,          // 被点中的设备(和 2 层邻居分开配色)
@@ -1651,9 +1652,20 @@ function exportFlowPng() {
 
 /* ------------------------------------------------------------ 初始化 */
 
+const EMPTY_HINT = [
+  "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。",
+  "",
+  "想看样例数据(不需要 Aspen):",
+  "① 打开 samples 文件夹,复制 case-23-error.db",
+  "② 粘贴到 data 文件夹",
+  "③ 改名为 cases.db(已有就覆盖)",
+  "④ 刷新本页,首页会出现工况 #23",
+].join("\n");
+
 function showEmpty(text) {
-  const msg = text || "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。想先看看长什么样:① 打开 samples 文件夹,复制 case-23-error.db;② 粘贴到 data 文件夹;③ 改名为 cases.db(已有就覆盖);④ 刷新本页,首页会出现工况 #23。";
+  const msg = text || EMPTY_HINT;
   state.emptyText = msg;
+  state.emptyIsError = Boolean(text);
   const el = document.getElementById("empty");
   el.textContent = msg;
   el.classList.remove("hidden");
@@ -1663,6 +1675,7 @@ function showEmpty(text) {
 
 function hideEmpty() {
   state.emptyText = "";
+  state.emptyIsError = false;
   document.getElementById("empty").classList.add("hidden");
 }
 
@@ -1784,10 +1797,9 @@ function renderHome() {
   const c = state.current;
 
   if (!c) {
-    const hint = state.emptyText
-      || "在 Aspen Plus 里打开并 Run 过模型,然后点左上角「读取当前工况」。想先看看长什么样:① 打开 samples 文件夹,复制 case-23-error.db;② 粘贴到 data 文件夹;③ 改名为 cases.db(已有就覆盖);④ 刷新本页,首页会出现工况 #23。";
+    const hint = state.emptyText || EMPTY_HINT;
     cards.innerHTML = `<section class="card wide">
-        <h3>${state.emptyText ? "读不到工况" : "还没有工况"}</h3>
+        <h3>${state.emptyIsError ? "读不到工况" : "还没有工况"}</h3>
         <p class="muted" style="margin:0;line-height:1.8;white-space:pre-wrap">${esc(hint)}</p>
       </section>`;
     problemsCard.classList.add("hidden");
