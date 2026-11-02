@@ -98,6 +98,7 @@ python -m app.api
 | [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(正在做的管路选型功能) |
 | [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型方案(口径与开工清单) |
 | [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
+| [`docs/api.md`](docs/api.md) | 本地 HTTP 接口参考(排错 / 集成用) |
 | [`app/README.md`](app/README.md) / [`tools/README.md`](tools/README.md) | 代码分层 / 脚本用途 |
 
 ## 项目结构
