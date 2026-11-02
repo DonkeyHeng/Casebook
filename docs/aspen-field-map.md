@@ -442,7 +442,7 @@ unit = u() if callable(u) else u
 ## 12. 焓 / 设备连接 / 公用工程(2026-11-01 实测,第 1 步落地依据)
 
 
-探测报告:`data/probe_topology.txt`(由 `probe_topology.bat` 生成,脚本 `tools/probe_topology.py`)。
+探测报告:`data/probe_topology.txt`(由 `tools/probe_topology.bat` 生成,脚本 `tools/probe_topology.py`)。
 
 ### 12.1 流股焓:`HMX` 是目录,真正的值在 `MIXED`
 

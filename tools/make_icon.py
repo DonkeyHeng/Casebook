@@ -10,7 +10,7 @@ r"""把 Gemini 生成的圆形徽章做成 Windows 图标(.ico)。
    否则徽章里 "DEEPSEEK" / "ASPEN PLUS" 的白色笔画会被一起镂空。
    改为按几何判定:画的是正圆,就按"到圆心的距离"给 alpha,圆外透明、边缘抗锯齿。
 2. 按圆裁切:去掉四周白边,让徽章撑满图标。
-3. 多尺寸:16/24/32/48/64/128/256 各存一份。
+3. 多尺寸:16/24/32/48/64/128 各存一份(256 太重,见下面 SIZES 的注释)。
    Windows 会按显示场景挑合适的那张,只放一张 256 的话 16px 下会糊成一团。
 
 为什么自己拼 ICO 字节,不用 Pillow 的 ico 保存
@@ -21,7 +21,7 @@ Pillow 会把**每个尺寸都写成 PNG 压缩条目**。浏览器(Chromium 读
 所以这里手写 ICO:所有尺寸都用 32bpp BMP + AND 掩码,兼容性最好。
 
 用法:
-    python tools/make_icon.py "Gemini_Generated_Image_xxx.jpg" assets/app-icon.ico
+    python tools/make_icon.py assets/icon-source.jpg assets/app-icon.ico
 
 图标为什么要**再复制一份到 %LOCALAPPDATA%**
 ----------------------------------------

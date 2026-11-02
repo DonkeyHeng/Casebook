@@ -24,11 +24,11 @@
   * 失败也出报告,并说明失败在哪一步
 
 用法:
-  python probe_aspen.py                 # 只扫注册表,不碰 Aspen
-  python probe_aspen.py --attach        # 附加到已打开的 Aspen 并出完整报告
-  python probe_aspen.py --attach --deep # 额外转储字段全名(排错用)
-  python probe_aspen.py --launch model.apw   # 自己开 Aspen(慢,占许可证)
-  python probe_aspen.py --attach --run  # [谨慎] 附加后跑一次仿真
+  python tools/probe_aspen.py                 # 只扫注册表,不碰 Aspen
+  python tools/probe_aspen.py --attach        # 附加到已打开的 Aspen 并出完整报告
+  python tools/probe_aspen.py --attach --deep # 额外转储字段全名(排错用)
+  python tools/probe_aspen.py --launch model.apw   # 自己开 Aspen(慢,占许可证)
+  python tools/probe_aspen.py --attach --run  # [谨慎] 附加后跑一次仿真
 """
 from __future__ import annotations
 

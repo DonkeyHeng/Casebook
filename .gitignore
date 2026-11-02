@@ -6,6 +6,7 @@ model-full/*
 
 # Aspen 运行中间文件(在任何目录都可能出现,统一忽略)
 _*.*
+!__init__.py
 *.apw
 *.bkp
 *.apwz
@@ -36,8 +37,9 @@ venv/
 data/window.json
 
 # 标准规范 PDF(21 MB,只在本地查;规则已摘进 docs/pipe-class-codes.md)
-管路选型/
+standards/*
+!standards/README.md
 *.pdf
 
-# 第三方安装包(如"中联水泵选型安装包.exe",232 MB)
+# 第三方安装包 / 选型工具(不入库,如水泵选型安装包)
 *.exe

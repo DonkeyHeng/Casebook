@@ -3,7 +3,7 @@ rem aspen-insight: read-only topology / enthalpy probe launcher
 rem Double-click this file with Aspen Plus open (model loaded and already run).
 setlocal
 chcp 65001 >nul
-cd /d "%~dp0"
+cd /d "%~dp0.."
 
 echo ============================================================
 echo  aspen-insight : topology / enthalpy probe   (READ-ONLY)

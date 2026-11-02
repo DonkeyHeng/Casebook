@@ -74,7 +74,11 @@ Aspen Plus 数据读取与分析工具。通过 COM 附着到已运行的 Aspen 
 
 ```
 aspen-insight/
-  probe_aspen.py          COM 只读探测脚本(诊断入口)
+  README.md              本文件
+  HANDOFF.md             交接文档(第 0 节:现在在哪 / 下一步做什么)
+  AGENTS.md              仓库约定(先查现成实现、网络与工具真相、数字纪律)
+  start.cmd              调试用启动器(开控制台窗口,方便看日志)
+  requirements.txt       Python 依赖:pywin32(COM)+ openpyxl(Excel 导出)
   app/
     cli.py                命令行:读当前工况入库、列工况、看明细
     api/
@@ -93,18 +97,28 @@ aspen-insight/
       db.py               SQLite 工况库(cases/streams/stream_components/blocks/column_stages/connections)
       flowsheet.py        连接关系 → 流程图数据(纯函数)
       impact.py           报错设备 → 受影响流股(纯函数,「不可用 / 仅告警」)
-  tools/
+  tools/                 脚本(用途与依赖见 tools/README.md)
+    probe_aspen.py       COM 只读探测(诊断入口:注册表 / 附着 / 字段全名)
+    probe_topology.bat   双击入口:拓扑 / 焓值探测(只读)
+    probe_topology.py    探测脚本本体(由上面的 bat 调用)
     bench.py              性能基准(测 COM 调用成本与规模曲线)
     column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
-    make_icon.py          从源图生成 .ico(圆形抠底 + 7 个尺寸)
+    make_icon.py          从源图生成 .ico(圆形抠底 + 6 个尺寸)
     repair_cases.py       按最新规则/单位表重算历史工况(不用回 Aspen 重读)
     selftest.py           判定 / 焓平衡 / 波及范围的回归自测(不需要 Aspen)
     stop.py               按端口停止服务
-  assets/app-icon.ico    图标源件(favicon 用它;桌面快捷方式用部署到 %LOCALAPPDATA% 的副本)
-  docs/aspen-field-map.md 真实字段路径地图(实测)
-  model/                  Aspen 模型与它的运行文件(见 model/README.md)
-  data/cases.db           本地工况库(运行时生成,不入库)
-  probe_out/              探测报告输出
+  assets/                图标(见 assets/README.md)
+    icon-source.jpg      图标源图(2048²,白底圆形徽章)
+    app-icon.ico         成品图标(favicon 用它;桌面快捷方式用部署到 %LOCALAPPDATA% 的副本)
+  docs/                  文档(阅读顺序见 docs/README.md)
+    aspen-field-map.md   真实字段路径地图(实测)
+    pipe-class-codes.md  HG/T 20519.6 等级号规则 + 本项目约定
+    pipe-selection-plan.md  管路选型方案(§14 口径 / §15 开工清单)
+  data/                  本地数据(结构见 data/README.md;*.db / 日志 / 截图不入库)
+  standards/             标准 PDF(不入库;规则已摘进 docs,见 standards/README.md)
+  model/                 32 股精简模型(见 model/README.md)
+  model-full/            121 股全流程模型(见 model-full/README.md)
+  probe_out/             探测报告与 UI 截图(不入库)
 ```
 
 > **模型统一放 `model/`**:Aspen 会把 `_<runid>.*` 运行中间文件写在 `.apw` 旁边,
@@ -142,7 +156,7 @@ python -m tools.bench                  # 性能基准
 python -m tools.column_diag T0202      # 塔逐板剖面 + 异常标记
 python -m tools.selftest --db data/cases.db   # 判定/焓平衡回归自测(不需要 Aspen)
 python tools/stop.py 8000              # 停止服务(等价于桌面"停止"快捷方式)
-python probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
+python tools/probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
 ```
 
 > **改了 `judge()` 判定规则、`balance.py` 容差或单位表之后,先跑 `python -m tools.selftest --db data/cases.db`。**
@@ -167,10 +181,10 @@ python probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
 为什么快捷方式不能指项目目录:实测同一个文件放在项目目录下,资源管理器取不到图标,
 桌面会显示成通用的白色文件图标;复制到用户目录后立刻正常。
 
-源图是根目录的 `Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg`(2048²,白底圆形徽章)。改图标就重跑:
+源图是 `assets/icon-source.jpg`(2048²,白底圆形徽章)。改图标就重跑:
 
 ```bash
-python tools/make_icon.py "Gemini_Generated_Image_pjxeyapjxeyapjxe.jpg" assets/app-icon.ico
+python tools/make_icon.py assets/icon-source.jpg assets/app-icon.ico
 ```
 
 脚本做三件事:按**圆的几何**把圆外白底抠成透明(不做全局"白→透明",否则徽章上
