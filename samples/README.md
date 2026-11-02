@@ -49,4 +49,4 @@ python tools/fill_composition.py --case 23      # 121 条,约 36 s
 - `model_path` → 相对路径 `model-full/ASPEN 全流程模拟.apw`
 - 模型本体 `.apw` **不在**仓库里(见 `.gitignore`),这里只有读数
 
-许可:随仓库 LICENSE 一并授权(仓库 LICENSE 定稿后本条替换为具体条款)。
+许可:与本项目一致,采用 [Apache License 2.0](../LICENSE)。

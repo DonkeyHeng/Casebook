@@ -7,11 +7,14 @@
 打开已经跑好的 Aspen 模型,点一下「读取当前工况」,就能在本地网页里查看整条流程的流股、
 设备、塔板剖面与连接图,做多工况对比,导出 Excel,或打包一份给 AI 阅读的结构化数据。
 
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
+[![Built with DeepSeek Harness](https://img.shields.io/badge/built%20with-DeepSeek%20Harness-4D6BFE)](https://www.deepseek.com/en/harness/)
+
 > **⚠️ 关于本项目的两点说明**
 >
 > **1. 本项目依托于正版 Aspen Plus V15，项目中示例文件为本人独立完成的 Aspen 设计，由于本人能力有限，其中存在大量错误以及不合理之处，但对于项目的适配是有利的，望各位多多担待。**
 >
-> **2. 本项目使用 DeepSeek Harness（DSH）完成** —— 代码、文档与整理均在 DSH 中协助生成。
+> **2. 本项目使用 [DeepSeek Harness（DSH）](https://www.deepseek.com/en/harness/) 完成** —— 代码、文档与整理均在 DSH 中协助生成。
 > 这是一个个人项目,与 AspenTech 没有任何关联,使用前请自备正版 Aspen Plus 许可证。
 
 ---
@@ -156,9 +159,16 @@ aspen-insight/
 
 ## 许可证
 
-尚未选定,将在正式开源前补充。在此之前请勿直接再分发。
+本项目采用 [Apache License 2.0](LICENSE) 许可,可自由使用、修改与再分发,
+条件是保留版权与许可声明(全文见 [`LICENSE`](LICENSE))。
 
 ## 致谢
 
 - **DeepSeek Harness** —— 本项目的代码、文档与整理工作均在 DSH 中完成
 - Aspen Plus 及其相关名称是 Aspen Technology, Inc. 的商标;本项目与该公司无关联,也不包含其任何软件
+
+## 开发成本
+
+> 截至 2026-11-02,本项目累计的模型调用费用约为 **¥21.85**。
+
+如实记录,供后续维护者参考;金额与许可无关,本项目按 Apache-2.0 免费提供。
