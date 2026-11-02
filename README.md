@@ -75,10 +75,11 @@ Windows 下也可以直接双击 `start.cmd`(开控制台,方便看日志)。
 
 ## 没有 Aspen 也能看:样本数据
 
-仓库里带了一份**真实但失败**的工况快照,用来演示界面、验证判定逻辑,不需要 Aspen:
+仓库里带了一份**真实但失败**的工况快照,用来演示界面、验证判定逻辑,不需要 Aspen。
+**注意:仓库不带 `data/cases.db`(本地库不入库),所以第一次打开是空库、首页会提示「还没有工况」,这是正常的。**
 
 ```bash
-cp data/cases.db data/cases.local.db        # 先备份本地库
+cp data/cases.db data/cases.local.db        # 有本地库时先备份
 cp samples/case-23-error.db data/cases.db
 python -m app.api
 ```

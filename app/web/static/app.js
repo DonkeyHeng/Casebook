@@ -1652,7 +1652,7 @@ function exportFlowPng() {
 /* ------------------------------------------------------------ 初始化 */
 
 function showEmpty(text) {
-  const msg = text || "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。";
+  const msg = text || "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次;想先看看长什么样,可以把 samples/case-23-error.db 复制成 data/cases.db 后刷新。";
   state.emptyText = msg;
   const el = document.getElementById("empty");
   el.textContent = msg;
@@ -1785,7 +1785,7 @@ function renderHome() {
 
   if (!c) {
     const hint = state.emptyText
-      || "在 Aspen Plus 里打开并 Run 过模型,然后点左上角「读取当前工况」。";
+      || "在 Aspen Plus 里打开并 Run 过模型,然后点左上角「读取当前工况」;或把 samples/case-23-error.db 复制成 data/cases.db 后刷新,先看样例数据。";
     cards.innerHTML = `<section class="card wide">
         <h3>${state.emptyText ? "读不到工况" : "还没有工况"}</h3>
         <p class="muted" style="margin:0;line-height:1.8;white-space:pre-wrap">${esc(hint)}</p>
