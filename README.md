@@ -1,221 +1,163 @@
 # aspen-insight
 
-Aspen Plus 数据读取与分析工具。通过 COM 附着到已运行的 Aspen Plus 实例,读取全流程数据,
-本地建工况库,并导出便于 AI 分析的结构化数据包。
+<img src="assets/app-icon_256.png" width="96" align="right" alt="aspen-insight 图标">
 
-> 状态:第一期核心打通 —— **点「读取当前工况」→ 自动入库 → 看表/对比/塔剖面/流程图 → 焓平衡自检 → 导出**全链路可用(2026-11-01)。
-> 真实字段路径见 [`docs/aspen-field-map.md`](docs/aspen-field-map.md),不要靠猜。
+把 **Aspen Plus** 的仿真结果变成可查、可对比、可导出的本地数据工具。
 
-## 定位
+打开已经跑好的 Aspen 模型,点一下「读取当前工况」,就能在本地网页里查看整条流程的流股、
+设备、塔板剖面与连接图,做多工况对比,导出 Excel,或打包一份给 AI 阅读的结构化数据。
 
-| 项 | 结论 |
-| --- | --- |
-| 产品定位 | 数据分析工具(不做闭环优化) |
-| 连接方式 | **附着(attach)** 到已打开并收敛的 Aspen 实例,零启动开销、不额外占许可证 |
-| 模型规模 | **实测 90–128 流股**(6 份样本模型:90/98/105/116/128,13.8–19.1 s);<br>更大规模未验证,按线性外推 500 流股 ≈ 60–75 s。有进度条 + 卡住提示,规模变大是"变慢"不是"崩掉" |
-| 用户 | 单人本机使用,无权限体系 |
-| 第一期范围 | 流股总表 + 设备结果表 |
-| 二期范围 | 塔板剖面、多工况对比、公用工程(介质等级 + 成本) |
-| 单位 | 统一换算为固定单位(℃ / bar / kg·h⁻¹ / kW) |
-| 存储 | 本地 SQLite 工况快照(名称、时间、收敛状态) |
-| 导出 | 「AI 分析包」= Markdown 说明 + 精简指标 CSV + 完整数据 CSV |
-| 应用形态 | 本地网页应用;Python 后端 + 零构建原生 HTML + ECharts;可打包 exe |
+> **⚠️ 关于本项目的两点说明**
+>
+> **1. 本项目依托于正版 Aspen Plus V15，项目中示例文件为本人独立完成的 Aspen 设计，由于本人能力有限，其中存在大量错误以及不合理之处，但对于项目的适配是有利的，望各位多多担待。**
+>
+> **2. 本项目使用 DeepSeek Harness（DSH）完成** —— 代码、文档与整理均在 DSH 中协助生成。
+> 这是一个个人项目,与 AspenTech 没有任何关联,使用前请自备正版 Aspen Plus 许可证。
+
+---
+
+## 它解决什么问题
+
+Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成、对比两版设计的热负荷、
+把塔的逐板剖面贴进报告,都得自己一格格点。而流程有错时,错误散落在收敛块、模块消息和
+撕裂流里,很难一眼看出「这次结果到底能不能用」。
+
+这个工具做的只有一件事:**把已经存在的仿真结果,读成干净、统一、可检索的数据**。
+
+- 附着到**已经打开**的 Aspen 实例,只读,不启动新会话、不额外占许可证
+- 一键把全流程读数存成本地 SQLite 快照,之后不连 Aspen 也能看
+- 判定只看硬错误,不收敛的模型**照读但明确标记**
+- 导出一份给人看的 Excel,和一份给 AI 读的文本包
 
 ## 功能
 
-| 页面 | 内容 |
+| 模块 | 能做什么 |
 | --- | --- |
-| 首页 | 左栏第一项:工况信息、收敛横幅、规模(流股 / 设备 / 连接 / 塔)、**焓平衡四态**、异常模块、**受影响流股数**(报错设备碰过几条);<br>导出 Excel / AI 分析包 / 删除工况也在这一页 |
-| 读取当前工况 | 左栏顶部蓝色按钮,**任何页面都能点**。点一下 = 附着到已打开的 Aspen、读全流程、存库、自动切到新工况。<br>读取约 10–30 s(1000 流股约 76 s),进度条里会显示**正在读哪个模型文件**;<br>失败时直接在页面上给中文提示(Aspen 没开 / 权限不一致 / 在沙箱里跑) |
-| 单位诊断 | 读完会告诉你**有多少字段因为单位不认识被留空**(老模型可能是 ENG:℉/psia/Btu·h⁻¹),<br>这类 `—` 不是模型没结果,是换算表没覆盖;有缺口时提示不自动消失 |
-| 流股 | 全部流股的温度/压力/质量流量/摩尔流量/汽化率/体积流量(已统一单位);**点流股名 → 看组成**;<br>「受影响」列标出被报错设备碰过的流股(不可用 / 仅告警),点徽标跳到那台设备 |
-| 流股组成 | 右侧抽屉:每个组分的液相 x / 气相 y 摩尔分数 + 合计(正常应 ≈ 1)。<br>没读过时从当前打开的 Aspen 现读这一条(实测 0.26 s)并存入工况,之后直接取、不再连 Aspen |
-| 设备 | 全部设备,按"错误 → 告警 → 正常"排序,带 Aspen 原始提示;塔名可点开剖面;<br>**焓平衡四列**:ΔH / 参照 / 焓平衡(通过·超差·无法校验·不校验)/ 平衡说明 |
-| 焓平衡自检 | `ΔH = Σ出 − Σ入`(流股能量流)对设备热负荷 / 轴功率:Heater 1%、绝热设备 0.5%、压缩机和泵按效率比、换热器按冷侧;<br>塔和反应器不校验。口径在 `app/aspen/balance.py`,改规则后 `python -m tools.repair_cases --apply` 即可回算 |
-| 流程 | 设备连接图:全图自动分层(链路太长自动折行),滚轮缩放 / 拖动平移 / 双击适应窗口;<br>**点设备聚焦上下游 2 层**并弹出该设备的进出流股与焓平衡;<br>`#flow/设备名` 可直达某台设备;**「导出 SVG / 导出 PNG」把当前视图存成图片**(白底、样式内联,可直接贴报告);入口是左栏「流程」 |
-| 对比 | 任选两个工况,左上角「流股 / 设备」开关切换对比对象(两张表都显示 A 值 / B 值 / 差值);<br>设备对比看热负荷、功率、级数、顶温、底温、**ΔH**,外加状态列(变了就显示 `正常 → 错误`)和**焓平衡列**(`通过 → 超差`);<br>设备名固定在左侧,列多横向滚也不会跟丢;入口是工具栏右上角的 **⇄** 图标 |
-| 塔剖面 | 右侧抽屉:逐板温度、压力、液/气流量、热负荷,含温度曲线和流量曲线;<br>**鼠标移到曲线上任意位置 → 浮出该级全部数值**,两张图共用一条准线,下方表格同步高亮对应行 |
-| 导出 Excel | 首页右上角「导出 Excel」→ 一个工作簿五张表:概要 / 流股(含焓)/ 设备(含 ΔH)/ 连接 / 塔剖面(给人看) |
-| AI 分析包 | 首页右上角「AI 分析包」→ 一个 zip,里面是 `README.md`(数据字典 + 这次运行的状态)、<br>`metrics.csv`(精简指标,含「焓平衡」一类)、`streams.csv` / `blocks.csv` / `connections.csv` /<br>`column_profiles.csv` / `composition.csv`(完整数据;后两个没有就不生成)、`case.json`。<br>纯文本、空值留空、单位已归一、原始值与原始单位保留(给 AI 读) |
-| 删除工况 | 首页右上角红色「删除工况」:二次确认框里写明模型名 / 读取时间 / 规模,避免删错;<br>明细(流股/设备/连接/塔剖面/组成)一起删,删完自动切到剩下的最新工况 |
-| 退出 | 左栏底部「退出」:二次确认后停掉后台服务并关闭窗口(默认用浏览器"应用窗口"模式打开,所以关得掉);<br>也可以用桌面 `aspen-insight 停止` 快捷方式 |
-| 窗口记忆 | 记住上次的窗口大小、位置、是否最大化,下次打开原样恢复;点窗口右上角 ✕ 会自动停服务 |
-| 问题横幅 | 第一行就是**结论**:"本次运行有 2 个模块报错 —— 不建议用它算收率 / 能耗 / 做工况对比";<br>下面才是明细(状态码 + 模块报错原文),右边缘「收起 / 展开」只收起明细、结论仍在;对比页也保留这块高度,切页签顶部不跳 |
-| 卡住提示 | 读取超过 2 分钟还没结束,进度条变成琥珀色并提示:可能 Aspen 正忙 / 弹了对话框 / 许可证排队 |
+| 读取当前工况 | 任意页面可点。附着 → 读流股/设备/连接/塔板 → 存库 → 自动切换到新工况;百条流股约 15–40 s,有进度条和卡住提示 |
+| 流股表 | 温度 / 压力 / 质量流量 / 摩尔流量 / 汽化率 / 体积流量,统一单位;点流股名看组成 |
+| 流股组成 | 液相 x / 气相 y 摩尔分数与合计;首次点开时从 Aspen 现读并缓存,之后离线可看 |
+| 设备与焓平衡 | 设备结果按「错误 → 告警 → 正常」排序,附 Aspen 原始提示;并做焓平衡自检(ΔH vs 热负荷/轴功率),区分通过、超差、无法校验、不校验 |
+| 流程图 | 设备连接图,自动分层、缩放平移、点设备聚焦上下游两层;可导出 SVG / PNG 贴进报告 |
+| 多工况对比 | 任选两个工况,按流股或按设备对比 A / B / 差值,并标出状态与焓平衡的变化 |
+| 塔剖面 | 逐板温度、压力、液/气流量、热负荷,含曲线与联动表格 |
+| 导出 | Excel 五张表(概要 / 流股 / 设备 / 连接 / 塔剖面);或 AI 分析包(README + 多份 CSV + JSON 的 zip) |
+| 问题横幅 | 第一行直接给结论(「本次运行有 2 个模块报错,不建议用它算收率」),下面是明细,可收起 |
 
-> 有问题的工况会在顶部红色横幅列出原因(CVSTAT、模块报错原文、撕裂流误差)。
+## 环境要求
 
-## 关键约束(已实测)
+| 项 | 要求 |
+| --- | --- |
+| 系统 | Windows 10 / 11(唯一支持平台) |
+| Aspen | Aspen Plus **V15**(实测版本;其它版本未验证),需自备正版许可证 |
+| Python | 3.10 及以上,依赖 `pywin32`、`openpyxl` |
+| 会话 | 必须在**真实桌面会话**运行,Aspen 与本工具需要同权限级别 |
+| 浏览器 | Edge / Chrome 等现代浏览器(前端零构建,不需要 Node) |
 
-- Aspen Plus V15 的 COM 接口注册完整:`Apwn.Document` → CLSID `{8EDFE38B-7513-45D6-9A63-B161FCC3832E}`,
-  另有版本化 ProgID `Apwn.Document.41.0`(`41.0` = V15)与只读入口 `Apwn.ReadOnlyComposite.41.0`。
-- **附着必须走文件 moniker**:手工打开的 Aspen 只把文档注册成 `...\model.apw`,
-  `GetActiveObject("Apwn.Document")` 会报 `MK_E_UNAVAILABLE`。正确写法:
-  `win32com.client.GetObject(r"模型路径.apw")`。
-- 必须在**真实桌面会话**执行:DSH 沙箱内 ROT 为空,COM 全部不可用。
-- 必须以**相同权限级别**运行:若 Aspen 以管理员身份启动,普通权限进程无法附加。
-- 流股结果字段是 `RES_TEMP` / `RES_PRES` / `RES_MASSFLOW` / `RES_MOLEFLOW` / `RES_VFRAC`,
-  `TEMP` / `MASSFLOW` 这些是 0/1 开关,不是数值。
-- 单位不统一(加热器 `cal/sec`、泵 `kW`),必须按节点 `UnitString` 换算。
-- **模块级报错要看 `\Data\Blocks\<设备>\Output\BLKSTAT`(0 正常 / 1 错误 / 2 告警)和 `BLKMSG`**;
-  Run-Status 里没有完整错误文本,不要指望从树里读到一句现成的结论。
-- 判定只看**硬错误**:模块 `BLKSTAT=1`、收敛块 `CVSTAT≠0`、撕裂流超容差。
-  `UOSSTAT` / `PER_ERROR` 非 0 只说明"有东西非零",**区分不了告警和错误**,
-  不能据此判"有错误"(实测:一个全是告警的样本模型,这两个码同样是 1)。
-- 撕裂流误差小 ≠ 流程可用:曾实测到 6 条撕裂流误差都在 1e-14~1e-6,
-  但两个塔仍报"干涸""组分平衡不收敛"。
-- **不收敛的数据照读,但必须标记**:收敛结果(绿)/ 未收敛有值(黄,禁止进入统计对比)/ 读取失败(红)。
-- 组成**按需读**:18 组分 × 2 相 × 每条流股 = 36 次 COM 调用,全量会让 121 条流股从 9 s 变 41 s。
-  所以只在点开时读一条,并且读之前核对两件事:**当前打开的模型就是这个工况的来源模型**、
-  **运行 ID 还是同一次运行**(模型重跑过就不给,免得和旧快照的温度流量混在一起算)。
-- 前端不使用需要 Node 构建的框架,保证「打包 exe」链路只有一步。
+## 快速开始
 
-## 目录结构
+```bash
+git clone https://github.com/DonkeyHeng/aspen-insight.git
+cd aspen-insight
+python -m pip install -r requirements.txt
+python -m app.api          # 打开 http://127.0.0.1:8000
+```
+
+Windows 下也可以直接双击 `start.cmd`(开控制台,方便看日志)。
+
+然后:
+
+1. **打开模型** —— 在 Aspen Plus 里加载 `.apw` 并完成一次计算
+2. **点「读取当前工况」** —— 左上角蓝色按钮,等进度条走完
+3. **看、比、导** —— 首页看概况,左栏切换流股 / 设备 / 流程,右上角导出
+
+## 没有 Aspen 也能看:样本数据
+
+仓库里带了一份**真实但失败**的工况快照,用来演示界面、验证判定逻辑,不需要 Aspen:
+
+```bash
+cp data/cases.db data/cases.local.db        # 先备份本地库
+cp samples/case-23-error.db data/cases.db
+python -m app.api
+```
+
+样本是 121 流股 / 77 模块 / 2178 条组成记录的异常工况(T0202 塔干涸、T0205 组分不收敛),
+它正好能展示「失败工况长什么样、工具会怎么标」。细节见 [`samples/README.md`](samples/README.md)。
+
+## 数据存在哪里
+
+- 工况快照存在本地 `data/cases.db`(SQLite),不上传、不外传
+- 单位统一换算为 ℃ / bar / kg·h⁻¹ / kW,原始值与原始单位会保留在导出物里
+- 读不到的字段留空并在「单位诊断」里计数,不会静默丢弃
+- 导出物就是普通文件:Excel 工作簿,或一个 zip
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [`docs/aspen-field-map.md`](docs/aspen-field-map.md) | Aspen 的真实字段路径(给开发者/排错) |
+| [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(正在做的管路选型功能) |
+| [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型方案(口径与开工清单) |
+| [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
+| [`app/README.md`](app/README.md) / [`tools/README.md`](tools/README.md) | 代码分层 / 脚本用途 |
+
+## 项目结构
 
 ```
 aspen-insight/
-  README.md              本文件
-  HANDOFF.md             交接文档(第 0 节:现在在哪 / 下一步做什么)
-  AGENTS.md              仓库约定(先查现成实现、网络与工具真相、数字纪律)
-  start.cmd              调试用启动器(开控制台窗口,方便看日志)
-  requirements.txt       Python 依赖:pywin32(COM)+ openpyxl(Excel 导出)
-  app/
-    cli.py                命令行:读当前工况入库、列工况、看明细
-    api/
-      server.py           HTTP 接口(标准库,零依赖)
-      read_job.py         网页「读取当前工况」的后台任务(进度/状态机)
-      composition.py      流股组成按需读(模型/运行 ID 校验 + 缓存)
-      aipack.py           AI 分析包生成(Markdown + CSV + JSON → zip)
-      window.py           窗口几何记忆(ctypes)
-    web/                  原生 HTML + CSS + JS 表格(零构建)
-    aspen/
-      connect.py          附着(ROT → GetObject),失败给人话提示
-      units.py            单位归一(C/bar/kg·h⁻¹/kW…)
-      reader.py           读流股/组成/设备/收敛,并做三档判定
-      balance.py          焓平衡自检:ΔH vs 热负荷/轴功率(纯函数,可回算)
-    store/
-      db.py               SQLite 工况库(cases/streams/stream_components/blocks/column_stages/connections)
-      flowsheet.py        连接关系 → 流程图数据(纯函数)
-      impact.py           报错设备 → 受影响流股(纯函数,「不可用 / 仅告警」)
-  tools/                 脚本(用途与依赖见 tools/README.md)
-    probe_aspen.py       COM 只读探测(诊断入口:注册表 / 附着 / 字段全名)
-    probe_topology.bat   双击入口:拓扑 / 焓值探测(只读)
-    probe_topology.py    探测脚本本体(由上面的 bat 调用)
-    bench.py              性能基准(测 COM 调用成本与规模曲线)
-    column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
-    fill_composition.py   给已存工况批量补流股组成(需 Aspen 开着,只读)
-    make_icon.py          从源图生成 .ico(圆形抠底 + 6 个尺寸)
-    repair_cases.py       按最新规则/单位表重算历史工况(不用回 Aspen 重读)
-    selftest.py           判定 / 焓平衡 / 波及范围的回归自测(不需要 Aspen)
-    stop.py               按端口停止服务
-  assets/                图标(见 assets/README.md)
-    icon-source.jpg      图标源图(2048²,白底圆形徽章)
-    app-icon.ico         成品图标(favicon 用它;桌面快捷方式用部署到 %LOCALAPPDATA% 的副本)
-  docs/                  文档(阅读顺序见 docs/README.md)
-    aspen-field-map.md   真实字段路径地图(实测)
-    pipe-class-codes.md  HG/T 20519.6 等级号规则 + 本项目约定
-    pipe-selection-plan.md  管路选型方案(§14 口径 / §15 开工清单)
-  data/                  本地数据(结构见 data/README.md;*.db / 日志 / 截图不入库)
-  samples/               公开样本库(121 流股 / 77 模块 / 含全部组成的真实读数,见 samples/README.md)
-  standards/             标准 PDF(不入库;规则已摘进 docs,见 standards/README.md)
-  model/                 32 股精简模型(见 model/README.md)
-  model-full/            121 股全流程模型(见 model-full/README.md)
-  probe_out/             探测报告与 UI 截图(不入库)
+  app/           应用代码:aspen(COM)、store(本地库)、api(HTTP)、web(零构建前端)
+  tools/         调试与回算脚本:探测、基准、塔诊断、组成补读、回归自测
+  docs/          字段地图与功能方案
+  assets/        图标
+  samples/       公开样本数据(可离线演示)
+  standards/     标准 PDF 原文(不入库)
+  model/         32 股精简模型与运行文件(不入库)
+  model-full/    121 股全流程模型(不入库)
+  data/          本地工况库与运行产物(不入库)
 ```
 
-> **模型统一放 `model/`**:Aspen 会把 `_<runid>.*` 运行中间文件写在 `.apw` 旁边,
-> 模型进子目录后,根目录就不会被这些文件淹掉。从这里打开模型,不要另存到根目录。
+各目录都有独立 README,第一次看代码建议从 [`app/README.md`](app/README.md) 开始。
 
-## 运行
+## 常见问题
 
-**最省事:双击桌面上的 `aspen-insight` 快捷方式** —— 后台起服务(无黑窗口)并自动打开浏览器;
-打开 Aspen、加载 `.apw`,然后在网页右上角点**「读取当前工况」**。
-关服务用桌面上的 `aspen-insight 停止` 快捷方式,或页面右上角的「退出」。
+**点了「读取当前工况」,提示看不到 Aspen?**
+先确认:它是在真实桌面会话运行(远程/服务会话没有 COM)、和 Aspen 权限一致、
+模型已经在 Aspen 里打开。仍不行就用 `tools/probe_aspen.py` 做一次诊断。
 
-快捷方式直接指向 `pythonw.exe`(GUI 版 Python),所以:
+**为什么组成要点开流股才读?**
+全量读是每条流股 36 次 COM 调用,121 条流股会从几秒变成几十秒。所以按需读、读完缓存。
 
-- 不会弹"无法验证发布者"的安全警告(不经过 `.cmd` 脚本宿主)
-- 不会留一个终端窗口在桌面上
-- 服务日志写到 `data/server.log`(出问题时看这里)
-- 重复双击只会再打开一次网页,不会起第二个服务
+**表格里有些单元格是 `—`?**
+那不是模型没结果,而是单位没被换算表覆盖(多见于老模型的 ENG 单位集)。顶部「单位诊断」会给出计数。
 
-手动/调试方式(`start.cmd` 会开一个控制台窗口,方便看实时输出):
+**不收敛的模型能读吗?**
+能。读数照存,但会标黄并禁止进入统计对比;状态码与模块报错原文都会列出。
 
-```bash
-python -m pip install -r requirements.txt
+**会改动我的模型吗?**
+不会。工具只读取节点值,不调用 Run / Reinit,也不会保存模型。
 
-# 1) 读工况:网页按钮已能完成,命令行只是备选/排错用
-python -m app.cli --list        # 看现在开着哪些模型
-python -m app.cli --read        # 读取并存库,打印摘要
-python -m app.cli --cases       # 列出已存工况
-python -m app.cli --show 1      # 看某个工况的明细
+**支持 Linux / Mac 吗?**
+不支持。Aspen 的 COM 接口只存在于 Windows。
 
-# 2) 起网页看表(调试时用,能看到请求日志)
-python -m app.api               # 打开 http://127.0.0.1:8000
+## 已知限制
 
-# 3) 工具
-python -m tools.bench                  # 性能基准
-python -m tools.column_diag T0202      # 塔逐板剖面 + 异常标记
-python -m tools.selftest --db data/cases.db   # 判定/焓平衡回归自测(不需要 Aspen)
-python tools/stop.py 8000              # 停止服务(等价于桌面"停止"快捷方式)
-python tools/probe_aspen.py --attach --out probe_out   # 完整探测报告(排错用)
-```
+- 只读工具,不做闭环优化,也不写回 Aspen
+- 塔与反应器不参与焓平衡校验(这类设备的能量关系不适用简单加和)
+- 只在 Aspen Plus V15 上实测过,其它版本行为未验证
+- 个人项目,非官方产品;Aspen Plus 是 Aspen Technology, Inc. 的商标
 
-> **改了 `judge()` 判定规则、`balance.py` 容差或单位表之后,先跑 `python -m tools.selftest --db data/cases.db`。**
-> 它会用 4 份真实工况当固定样本,校验"该 ok 的 ok、7 个告警不判 error、空模型判 empty、焓平衡逐台可重算";
-> 不过就说明规则被改坏了,或者改了规则但没跑 `python -m tools.repair_cases --apply`。
+## 参与贡献
 
-> COM 必须在真实桌面会话执行;DSH 沙箱里 ROT 为空,会误报"Aspen 没开"。
+欢迎 issue 与 pull request。动手前建议先看:
 
-## 图标
+1. [`app/README.md`](app/README.md) —— 代码分层与「改判定 / 单位 / 焓平衡必须先跑自测」的约定
+2. [`tools/README.md`](tools/README.md) —— `python -m tools.selftest` 是不需要 Aspen 的回归自测
+3. 请不要提交模型文件、标准 PDF 原文或本地工况库(已在 `.gitignore` 中)
 
-<img src="assets/app-icon_256.png" width="120" alt="aspen-insight 图标">
+## 许可证
 
-图标用在两处:**桌面快捷方式**和**网页 favicon**(所以浏览器"应用窗口"在任务栏里也是这张脸)。
+尚未选定,将在正式开源前补充。在此之前请勿直接再分发。
 
-注意它们用的是**两份拷贝**:
+## 致谢
 
-| 谁用 | 路径 |
-| --- | --- |
-| 桌面快捷方式 | `%LOCALAPPDATA%\aspen-insight\app-icon.ico`(**必须放在项目目录之外**) |
-| 网页 favicon | 仓库里的 `assets/app-icon.ico` |
-
-为什么快捷方式不能指项目目录:实测同一个文件放在项目目录下,资源管理器取不到图标,
-桌面会显示成通用的白色文件图标;复制到用户目录后立刻正常。
-
-源图是 `assets/icon-source.jpg`(2048²,白底圆形徽章)。改图标就重跑:
-
-```bash
-python tools/make_icon.py assets/icon-source.jpg assets/app-icon.ico
-```
-
-脚本做三件事:按**圆的几何**把圆外白底抠成透明(不做全局"白→透明",否则徽章上
-"DEEPSEEK / ASPEN PLUS"的白字会被一起镂空)、生成 16/24/32/48/64/128 六个尺寸、
-把成品部署一份到 `%LOCALAPPDATA%\aspen-insight\`。
-
-> 快捷方式里存的是**绝对路径**。项目搬家或部署副本被删,图标会变回默认样式,
-> 重跑上面的命令、再把 `IconLocation` 指过去即可
-> (`WScript.Shell` → `CreateShortcut` → `.Save()`)。
-
-### 接口(给排错用)
-
-| 方法 | 路径 | 作用 |
-| --- | --- | --- |
-| POST | `/api/read` | 起一次后台读取;已有任务在跑时返回 409 |
-| GET | `/api/read/status` | 读取进度/结果(前端每 0.6 s 轮询) |
-| GET | `/api/compare?base=1&other=2` | 逐流股 + 逐设备对比两个工况(A / B / 差值 / 状态变化) |
-| GET | `/api/cases/{id}/connections` | 设备 ↔ 流股连接关系(方向 / 换热器冷热侧 / 塔进料板 / 来源) |
-| GET | `/api/cases/{id}/flowsheet` | 流程图数据(节点 = 设备、边 = 设备间流股、边界进料 / 产品) |
-| GET | `/api/cases/{id}/impact` | 报错设备的波及范围(哪些流股的数据不可用 / 仅告警) |
-| DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股/设备/连接/塔剖面/组成) |
-| GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
-| GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看) |
-| GET | `/api/cases/{id}/export.ai.zip` | 导出 AI 分析包(给 AI 读) |
-
-工况库默认写到 `data/cases.db`(可用 `--db` 指定)。
-探测报告写入 `probe_out/probe_report.txt` 与 `.json`。
-
-## 免责与边界
-
-- 探测与应用默认**只读**,除显式指定外不调用 `Run2` / `Reinit`,不改动模型。
-- 无 Aspen 环境的机器无法运行本工具(不做演示模式)。
+- **DeepSeek Harness** —— 本项目的代码、文档与整理工作均在 DSH 中完成
+- Aspen Plus 及其相关名称是 Aspen Technology, Inc. 的商标;本项目与该公司无关联,也不包含其任何软件
