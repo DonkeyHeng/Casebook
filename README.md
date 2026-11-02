@@ -103,6 +103,7 @@ aspen-insight/
     probe_topology.py    探测脚本本体(由上面的 bat 调用)
     bench.py              性能基准(测 COM 调用成本与规模曲线)
     column_diag.py        塔逐板剖面 + 异常标记(只标记,不给修复建议)
+    fill_composition.py   给已存工况批量补流股组成(需 Aspen 开着,只读)
     make_icon.py          从源图生成 .ico(圆形抠底 + 6 个尺寸)
     repair_cases.py       按最新规则/单位表重算历史工况(不用回 Aspen 重读)
     selftest.py           判定 / 焓平衡 / 波及范围的回归自测(不需要 Aspen)
@@ -115,7 +116,7 @@ aspen-insight/
     pipe-class-codes.md  HG/T 20519.6 等级号规则 + 本项目约定
     pipe-selection-plan.md  管路选型方案(§14 口径 / §15 开工清单)
   data/                  本地数据(结构见 data/README.md;*.db / 日志 / 截图不入库)
-  samples/               公开样本库(121 流股 / 77 模块的真实读数,见 samples/README.md)
+  samples/               公开样本库(121 流股 / 77 模块 / 含全部组成的真实读数,见 samples/README.md)
   standards/             标准 PDF(不入库;规则已摘进 docs,见 standards/README.md)
   model/                 32 股精简模型(见 model/README.md)
   model-full/            121 股全流程模型(见 model-full/README.md)
