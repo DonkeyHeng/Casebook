@@ -2,7 +2,7 @@
 
 | 文件 | 用途 |
 | --- | --- |
-| `icon-source.jpg` | 源图(2048×2048,白底圆形徽章) |
+| `icon-source.jpg` | 源图(512×512,白底圆形徽章) |
 | `app-icon.ico` | 成品图标:网页 favicon + 仓库内引用 |
 | `app-icon_256.png` | README 里展示用的 256 px 预览 |
 

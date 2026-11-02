@@ -153,11 +153,12 @@ aspen-insight/
 
 ## 参与贡献
 
-欢迎 issue 与 pull request。动手前建议先看:
+欢迎 issue 与 pull request。动手前建议先看 [`CONTRIBUTING.md`](CONTRIBUTING.md),以及:
 
 1. [`app/README.md`](app/README.md) —— 代码分层与「改判定 / 单位 / 焓平衡必须先跑自测」的约定
 2. [`tools/README.md`](tools/README.md) —— `python -m tools.selftest` 是不需要 Aspen 的回归自测
 3. 请不要提交模型文件、标准 PDF 原文或本地工况库(已在 `.gitignore` 中)
+4. 发现安全问题请走 [`SECURITY.md`](SECURITY.md) 的私密渠道,不要开公开 issue
 
 ## 许可证
 
@@ -168,9 +169,3 @@ aspen-insight/
 
 - **DeepSeek Harness** —— 本项目的代码、文档与整理工作均在 DSH 中完成
 - Aspen Plus 及其相关名称是 Aspen Technology, Inc. 的商标;本项目与该公司无关联,也不包含其任何软件
-
-## 开发成本
-
-> 截至 2026-11-02,本项目累计的模型调用费用约为 **¥21.85**。
-
-如实记录,供后续维护者参考;金额与许可无关,本项目按 Apache-2.0 免费提供。
