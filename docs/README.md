@@ -10,12 +10,11 @@
 
 ## 阅读顺序
 
-1. `HANDOFF.md` 第 0 节 —— 现在在哪、下一步做什么
-2. 本目录 `aspen-field-map.md` —— 数据从哪来、字段叫什么
-3. 当前任务对应的文档(现在是 `pipe-selection-plan.md` + `pipe-class-codes.md`)
+1. 本目录 `aspen-field-map.md` —— 数据从哪来、字段叫什么
+2. 当前任务对应的文档(现在是 `pipe-selection-plan.md` + `pipe-class-codes.md`)
 
 ## 约定
 
 - 结论里的数字必须**实测**,注明样本规模与工况号;没验证就写「未验证」,不估算当实测。
 - 标准原文放 `standards/`(不入库),**只有规则摘要进 docs**。
-- 拍板过的决定写在 `HANDOFF.md` §0.3 / §2,不要再翻案。
+- 拍板过的决定记录在内部交接文档中,不再翻案。

@@ -1,55 +1,50 @@
-# aspen-insight — 会话工作约定
+# aspen-insight — 协作约定
 
-## 0. 接手先读
+本文件写给在本仓库工作的开发者与 AI 助手。动手改代码前,先读
+[`docs/conventions.md`](docs/conventions.md) 第 5 节的命名与文档检查清单。
 
-- 只读 `HANDOFF.md` 第 0 节 + `docs/aspen-field-map.md` 就能接手。**不要重新访谈、不要重新探测 Aspen。**
-- 当前下一步是**管路选型**:口径已定稿、代码未写。开工只读 `docs/pipe-selection-plan.md`(§14 定稿口径 + §15 开工清单)与 `docs/pipe-class-codes.md`。
+## 1. 改代码的硬约束
 
-## 1. 动手前先查现成实现
+- 静态文件(HTML / JS / CSS)改完刷新即生效;**Python 改了必须重启服务**
+  (`pythonw -m app.api --port 8000`,或双击 `start.cmd`)。
+- 动了**判定 / 单位 / 焓平衡**口径,必须先跑回归自测,再回算历史工况:
 
-新功能 / 新算法 / 没做过的技术问题,先看别人怎么做的,再动手:
+  ```bash
+  python -m tools.selftest --db data/cases.db
+  python -m tools.repair_cases --apply
+  ```
 
-1. `web_search` 加 `site:github.com` 定位候选仓库;拿不到就走下面的 API。
-2. 有 token 时用 **Python** 调 API(`web_fetch` 带不了请求头,用不了 token):
+  判定规则写在 `app/aspen/reader.py` 顶部与 `tools/selftest.py` 开头,改之前先读。
+  自测网不需要 Aspen,任何人本地都能跑。
+- `app/aspen/` 只读 Aspen,不调用 Run / Reinit / Save,不要引入写模型的代码路径。
 
-   ```python
-   import urllib.request, json, os
-   tok = os.environ.get("GITHUB_TOKEN") or open(r"<token-file>").read().strip()
-   req = urllib.request.Request(url, headers={"Authorization": f"Bearer {tok}", "User-Agent": "dsh"})
-   ```
+## 2. 数字纪律
 
-   - 代码搜索:`https://api.github.com/search/code?q=<关键词>+in:file+language:python`(必须带 token,匿名 401)
-   - 仓库搜索:`https://api.github.com/search/repositories?q=<关键词>&sort=stars&per_page=10`
-3. 读单文件全文:`https://raw.githubusercontent.com/<owner>/<repo>/<branch>/<path>`。
-4. 要看整个仓库:Python 抓 `https://codeload.github.com/<owner>/<repo>/zip/refs/heads/<branch>`,再用 `zipfile` 解压。
-5. 交付时补一句「参考了什么 / 为什么不用它」,再开工。
+- 结论里的数字必须来自**实测**,注明样本规模;没验证就写「未验证」。
+- 不要把估算当实测写进文档或提交信息。
 
-## 2. 网络与工具的真相(别重复踩)
-
-- `web_fetch` 可用,但**只能传 URL、不能加请求头** → 匿名,带不了 token。
-- **沙箱里 Python 有完整外网**(`urllib.request` 实测 200),这是调 GitHub API 的正路。
-- `curl` 不可用:DNS 能解析,但 TLS 报 `schannel: AcquireCredentialsHandle failed (SEC_E_NO_CREDENTIALS)`。
-- `git clone` 不可用:`cannot create standard input pipe for remote-https`。`git add/commit/log/diff` 正常;`git push` 需提权。
-- 匿名额度很小且出口 IP 共享(约 60 次/小时),**查不动就直接说查不动**,不许假装查过、不许凭印象编仓库名。
-
-## 3. 改代码的硬约束
-
-- 静态文件(HTML/JS/CSS)改完刷新即生效;**Python 改了必须重启服务**(`pythonw -m app.api --port 8000` 或双击 `start.cmd`)。
-- 动了判定 / 单位 / 焓平衡口径,先跑 `python -m tools.selftest --db data/cases.db`,再跑 `python -m tools.repair_cases --apply` 回算历史工况 —— 不用回 Aspen 重读。
-- `HANDOFF.md` §0.3、§2 已拍板的决定不要再翻;夹点分析 / 公用工程成本用户明确说**暂缓**。
-
-## 4. 数字纪律
-
-- 结论里的数字必须来自实测,注明样本规模与工况号(现有 #19–#23)。没验证就写「未验证」,不要估算当实测。
-
-## 5. 文件命名与文档规范(必须遵守)
+## 3. 文件命名与文档规范(必须遵守)
 
 新建 / 改名任何文件、目录、文档之前,先过 [`docs/conventions.md`](docs/conventions.md) 第 5 节检查清单。摘要:
 
-- **路径全 ASCII**:目录小写 kebab-case、脚本 snake_case、数据/样本小写连字符;中文只进内容,不进路径。
+- **路径全 ASCII**:目录小写 kebab-case、脚本 snake_case、数据 / 样本小写连字符;中文只进内容,不进路径。
 - 放对位置:代码 `app/`、脚本 `tools/`、文档 `docs/`(并进 `docs/README.md` 索引)、样本 `samples/`、标准 `standards/`。
-- 根 README 只写给外人看:固定结构(定位、徽章、醒目说明、功能、环境、快速开始、样本、数据、文档、结构、FAQ、限制、贡献、许可、致谢、成本);**不写** HANDOFF / 沙箱 / 待办等内部内容。
+- 根 README 只写给外部使用者看:固定结构(定位、徽章、醒目说明、功能、环境、快速开始、样本、数据、文档、结构、FAQ、限制、贡献、许可、致谢、成本);**不写**内部待办、开发过程与工具环境细节。
 - 每个顶层目录都要有 README,写清「放什么、能不能删、怎么用」。
-- 提交信息用 `type(scope): 中文摘要`(feat/fix/docs/refactor/chore/style),大改动带正文;不带 P0/P1。
+- 提交信息用 `type(scope): 中文摘要`(feat / fix / docs / refactor / chore / style),大改动带正文;不带 `P0` / `P1` 编号。
 - 改路径要同步:根 README 目录树、文档引用、脚本默认路径、`.gitignore`、文档互链,最后 grep 确认无残留。
-- 数据安全:模型 / 标准 PDF / 本地库 / 日志 / 截图不入库;样本必须脱敏(`run_user`→`user`、`model_path`→相对路径)。
+
+## 4. 数据与安全
+
+- 模型、标准 PDF 原文、本地工况库、日志、截图**一律不入库**(已写入 `.gitignore`)。
+- 样本必须脱敏后入库:`run_user` → `user`、`model_path` → 相对路径,不留本地绝对路径与个人信息。
+- **不提交他人数据**:他人的模型、他人读数、他人作品的分析结果都不进仓库。
+- 提交前自查:`grep -rnE "[A-Za-z]:[\\/]Users|/home/" .` 应无命中。
+
+## 5. 动手前先看别人怎么做过
+
+遇到新功能、新算法、没做过的集成,先调研现成实现再动手:
+
+1. 用 `web_search` 加 `site:github.com` 定位候选仓库。
+2. 读它的 README 与核心源码,再决定是用、改造还是自己写。
+3. 在 PR / 提交正文里补一句「参考了什么 / 为什么不用」。

@@ -11,12 +11,12 @@
 ------
     probe_topology.bat                  # 双击(推荐):必须在真实桌面会话里跑,COM 才看得见
     python -m tools.probe_topology
-    python -m tools.probe_topology --model 天津        # 只探某个已打开的模型(路径子串)
+    python -m tools.probe_topology --model <关键字>    # 只探某个已打开的模型(路径子串)
     python -m tools.probe_topology --out data/x.txt    # 换个输出路径
 
 产出:`data/probe_topology.txt` —— 一份自带结论的完整证据,直接发回来即可。
 
-实测要点(2026-11-01,样本模型 C V12 全流程模型,98 流股 / 67 设备)
+实测要点(2026-11-01,某参考全流程模型,98 流股 / 67 设备)
 -----------------------------------------------------------------
 * 焓**不是单个标量节点**:`\\Data\\Streams\\<流>\\Output\\HMX` 是目录,值在 `HMX\\MIXED`(J/kmol);
   另有 `HMX_MASS\\MIXED`(J/kg)和 `HMX_FLOW\\MIXED`(MW,现成的 m·h,可直接相加)。
@@ -1394,7 +1394,7 @@ def render_model(rep: Report, model_path: str, data: dict) -> None:
     rep.say("  1) 流股焓 → `streams` 表新列;按报告的 UnitString 换算,别假设单位集。")
     rep.say("  2) 连接关系 → 新表 `connections`(block, side, stream, seq):")
     rep.say("     优先用流股侧 SOURCE/DESTINATION 生成;设备 IN/OUT_STRMID 与换热器分侧字段做交叉校验。")
-    rep.say("  3) 公用工程只做结构记录(成员 / 单价 / 用量 / 使用设备),不做成本判断(HANDOFF 0.3 已拍板)。")
+    rep.say("  3) 公用工程只做结构记录(成员 / 单价 / 用量 / 使用设备),不做成本判断(已拍板)。")
     rep.say("  4) 焓平衡用流股 HMX_FLOW(能量流)算 ΔH,与设备 duty 对照;RadFrac / 反应器不校验。")
 
 
@@ -1502,7 +1502,7 @@ def parse_args(argv=None):
     )
     parser.add_argument(
         "--model", default=None,
-        help="只探这个模型(路径子串匹配,如 天津);默认探 ROT 里所有已打开的模型",
+        help="只探这个模型(路径子串匹配,如 <关键字>);默认探 ROT 里所有已打开的模型",
     )
     parser.add_argument(
         "--out", default=None,

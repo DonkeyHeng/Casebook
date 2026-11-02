@@ -46,3 +46,21 @@ standards/*
 
 # 第三方安装包 / 选型工具(不入库,如水泵选型安装包)
 *.exe
+
+# ---- 内部文档(会话交接、内部笔记;本地保留,不公开) ----
+docs/_internal/
+
+# ---- SQLite 运行期附属文件:含完整数据页,必须忽略 ----
+*-wal
+*-shm
+*-journal
+
+# ---- 本地配置 / 编辑器 / 系统噪声 ----
+.env
+.env.*
+*.bak
+*.tmp
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
