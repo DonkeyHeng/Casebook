@@ -115,6 +115,7 @@ aspen-insight/
     pipe-class-codes.md  HG/T 20519.6 等级号规则 + 本项目约定
     pipe-selection-plan.md  管路选型方案(§14 口径 / §15 开工清单)
   data/                  本地数据(结构见 data/README.md;*.db / 日志 / 截图不入库)
+  samples/               公开样本库(121 流股 / 77 模块的真实读数,见 samples/README.md)
   standards/             标准 PDF(不入库;规则已摘进 docs,见 standards/README.md)
   model/                 32 股精简模型(见 model/README.md)
   model-full/            121 股全流程模型(见 model-full/README.md)

@@ -16,3 +16,9 @@
 - **重置**:停服务,删 `cases.db`;下次点「读取当前工况」自动建库。
 - **回算**(改了判定 / 单位 / 焓平衡之后):`python -m tools.repair_cases --apply`,
   不用回 Aspen 重读。
+
+## 和 `samples/` 的关系
+
+`samples/` 里有一份**脱敏后的公开样本**(工况 #22,异常工况),是唯一入库存档的 `.db`。
+想在不连 Aspen、不污染本地库的情况下看界面,把 `samples/case-22-error.db` 复制成
+`data/cases.db` 即可(先备份原库)。
