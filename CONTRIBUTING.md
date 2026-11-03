@@ -69,6 +69,7 @@ type(scope): 中文摘要
 ## PR 检查清单
 
 - [ ] `python -m tools.selftest --db data/cases.db` 全绿
+- [ ] `python -m tools.check_public_safe --all` 无高危项(密钥 / 隐私 / 本机路径 / 内网)
 - [ ] 没有新增未忽略的模型 / PDF / 数据库 / 日志
 - [ ] 没有本机绝对路径与个人信息
 - [ ] 改了路径的话,README 目录树、文档互链、脚本默认路径都已同步

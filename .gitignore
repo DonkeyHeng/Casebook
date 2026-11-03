@@ -64,3 +64,6 @@ docs/_internal/
 .idea/
 Thumbs.db
 desktop.ini
+
+# ---- 项目专属的禁词 / 放行规则(本地,不公开) ----
+.public-safe.local

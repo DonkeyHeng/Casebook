@@ -14,6 +14,7 @@
 | `selftest.py` | 判定 / 焓平衡 / 波及范围回归自测,拿 4 份真实工况(#19–#22)当固定样本 | ❌ | 只读库 |
 | `make_icon.py` | 源图 → `.ico`(圆形抠底 + 6 个尺寸),并部署副本到 `%LOCALAPPDATA%` | ❌ | 写 `assets/` 和用户目录 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
+| `check_public_safe.py` | 开源 / 提交前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
 
 ## 什么时候跑哪个
 
@@ -22,6 +23,7 @@
 - 读了判定 / 单位 / 焓平衡 → 先 `selftest.py`;不过说明改坏了,过了再 `repair_cases.py --apply`
 - 刚读完工况、想给整份工况补组成(导出样本 / 离线分析)→ `fill_composition.py --case N`,要趁 Aspen 还开着
 - 读得太慢 → `bench.py`
+- 提交前 / 把仓库转公开前 → `check_public_safe.py --all`(工作区 + 全历史一起查)
 
 ## 注意
 
