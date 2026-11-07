@@ -276,6 +276,38 @@ function bindPipeEvents() {
   if (save) save.addEventListener("click", savePipeClass);
   const clear = document.getElementById("pipeClassClear");
   if (clear) clear.addEventListener("click", clearPipeClass);
+
+  // ---- 管道计算说明(纯文字弹窗,不依赖接口数据) ----
+  const docOpen = document.getElementById("pipeDocOpen");
+  if (docOpen) docOpen.addEventListener("click", openPipeDoc);
+  const docClose = document.getElementById("pipeDocClose");
+  if (docClose) docClose.addEventListener("click", closePipeDoc);
+  const docModal = document.getElementById("pipeDocModal");
+  if (docModal) {
+    // 点遮罩关闭;点内容区(含表格里的文字)不关
+    docModal.addEventListener("click", (e) => {
+      if (e.target === docModal) closePipeDoc();
+    });
+  }
+}
+
+/* ------------------------------------------------------------ 管道计算说明 */
+
+function openPipeDoc() {
+  const modal = document.getElementById("pipeDocModal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  document.addEventListener("keydown", pipeDocEsc);
+}
+
+function closePipeDoc() {
+  const modal = document.getElementById("pipeDocModal");
+  if (modal) modal.classList.add("hidden");
+  document.removeEventListener("keydown", pipeDocEsc);
+}
+
+function pipeDocEsc(e) {
+  if (e.key === "Escape") closePipeDoc();
 }
 
 /* ------------------------------------------------------------ 管道等级表弹窗 */

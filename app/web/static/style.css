@@ -1049,3 +1049,33 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 
 /* 等级表:表头说明挪到悬停,表头只留列名;带 title 的表头给个"可悬停"的手势 */
 #pipeClassTable thead th[title] { cursor: help; }
+
+/* ---------------------------------------------------------------- 管道计算说明弹窗
+   纯文字说明,窄一点更好读;内容长就整体滚动(.pipe-modal-box 已经 overflow:auto) */
+.pipe-doc { width: min(860px, 96vw); font-size: 13px; line-height: 1.8; }
+.pipe-doc h4 { margin: 14px 0 6px; font-size: 13.5px; }
+.pipe-doc h4:first-of-type { margin-top: 2px; }
+.pipe-doc p { margin: 0; }
+.pipe-doc code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+}
+.pipe-doc-callout, .pipe-doc-warn, .pipe-doc-note {
+  padding: 9px 12px; border-radius: 8px; font-size: 12.8px; line-height: 1.75;
+}
+.pipe-doc-callout { background: var(--panel); border: 1px solid var(--line); }
+.pipe-doc-warn { background: var(--state-warn-bg); border: 1px solid var(--state-warn-line); color: #7c3d05; }
+.pipe-doc-note { background: var(--bg); border: 1px dashed var(--line); }
+.pipe-doc-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+.pipe-doc-table th, .pipe-doc-table td {
+  border-bottom: 1px solid var(--line); padding: 6px 8px;
+  vertical-align: top; text-align: left; word-break: break-word;
+}
+.pipe-doc-table th { font-weight: 600; color: var(--muted); white-space: nowrap; }
+.pipe-doc-table th:nth-child(1) { width: 36px; }
+.pipe-doc-table th:nth-child(2) { width: 92px; }
+.pipe-doc-table td:nth-child(1) { text-align: right; color: var(--muted); }
+.pipe-doc-list { margin: 0; padding-left: 20px; }
+.pipe-doc-list li { margin: 3px 0; }
+.pipe-doc-codes { columns: 2; column-gap: 28px; }
+.pipe-doc-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }

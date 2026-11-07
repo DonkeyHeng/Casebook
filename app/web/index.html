@@ -100,6 +100,7 @@
           <button id="pipeExportXlsx" class="btn" title="导出整个工况的 Excel(含「管道」「管道计算书」两张表)">导出 Excel</button>
           <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
           <button id="pipeClassOpen" class="btn" title="配置管道等级表(可选:不配就全部按默认材质)">等级表</button>
+          <button id="pipeDocOpen" class="btn" title="管道计算说明:十步流程、公式、数据来源与已知局限(想核对算法时看)">计算说明</button>
         </div>
       </header>
 
@@ -198,6 +199,162 @@
             <button id="pipeClassCancel" class="btn" type="button">取消</button>
           </div>
           <div id="pipeClassError" class="pipe-notice err hidden"></div>
+        </div>
+      </div>
+
+      <!-- 管道计算说明:写给人核对算法用的。第一段就说明"能核对才看",不看的直接忽略 -->
+      <div id="pipeDocModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pipeDocTitle">
+        <div class="pipe-modal-box pipe-doc">
+          <header class="panel-head">
+            <h3 id="pipeDocTitle">管道计算说明</h3>
+            <button id="pipeDocClose" class="close" title="关闭">✕</button>
+          </header>
+
+          <p class="pipe-doc-callout">
+            <b>如果你了解管道选型,可以拿这份说明检验算法对不对。</b>
+            下面十步就是工具算每一根管的完整过程,中间结果全都摆得出来:勾上「显示计算过程」,
+            表里会多出设计压力、设计温度、许用应力、计算厚度、加裕量后厚度、最小壁厚下限几列;
+            导出 Excel 的「管道计算书」是同一份数据。挑几条流股照着算一遍,
+            <b>对不上就是算法有问题</b> —— 把流股名、相态、流量和你算出的值告诉我即可。
+          </p>
+          <p class="pipe-doc-callout muted">
+            <b>如果不了解管道计算,请直接忽略这份说明。</b>
+            你只需要知道:表里的公称直径和壁厚是工具按固定口径<b>算出来的</b>,不是从 Aspen 读的;
+            想改口径就改页面顶部的流速与设计压力参数。
+          </p>
+          <p class="pipe-doc-warn">
+            <b>计算可能有误,结果仅供参考。</b>
+            流速取值、壁厚圆整、最小壁厚下限都是<b>约定口径</b>,不同设计院会取不同的数;
+            工具也不做外压稳定、管长压降、应力与振动校核。这些数字不能直接当施工图或采购清单,
+            正式设计请交由设计人员复核。
+          </p>
+
+          <h4>一、从流量到管径</h4>
+          <table class="pipe-doc-table">
+            <thead><tr><th>步</th><th>做什么</th><th>怎么定 / 公式</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>1</td><td>判相态</td>
+                <td>汽化率 &lt; 1e-4 按液体,&gt; 1−1e-4 按气体,其余按气液共存。留这个容差是因为库里实测有
+                  1e-8 量级的痕量汽化率,按 <code>== 0</code> 判会把全液流股误判成两相。</td>
+              </tr>
+              <tr>
+                <td>2</td><td>取流速</td>
+                <td>液体 1.5、气体 15、两相 8、泵入口 0.8 m/s;泵入口只在该流股<b>进入</b>泵块(方向 in)时生效,
+                  泵出口不沿用这个口径。</td>
+              </tr>
+              <tr>
+                <td>3</td><td>算内径</td>
+                <td><code>D = √(4Q / (π·v))</code>,Q 是 Aspen 的体积流量(m³/h 换算成 m³/s)。</td>
+              </tr>
+              <tr>
+                <td>4</td><td>选 DN</td>
+                <td>从 DN10 起逐档往上试,直到 <code>外径 − 2×壁厚 ≥ 计算内径</code>。
+                  不能按 <code>DN ≥ 计算内径</code> 选 —— 同一 DN 的外径比 DN 大,那样选会系统性偏大。</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h4>二、从压力温度到壁厚</h4>
+          <table class="pipe-doc-table">
+            <thead><tr><th>步</th><th>做什么</th><th>怎么定 / 公式</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>5</td><td>设计压力</td>
+                <td><code>P = (操作绝压 − 0.1013 MPa) × 1.1</code>,下限钳到 1.0 MPa。
+                  表压在 ±0.01 MPa 内按常压算(1.0 bar 绝压不是真空);更低的标真空,
+                  按外压 0.1 MPa 校核 —— 工具不做外压计算。</td>
+              </tr>
+              <tr>
+                <td>6</td><td>设计温度</td>
+                <td>介质 ≥50 ℃ 视为保温,直接取介质温度;只有 65–80 ℃ 且无保温时折 0.95。</td>
+              </tr>
+              <tr>
+                <td>7</td><td>许用应力</td>
+                <td>按牌号 + 设计温度查 GB/T 20801.1 表 B.1,缺温度线性内插;低于 40 ℃ 取 40 ℃ 列;
+                  超出表范围不给值(不猜)。</td>
+              </tr>
+              <tr>
+                <td>8</td><td>计算壁厚</td>
+                <td><code>t = P·D_o / [2·([σ]·Φ_w + P·Y)]</code>,无缝 <code>Φ_w = 1</code>、<code>Y = 0.4</code>。
+                  只有 <code>t &lt; D_o/6</code> 时公式适用,否则标"需另行校核"。</td>
+              </tr>
+              <tr>
+                <td>9</td><td>选壁厚</td>
+                <td>加上腐蚀裕量后要满足 <code>S − C1 ≥ t + C2</code>(C1 是标准壁厚的负偏差,
+                  按 GB/T 17395 表 8 的 S2-B 档),在这个前提下圆整到规格表里的标准壁厚;
+                  最后再套最小壁厚下限。</td>
+              </tr>
+              <tr>
+                <td>10</td><td>等级号</td>
+                <td>压力代号 + 顺序号(默认 1)+ 材质代号,设计温度 ≥50 ℃ 再补保温代号 <code>-H</code>。</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p class="pipe-doc-note">
+            <b>最小壁厚下限</b>:DN10–25 取 2.0 mm、DN32–100 取 3.0 mm、DN125 起不设限。
+            承压公式只管"承得住",不管"能不能施工" —— 1.0 MPa 的 DN15 按公式只要 0.07 mm,
+            圆整到标准壁厚是 0.5 mm,那是换热管/仪表管规格,工艺管道焊不出来。下限<b>只抬高、不降低</b>,
+            承压需要更厚时仍按承压。所以表里会出现"计算厚度 0.21 / 选定壁厚 3.0"这种组合:
+            前者是承压所需,后者是被下限托住的施工厚度。
+          </p>
+
+          <h4>三、几个最容易被质疑的口径</h4>
+          <ul class="pipe-doc-list">
+            <li><b>两相为什么按 8 m/s</b>:保守取法,落在 5–10 m/s 的常用区间内。两份样本模型用的是 16 m/s 上下,
+              按 16 算我们的管径会小一档;引用结论时请注明"两相按 8 m/s 保守选型"。</li>
+            <li><b>液体为什么是 1.5 m/s</b>:常用区间 1.0–2.5 m/s 的中值。样本模型有的取 1.7、有的取 0.75,
+              两种都在工程允许范围内,不是谁算错了。可以在参数条上直接改。</li>
+            <li><b>为什么材质不自动判定</b>:腐蚀不是组分清单的函数 —— 浓度、温度、含水量、氯离子 ppm、流速
+              都会翻转结论(干氯气对碳钢几乎不腐蚀,痕量水就变成剧腐蚀)。用哪种材质由你或材料专业定,
+              工具只按「管道等级表」一致地套用。</li>
+            <li><b>为什么不做管长压降</b>:本期只管"选型",不含管网水力计算;DN 也只做到 600,
+              更大的会单独列在表尾提示"需并联或专项设计"。</li>
+          </ul>
+
+          <h4>四、校验发现(V1–V9)</h4>
+          <ul class="pipe-doc-list pipe-doc-codes">
+            <li><b>V1</b> 流股编号里的口径与选出的 DN 不一致</li>
+            <li><b>V2</b> 按选定内径反算的实际流速,超出该相态的推荐区间</li>
+            <li><b>V3</b> 承压所需壁厚超过所选标准壁厚</li>
+            <li><b>V4</b> 等级号的压力代号低于设计压力</li>
+            <li><b>V5</b> 气液共存却按单相流速选型</li>
+            <li><b>V6</b> 真空流股(按外压 0.1 MPa 另行校核)</li>
+            <li><b>V7</b> 设计温度超出材料常规使用区间</li>
+            <li><b>V8</b> 泵出口流股沿用了泵入口流速</li>
+            <li><b>V9</b> 高温流股却未加保温代号</li>
+          </ul>
+          <p class="muted">这些提示只陈述事实,不替你决定怎么改:该加保温、该换材质、该分两路,都是设计判断。</p>
+
+          <h4>五、数据从哪来</h4>
+          <ul class="pipe-doc-list">
+            <li>外径与标准壁厚系列:GB/T 17395-2024 表 1(碳钢)、表 4(不锈钢)</li>
+            <li>壁厚负偏差:GB/T 17395-2024 表 8,S2-B 档(无缝管按 −12.5%)</li>
+            <li>许用应力:GB/T 20801.1-2025 表 B.1</li>
+            <li>壁厚公式与系数:GB/T 20801.1-2025 6.2.1、表 27(Y 值)、4.1.6.2(最小厚度)</li>
+            <li>压力代号 / 材质代号 / 绝热代号:HG/T 20519.6</li>
+          </ul>
+          <p class="muted">
+            标准表的数值属于标准原文,不随公开仓库分发(只在本机 <code>data/</code> 下);换一台机器要按
+            <code>docs/pipe-standards-index.md</code> 的页码重新录入。录不到时页面会显示"标准表未录入"并列出缺哪张,
+            不会拿 0 算出一张假表。
+          </p>
+
+          <h4>六、明确不做的事</h4>
+          <ul class="pipe-doc-list">
+            <li>DN 上限 600(DN600 以上标"需并联或专项设计")</li>
+            <li>管长压降、外压稳定、管道应力与振动、支吊架</li>
+            <li>按组分判腐蚀性 / 自动选材质</li>
+            <li>允许压降反算管径、泵 NPSH 校核</li>
+            <li>阀门管件统计、管网平衡</li>
+            <li>Aspen Plus V15 以外的版本未验证</li>
+          </ul>
+
+          <p class="pipe-doc-foot muted">
+            核对时建议从中间结果入手:设计压力 → 许用应力 → 计算厚度 → 选定壁厚 → DN,
+            每一步都能独立复算。发现算法问题请带上流股名、相态、体积流量和你的计算结果。
+          </p>
         </div>
       </div>
     </section>
