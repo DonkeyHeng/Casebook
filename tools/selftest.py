@@ -23,10 +23,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+from pathlib import Path
 
 from app.aspen import balance as balance_rules
 from app.aspen import reader
+from app.store import db
 from app.store import impact as impact_rules
 
 PASSED: list[str] = []
@@ -741,6 +744,42 @@ def test_piping_class() -> None:
     check("piping: 负腐蚀裕量被拒", any("0–20" in e for e in errors))
 
 
+def test_install_sample() -> None:
+    """内置示例库:能装进空库;覆盖前把原库备份成 .bak。"""
+    from app.api import server
+
+    root = Path(__file__).resolve().parents[1]
+    tmp = root / "data" / "preview" / "_selftest-sample"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    try:
+        db_path = tmp / "cases.db"
+        ok, msg = server._install_sample(str(db_path), alert=False)
+        check_eq("示例:装库成功", ok, True)
+        check("示例:提示里有流股数", "121" in msg)
+
+        conn = db.open_db(str(db_path))
+        try:
+            cases = db.list_cases(conn)
+        finally:
+            conn.close()
+        check_eq("示例:工况条数", len(cases), 1)
+        check_eq("示例:工况 id", cases[0]["id"], 23)
+        check_eq("示例:流股数", cases[0]["stream_count"], 121)
+
+        ok2, msg2 = server._install_sample(str(db_path), alert=False)
+        check_eq("示例:重复装载也成功", ok2, True)
+        check("示例:覆盖前已备份", (tmp / "cases.db.bak").is_file())
+        check("示例:提示里写了备份", "备份" in msg2)
+        conn = db.open_db(str(db_path))
+        try:
+            check_eq("示例:覆盖后仍是同一条工况", len(db.list_cases(conn)), 1)
+        finally:
+            conn.close()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -758,7 +797,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("选型校验 validate() V1–V9", test_pipe_checks),
                      ("标准表补录说明 setup_guide()", test_pipe_setup),
                      ("标准表导入 import_standards()", test_std_import),
-                     ("管道等级表 piping-class", test_piping_class)):
+                     ("管道等级表 piping-class", test_piping_class),
+                     ("内置示例库 install_sample()", test_install_sample)):
         print(f"\n[{name}]")
         fn()
 

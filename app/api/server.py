@@ -243,6 +243,19 @@ class Handler(BaseHTTPRequestHandler):
                     }
                 self._json(payload, 200 if ok else 400)
                 return
+            if path == "/api/sample/install":
+                # 首页「载入示例工况」按钮:把内置示例库装进当前库(先备份原库)
+                ok, message = _install_sample(self.db_path, alert=False)
+                payload = {"ok": ok, "message": message}
+                if ok:
+                    conn = db.open_db(self.db_path)
+                    try:
+                        cases = db.list_cases(conn)
+                    finally:
+                        conn.close()
+                    payload["case_id"] = cases[0]["id"] if cases else None
+                self._json(payload, 200 if ok else 500)
+                return
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
@@ -955,25 +968,37 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
         httpd.server_close()
 
 
-def _install_sample(db_path: str) -> bool:
-    """把内置的示例工况库装成当前库(`--sample` 用:没有 Aspen 也能先看界面)。
+def _install_sample(db_path: str, alert: bool = True) -> tuple[bool, str]:
+    """把内置的示例工况库装成当前库(`--sample` 与首页按钮共用)。
 
     会先把已有的库备份成 `*.bak`,不覆盖掉用户自己的数据。
+    返回 (是否成功, 给人看的说明)。
     """
     src = paths.resource_root() / "samples" / "case-23-error.db"
     if not src.is_file():
-        _say(f"没有内置示例工况库:{src}")
-        _alert("这个版本里没有内置示例工况库。\n可以到仓库的 samples/ 目录拿 case-23-error.db。")
-        return False
+        msg = (f"这个版本里没有内置示例工况库(缺 {src})。"
+               "可以到仓库的 samples/ 目录拿 case-23-error.db。")
+        _say(msg)
+        if alert:
+            _alert(msg)
+        return False, msg
     dst = Path(db_path)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    backup_note = ""
     if dst.is_file():
         backup = dst.with_name(dst.name + ".bak")
         shutil.copy2(dst, backup)
         _say(f"已把原工况库备份成:{backup}")
+        backup_note = f";原库已备份成 {backup.name}"
+    # 清掉可能残留的 SQLite 附属文件,避免旧数据页混进新库
+    for suffix in ("-wal", "-shm", "-journal"):
+        side = Path(str(dst) + suffix)
+        if side.is_file():
+            side.unlink(missing_ok=True)
     shutil.copy2(src, dst)
-    _say(f"已装入示例工况库:{dst}(121 流股 / 77 模块,含两个塔的报错)")
-    return True
+    msg = f"已装入示例工况:121 流股 / 77 模块,含两个塔的报错{backup_note}"
+    _say(msg)
+    return True, msg
 
 
 def main() -> int:
@@ -992,6 +1017,7 @@ def main() -> int:
     _say(f"启动 Casebook (pid={os.getpid()})")
     if args.sample:
         _install_sample(args.db)
+    _say("提示:没有 Aspen 时,可以在首页点「载入示例工况」,或用 --sample 启动。")
     try:
         serve(args.db, args.host, args.port,
               open_browser=not args.no_browser,

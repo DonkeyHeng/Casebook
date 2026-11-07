@@ -375,6 +375,17 @@ td.name { font-weight: 550; }
 .msg { color: var(--muted); max-width: 520px; overflow: hidden; text-overflow: ellipsis; }
 
 .empty { padding: 40px; text-align: center; color: var(--muted); white-space: pre-wrap; line-height: 1.8; }
+
+/* 首页空态的「载入示例工况」按钮:文字 + 说明一行,窄窗口自动换行 */
+.empty-actions {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 16px;
+}
+.empty-actions .muted { font-size: 12.5px; }
+.empty-actions code {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 3px;
+}
 .hidden { display: none !important; }
 
 /* ---------- 对比页 ---------- */

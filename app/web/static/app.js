@@ -61,6 +61,19 @@ async function apiDelete(path) {
   return res.json();
 }
 
+async function apiPost(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: body ? { "Content-Type": "application/json" } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || data.message || `请求失败:${res.status}`);
+  }
+  return res.json();
+}
+
 function esc(value) {
   return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
@@ -1655,11 +1668,7 @@ function exportFlowPng() {
 const EMPTY_HINT = [
   "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。",
   "",
-  "想看样例数据(不需要 Aspen):",
-  "① 打开 samples 文件夹,复制 case-23-error.db",
-  "② 粘贴到 data 文件夹",
-  "③ 改名为 cases.db(已有就覆盖)",
-  "④ 刷新本页,首页会出现工况 #23",
+  "没有 Aspen 也能先看界面:点下面的「载入示例工况」。",
 ].join("\n");
 
 function showEmpty(text) {
@@ -1809,7 +1818,14 @@ function renderHome() {
     cards.innerHTML = `<section class="card wide">
         <h3>${state.emptyIsError ? "读不到工况" : "还没有工况"}</h3>
         <p class="muted" style="margin:0;line-height:1.8;white-space:pre-wrap">${esc(hint)}</p>
+        ${state.emptyIsError ? "" : `
+        <div class="empty-actions">
+          <button id="loadSampleBtn" class="btn primary" type="button">载入示例工况(无需 Aspen)</button>
+          <span class="muted">121 流股 / 77 模块的异常工况样本;会先把你现在的库备份成 <code>cases.db.bak</code></span>
+        </div>`}
       </section>`;
+    const sampleBtn = document.getElementById("loadSampleBtn");
+    if (sampleBtn) sampleBtn.addEventListener("click", installSampleData);
     problemsCard.classList.add("hidden");
     return;
   }
@@ -2087,6 +2103,34 @@ function bindEvents() {
     });
   }
   document.getElementById("deleteBtn").addEventListener("click", deleteCurrentCase);
+}
+
+/* 首页空态的「载入示例工况」:把内置示例库装进当前库(等价于 --sample,先备份原库) */
+async function installSampleData() {
+  const ok = confirm(
+    "载入内置示例工况?\n\n"
+    + "会先用示例数据覆盖当前工况库,原库自动备份成 cases.db.bak。\n"
+    + "如果你已经读过自己的模型,点「取消」即可。"
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById("loadSampleBtn");
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "正在载入…"; }
+  try {
+    const res = await apiPost("/api/sample/install");
+    hideEmpty();
+    await refreshCases(res.case_id ?? null);
+    if (state.cases.length) {
+      await loadCase(res.case_id ?? state.cases[0].id);
+    } else {
+      showEmpty("示例库装好了,但没读到工况。刷新一下页面试试。");
+    }
+  } catch (err) {
+    alert(`载入示例失败:${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label || "载入示例工况(无需 Aspen)"; }
+  }
 }
 
 async function init() {
