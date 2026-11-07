@@ -435,3 +435,116 @@ def piping_class_status() -> dict:
         "default_grade": (PIPING_CLASS_DEFAULT or {}).get("grade"),
         "note": "" if PIPING_CLASS_RULES else "未配置管道等级表:全部流股按页面上的默认材质计算",
     }
+
+
+PIPING_CLASS_PATH = _CONFIG_DIR / "piping-classes.json"
+
+#: 允许填进等级表的牌号(与许用应力表一致)
+PIPING_CLASS_GRADES = tuple(MATERIAL_CODE_BY_GRADE)
+
+#: 介质代号可以填的取值(空列表 = 不限制介质)
+PIPING_CLASS_MEDIA = ("PL", "PG", "PGL")
+
+
+def reload_piping_classes() -> None:
+    """重新读配置文件 —— 页面保存后调用,生效不用重启服务。"""
+    global PIPING_CLASS_RULES, PIPING_CLASS_DEFAULT
+    PIPING_CLASS_RULES, PIPING_CLASS_DEFAULT = _load_piping_classes()
+
+
+def validate_piping_classes(payload) -> tuple[dict, list[str]]:
+    """清洗用户提交的等级表,返回 (清洗后, 错误列表)。
+
+    只做**结构与取值**校验:牌号必须在许用应力表里、腐蚀裕量是非负数、
+    前缀/介质至少给一个 —— 至于"这个介质该不该用这个材质"不在这里判断。
+    """
+    errors: list[str] = []
+    data = payload if isinstance(payload, dict) else {}
+    raw_rules = data.get("rules") or []
+    if not isinstance(raw_rules, list):
+        return {"rules": [], "default": None}, ["rules 必须是数组"]
+
+    def _list(value) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return []
+        return [str(v).strip().upper() for v in value if str(v).strip()]
+
+    rules: list[dict] = []
+    for i, raw in enumerate(raw_rules, 1):
+        if not isinstance(raw, dict):
+            errors.append(f"第 {i} 条不是对象")
+            continue
+        prefixes = _list(raw.get("stream_prefix"))
+        media = _list(raw.get("medium"))
+        grade = str(raw.get("grade") or "").strip()
+        if not prefixes and not media:
+            errors.append(f"第 {i} 条:前缀和介质至少填一个")
+            continue
+        if grade not in PIPING_CLASS_GRADES:
+            errors.append(f"第 {i} 条:牌号 {grade!r} 不在 {'/'.join(PIPING_CLASS_GRADES)} 里")
+            continue
+        bad_media = [m for m in media if m not in PIPING_CLASS_MEDIA]
+        if bad_media:
+            errors.append(f"第 {i} 条:介质代号 {bad_media} 不认识(可用 {'/'.join(PIPING_CLASS_MEDIA)})")
+            continue
+        c2 = raw.get("corrosion_mm")
+        try:
+            c2 = 0.0 if c2 in (None, "") else float(c2)
+        except (TypeError, ValueError):
+            errors.append(f"第 {i} 条:腐蚀裕量必须是数字")
+            continue
+        if c2 < 0 or c2 > 20:
+            errors.append(f"第 {i} 条:腐蚀裕量要在 0–20 mm 之间")
+            continue
+        rule = {"grade": grade, "corrosion_mm": c2}
+        if prefixes:
+            rule["stream_prefix"] = prefixes
+        if media:
+            rule["medium"] = media
+        note = str(raw.get("note") or "").strip()
+        if note:
+            rule["note"] = note[:80]
+        rules.append(rule)
+
+    default = None
+    raw_default = data.get("default")
+    if isinstance(raw_default, dict) and str(raw_default.get("grade") or "").strip():
+        grade = str(raw_default.get("grade")).strip()
+        if grade not in PIPING_CLASS_GRADES:
+            errors.append(f"兜底牌号 {grade!r} 不在 {'/'.join(PIPING_CLASS_GRADES)} 里")
+        else:
+            try:
+                c2 = float(raw_default.get("corrosion_mm") or 0.0)
+            except (TypeError, ValueError):
+                c2 = 0.0
+            default = {"grade": grade, "corrosion_mm": max(0.0, min(c2, 20.0))}
+    return {"rules": rules, "default": default}, errors
+
+
+def save_piping_classes(payload) -> tuple[bool, list[str]]:
+    """校验 → 写文件 → 重新加载。返回 (是否写入, 错误列表)。"""
+    cleaned, errors = validate_piping_classes(payload)
+    if errors:
+        return False, errors
+    _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not cleaned["rules"] and not cleaned["default"]:
+        # 空表 = 清除配置,回到"全部按默认材质"
+        try:
+            PIPING_CLASS_PATH.unlink(missing_ok=True)
+        except OSError as exc:
+            return False, [f"删除配置失败:{exc}"]
+        reload_piping_classes()
+        return True, []
+    payload_out = {"_说明": "由管道页的「等级表」按钮生成;删掉本文件等于回到默认材质",
+                   **cleaned}
+    try:
+        PIPING_CLASS_PATH.write_text(
+            json.dumps(payload_out, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError as exc:
+        return False, [f"写入配置失败:{exc}"]
+    reload_piping_classes()
+    return True, []

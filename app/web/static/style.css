@@ -992,3 +992,27 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 /* .empty 带 white-space: pre-wrap(给纯文本空态用的),但 409 卡片是 HTML 结构,
    不覆盖它的话模板里的换行会被原样渲染成一大片空行 */
 #pipeEmpty .pipe-blocked { white-space: normal; }
+
+/* ---------- 管道等级表弹窗 ---------- */
+.pipe-modal {
+  position: fixed; inset: 0; z-index: 50; padding: 24px;
+  background: rgba(17, 24, 39, .45);
+  display: flex; align-items: center; justify-content: center;
+}
+.pipe-modal-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  width: min(940px, 96vw); max-height: 88vh; overflow: auto;
+  padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.pipe-class-hint { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.75; }
+.pipe-class-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pipe-class-default { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); }
+#pipeClassTable { width: 100%; }
+#pipeClassTable td { padding: 6px 8px; vertical-align: middle; }
+#pipeClassTable input, #pipeClassTable select {
+  width: 100%; padding: 4px 6px; font: inherit; font-size: 12.5px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--panel); color: var(--text);
+}
+#pipeClassTable input.pc-c2 { width: 80px; text-align: right; }
+#pipeClassTable .pc-del { padding: 2px 8px; }

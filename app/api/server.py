@@ -187,6 +187,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # 兜底,别让服务挂掉
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
+    def _read_json_body(self) -> dict:
+        """读 POST 的 JSON body;读不到就当空对象(参数校验会兜住)。"""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except (TypeError, ValueError):
+            return {}
+        if length <= 0:
+            return {}
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return {}
+        return body if isinstance(body, dict) else {}
+
     def do_POST(self) -> None:  # noqa: N802
         path = unquote(urlparse(self.path).path)
         try:
@@ -197,6 +212,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/read":
                 self._start_read()
+                return
+            if path == "/api/piping-classes":
+                # 保存管道等级表:校验 → 写 data/config/piping-classes.json → 重新加载
+                from app.design import pipe_data
+
+                ok, errors = pipe_data.save_piping_classes(self._read_json_body())
+                payload = {"ok": ok, "errors": errors,
+                           "status": pipe_data.piping_class_status()}
+                self._json(payload, 200 if ok else 400)
                 return
             self._error("未知接口", 404)
         except BrokenPipeError:
@@ -211,6 +235,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if len(parts) == 3 and parts[:2] == ["api", "cases"]:
                 self._delete_case(parts[2])
+                return
+            if parts == ["api", "piping-classes"]:
+                # 清除等级表 = 回到"全部按默认材质"
+                from app.design import pipe_data
+
+                ok, errors = pipe_data.save_piping_classes({"rules": [], "default": None})
+                self._json({"ok": ok, "errors": errors,
+                            "status": pipe_data.piping_class_status()}, 200 if ok else 400)
                 return
             self._error("未知接口", 404)
         except BrokenPipeError:
@@ -273,6 +305,19 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "pipe-tables"]:
             # 管路选型要用的标准表录到什么程度(前端空状态用)
             self._json(_pipe_table_status())
+            return
+        if parts == ["api", "piping-classes"]:
+            # 管道等级表的当前内容(页面上的「等级表」弹窗读它)
+            from app.design import pipe_data
+
+            self._json({
+                "status": pipe_data.piping_class_status(),
+                "rules": pipe_data.PIPING_CLASS_RULES,
+                "default": pipe_data.PIPING_CLASS_DEFAULT,
+                "grades": list(pipe_data.PIPING_CLASS_GRADES),
+                "media": list(pipe_data.PIPING_CLASS_MEDIA),
+                "file": "data/config/piping-classes.json",
+            })
             return
         if parts[:2] != ["api", "cases"]:
             self._error("未知接口", 404)

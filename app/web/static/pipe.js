@@ -261,6 +261,121 @@ function bindPipeEvents() {
     if (!c) return;
     window.location.href = `/api/cases/${c.id}/export.ai.zip`;
   });
+
+  // ---- 管道等级表(可选覆盖) ----
+  const open = document.getElementById("pipeClassOpen");
+  if (open) open.addEventListener("click", openPipeClass);
+  const close = document.getElementById("pipeClassClose");
+  if (close) close.addEventListener("click", closePipeClass);
+  const cancel = document.getElementById("pipeClassCancel");
+  if (cancel) cancel.addEventListener("click", closePipeClass);
+  const add = document.getElementById("pipeClassAdd");
+  if (add) add.addEventListener("click", () => addPipeClassRow({}));
+  const save = document.getElementById("pipeClassSave");
+  if (save) save.addEventListener("click", savePipeClass);
+  const clear = document.getElementById("pipeClassClear");
+  if (clear) clear.addEventListener("click", clearPipeClass);
+}
+
+/* ------------------------------------------------------------ 管道等级表弹窗 */
+
+const PIPE_CLASS_GRADES = ["20#", "Q345A", "Q345B", "S30408", "S31603"];
+
+function openPipeClass() {
+  const modal = document.getElementById("pipeClassModal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  showPipeClassError("");
+  api("/api/piping-classes").then((data) => {
+    const grades = (data && data.grades) || PIPE_CLASS_GRADES;
+    const defaultSel = document.getElementById("pipeClassDefault");
+    if (defaultSel) {
+      defaultSel.innerHTML = '<option value="">(不设兜底:未命中的走默认材质)</option>'
+        + grades.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
+      defaultSel.value = (data && data.default && data.default.grade) || "";
+    }
+    const tbody = document.querySelector("#pipeClassTable tbody");
+    if (tbody) tbody.innerHTML = "";
+    ((data && data.rules) || []).forEach((rule) => addPipeClassRow(rule, grades));
+    if (!((data && data.rules) || []).length) addPipeClassRow({}, grades);
+  }).catch((err) => showPipeClassError(`读不到当前配置:${err.message}`));
+}
+
+function closePipeClass() {
+  const modal = document.getElementById("pipeClassModal");
+  if (modal) modal.classList.add("hidden");
+}
+
+function showPipeClassError(text) {
+  const el = document.getElementById("pipeClassError");
+  if (!el) return;
+  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
+  el.classList.remove("hidden");
+  el.textContent = text;
+}
+
+/* 一行 = 一条规则:前缀(逗号分隔) / 介质(逗号分隔) / 牌号 / 腐蚀裕量 / 说明 */
+function addPipeClassRow(rule, grades) {
+  const tbody = document.querySelector("#pipeClassTable tbody");
+  if (!tbody) return;
+  const list = grades || PIPE_CLASS_GRADES;
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input class="pc-prefix" placeholder="如 CW,CWR" value="${esc((rule.stream_prefix || []).join(","))}"></td>
+    <td><input class="pc-medium" placeholder="如 PL" value="${esc((rule.medium || []).join(","))}"></td>
+    <td><select class="pc-grade">${list.map((g) =>
+      `<option value="${esc(g)}"${g === rule.grade ? " selected" : ""}>${esc(g)}</option>`).join("")}</select></td>
+    <td><input class="pc-c2" type="number" step="0.1" min="0" max="20" value="${rule.corrosion_mm ?? 0}"></td>
+    <td><input class="pc-note" placeholder="可选" value="${esc(rule.note || "")}"></td>
+    <td><button class="btn pc-del" type="button" title="删掉这一条">✕</button></td>`;
+  tr.querySelector(".pc-del").addEventListener("click", () => tr.remove());
+  tbody.appendChild(tr);
+}
+
+function collectPipeClass() {
+  const rows = [...document.querySelectorAll("#pipeClassTable tbody tr")];
+  const rules = rows.map((tr) => {
+    const split = (sel) => (tr.querySelector(sel).value || "")
+      .split(/[,,\s]+/).map((s) => s.trim()).filter(Boolean);
+    return {
+      stream_prefix: split(".pc-prefix"),
+      medium: split(".pc-medium").map((s) => s.toUpperCase()),
+      grade: tr.querySelector(".pc-grade").value,
+      corrosion_mm: Number(tr.querySelector(".pc-c2").value || 0),
+      note: tr.querySelector(".pc-note").value.trim(),
+    };
+  }).filter((r) => r.stream_prefix.length || r.medium.length);
+  const defaultGrade = document.getElementById("pipeClassDefault").value;
+  return { rules, default: defaultGrade ? { grade: defaultGrade, corrosion_mm: 0 } : null };
+}
+
+async function savePipeClass() {
+  const payload = collectPipeClass();
+  const res = await fetch("/api/piping-classes", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    showPipeClassError("保存失败:" + ((body.errors || []).join(";") || `HTTP ${res.status}`));
+    return;
+  }
+  closePipeClass();
+  pipeState.tables = null;         // 状态变了,重新拉一次
+  if (state.current) loadPipeTableStatus().then(() => runPipeCalc({ force: true }));
+}
+
+async function clearPipeClass() {
+  const res = await fetch("/api/piping-classes", { method: "DELETE" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || !body.ok) {
+    showPipeClassError("清除失败:" + ((body.errors || []).join(";") || `HTTP ${res.status}`));
+    return;
+  }
+  closePipeClass();
+  pipeState.tables = null;
+  if (state.current) loadPipeTableStatus().then(() => runPipeCalc({ force: true }));
 }
 
 function onPipeParamInput(evt) {

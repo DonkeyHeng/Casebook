@@ -99,6 +99,7 @@
           <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
           <button id="pipeExportXlsx" class="btn" title="导出整个工况的 Excel(含「管道」「管道计算书」两张表)">导出 Excel</button>
           <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
+          <button id="pipeClassOpen" class="btn" title="配置管道等级表(可选:不配就全部按默认材质)">等级表</button>
         </div>
       </header>
 
@@ -151,6 +152,49 @@
         <h3 id="pipeFindingsTitle">校验发现</h3>
         <div id="pipeFindingsBody"></div>
       </section>
+
+      <!-- 管道等级表:可选的覆盖规则。关掉这个弹窗就还是"全部按默认材质" -->
+      <div id="pipeClassModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pipeClassTitle">
+        <div class="pipe-modal-box">
+          <header class="panel-head">
+            <h3 id="pipeClassTitle">管道等级表</h3>
+            <button id="pipeClassClose" class="close" title="关闭(不保存)">✕</button>
+          </header>
+          <p class="pipe-class-hint">
+            可选:命中就按表里的材质/腐蚀裕量算,没配就全部按上面的默认材质。
+            工具只按表套用,<b>不判断介质是否腐蚀</b> —— 耐蚀性由设计人员定。
+            保存后立即重算,不用重启服务。
+          </p>
+          <div class="table-wrap small">
+            <table id="pipeClassTable">
+              <thead>
+                <tr>
+                  <th>流股名前缀<br><span class="muted">逗号分隔,可留空</span></th>
+                  <th>介质代号<br><span class="muted">PL/PG/PGL,可留空</span></th>
+                  <th>牌号</th>
+                  <th>腐蚀裕量 mm</th>
+                  <th>说明</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="pipe-class-actions">
+            <button id="pipeClassAdd" class="btn" type="button">+ 加一条</button>
+            <label class="pipe-class-default">兜底材质
+              <select id="pipeClassDefault">
+                <option value="">(不设兜底:未命中的走默认材质)</option>
+              </select>
+            </label>
+            <span class="spacer"></span>
+            <button id="pipeClassSave" class="btn primary" type="button">保存并重算</button>
+            <button id="pipeClassClear" class="btn" type="button">清除(用默认材质)</button>
+            <button id="pipeClassCancel" class="btn" type="button">取消</button>
+          </div>
+          <div id="pipeClassError" class="pipe-notice err hidden"></div>
+        </div>
+      </div>
     </section>
 
     <!-- 数据页:流股 / 设备 / 对比 共用 -->

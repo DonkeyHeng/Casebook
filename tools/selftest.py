@@ -560,6 +560,30 @@ def test_piping_class() -> None:
     check_eq("piping: 空规则+空兜底不抛异常",
              pipe_data.resolve_piping_class("X", "PL", rules=[], default=None)["grade"], None)
 
+    # 页面保存前的结构校验(只验结构,不判断"该不该用这个材质")
+    good = {"rules": [{"stream_prefix": ["cw"], "grade": "20#", "corrosion_mm": 1.0}],
+            "default": {"grade": "S30408"}}
+    cleaned, errors = pipe_data.validate_piping_classes(good)
+    check_eq("piping: 合法配置通过校验", errors, [])
+    check_eq("piping: 前缀统一转大写", cleaned["rules"][0]["stream_prefix"], ["CW"])
+    check_close("piping: 腐蚀裕量转成数字", cleaned["rules"][0]["corrosion_mm"], 1.0)
+
+    _, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"medium": ["PL"], "grade": "铝"}]})
+    check("piping: 不认识的牌号被拒", any("牌号" in e for e in errors))
+
+    _, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"grade": "S30408"}]})
+    check("piping: 前缀和介质都不填被拒", any("至少填一个" in e for e in errors))
+
+    _, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"medium": ["XX"], "grade": "S30408"}]})
+    check("piping: 不认识的介质代号被拒", any("介质代号" in e for e in errors))
+
+    _, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"medium": ["PL"], "grade": "S30408", "corrosion_mm": -1}]})
+    check("piping: 负腐蚀裕量被拒", any("0–20" in e for e in errors))
+
 
 # ---------------------------------------------------------------- runner
 
