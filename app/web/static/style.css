@@ -950,7 +950,8 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 #pipeTable tbody tr.pipe-row-hl td { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* 空态 / 409 卡片 */
-.pipe-blocked { line-height: 1.9; font-size: 13px; }
+/* 空态容器(#pipeEmpty)是 .empty:白空格保留 + 居中,这里是整块 HTML,必须改回来 */
+.pipe-blocked { line-height: 1.9; font-size: 13px; white-space: normal; text-align: left; }
 .pipe-blocked h3 { margin: 0 0 6px; font-size: 15px; }
 .pipe-blocked p { margin: 0 0 10px; }
 .pipe-table-status { list-style: none; margin: 0 0 10px; padding: 0; }
@@ -962,17 +963,23 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .pipe-setup {
   margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line);
   border-radius: 8px; background: var(--bg);
+  max-width: 100%; overflow: hidden;
 }
 .pipe-setup h4 { margin: 0 0 6px; font-size: 13.5px; }
 .pipe-setup p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.75; }
-.pipe-setup-files { width: 100%; border-collapse: collapse; margin: 0 0 10px; font-size: 12.5px; }
+/* 固定列宽 + 任意断行:长路径、长列名(许用应力_200)都不会把表撑出卡片 */
+.pipe-setup-files { width: 100%; border-collapse: collapse; margin: 0 0 10px; font-size: 12.5px; table-layout: fixed; }
+.pipe-setup-files th:nth-child(1) { width: 46%; }
+.pipe-setup-files th:nth-child(2) { width: 54%; }
 .pipe-setup-files th, .pipe-setup-files td {
   border-bottom: 1px solid var(--line); padding: 5px 6px;
-  text-align: left; vertical-align: top; word-break: break-word;
+  text-align: left; vertical-align: top;
+  overflow-wrap: anywhere; word-break: break-word;
 }
-.pipe-setup-files th { color: var(--muted); font-weight: 600; }
+.pipe-setup-files th { color: var(--muted); font-weight: 600; white-space: normal; }
+.pipe-setup-files code { overflow-wrap: anywhere; }
 .pipe-setup-steps { margin: 0 0 8px; padding-left: 20px; font-size: 12.5px; line-height: 1.8; }
-.pipe-setup-steps li { margin: 2px 0; }
+.pipe-setup-steps li { margin: 2px 0; overflow-wrap: anywhere; }
 
 /* 校验发现:按码分组,同一码的修法一样,分码看才像清单 */
 .pipe-finding-group { margin-bottom: 12px; }

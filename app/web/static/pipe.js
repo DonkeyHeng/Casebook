@@ -804,9 +804,10 @@ function pipeBlockedHtml(message, tables, setup) {
       <h4>怎么补上</h4>
       <p class="muted">${esc(setup.why)}</p>
       <table class="pipe-setup-files">
-        <thead><tr><th>放到 <code>${esc(setup.dir)}</code> 下的文件</th><th>来自哪张表</th><th>必需列</th></tr></thead>
+        <thead><tr><th>文件(放到 <code>${esc(setup.dir)}</code> 下)</th><th>来自哪张表 / 必需列</th></tr></thead>
         <tbody>${(setup.files || []).map((f) => `<tr>
-          <td><code>${esc(f.name)}</code></td><td>${esc(f.from)}</td><td>${esc(f.columns)}</td>
+          <td><code>${esc(f.name)}</code><br><span class="muted">${esc(f.from)}</span></td>
+          <td>${esc(f.columns)}</td>
         </tr>`).join("")}</tbody>
       </table>
       <ol class="pipe-setup-steps">${(setup.steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>

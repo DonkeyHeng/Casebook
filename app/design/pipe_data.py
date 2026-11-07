@@ -331,12 +331,11 @@ SETUP_GUIDE: dict = {
     ],
     "files": [
         {"name": "t1-17395-table1.csv", "from": "GB/T 17395-2024 表 1",
-         "columns": "D_mm, S_mm(其余列可留空;表号/PDF页/系列/kg_per_m 有就带上)"},
+         "columns": "D_mm, S_mm(其余列可空)"},
         {"name": "t4-17395-table4.csv", "from": "GB/T 17395-2024 表 4",
-         "columns": "D_mm, S_mm(其余列同上)"},
+         "columns": "D_mm, S_mm(其余列可空)"},
         {"name": "t3-20801-tableB1.csv", "from": "GB/T 20801.1-2025 表 B.1",
-         "columns": "标准, 牌号, 许用应力_20 … 许用应力_400(每个温度一列,列名必须是 "
-                    "许用应力_<整数温度>)"},
+         "columns": "标准, 牌号, 许用应力_20 … 400(每个温度一列)"},
     ],
 }
 
