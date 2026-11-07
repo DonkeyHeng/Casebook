@@ -879,7 +879,9 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   --text-faint: #9ca3af;
 }
 
-#pagePipes { display: flex; flex-direction: column; min-height: 0; }
+/* 和 #pageData 一致:页面自己滚,表头 sticky 才跟着页面滚动生效
+   (别用 flex 列:父级没有确定高度,表体会被压成表头高) */
+#pagePipes { height: 100%; overflow-y: auto; }
 
 /* 状态条:计算中 / 参数不合法 / 连不上。409 用整块卡片,不用这里 */
 .pipe-notice {
@@ -923,7 +925,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .pipe-toggle { gap: 5px; }
 
 /* 表体撑满剩余高度:这一页有参数面板,不能用 .page .table-wrap 的 max-height 公式 */
-.pipe-wrap { flex: 1 1 auto; min-height: 0; margin-top: 10px; }
+.pipe-wrap { margin-top: 10px; max-height: none; }
 .pipe-wrap table { min-width: 1080px; }
 /* 结果还没回来时旧表淡一点,但不清空 —— 整页闪白比慢更难受 */
 .pipe-wrap.stale { opacity: .55; transition: opacity .12s; }

@@ -102,10 +102,10 @@ def inner_diameter(vol_flow_m3h: float, velocity_ms: float) -> float:
 
 
 def pick_dn(inner_d_mm: float, dn_to_od: Mapping[int, float]) -> tuple[int | None, float | None]:
-    """向上取 DN(公称直径按"不小于计算内径"处理),返回 (DN, 公称外径)。
+    """**初选** DN:取第一个 `DN ≥ 计算内径` 的档位,返回 (DN, 公称外径)。
 
-    `dn_to_od` 是 DN→外径表(化工 Φ 系列)。表还没录时返回 (None, None),
-    调用侧要把它记成"缺数据,未选型",不能当成 0。
+    注意这只是一次粗选:DN 是公称直径,同一 DN 的外径比 DN 大(如 DN250 → Φ273),
+    真正的选档要用 `select_dn()` 按**实际内径**(外径 − 2×壁厚)复核。
     """
     if not dn_to_od:
         return None, None
@@ -114,6 +114,31 @@ def pick_dn(inner_d_mm: float, dn_to_od: Mapping[int, float]) -> tuple[int | Non
         return None, None
     dn = candidates[0]
     return dn, float(dn_to_od[dn])
+
+
+def select_dn(inner_d_mm: float, dn_to_od: Mapping[int, float],
+              walls_by_od: Mapping[float, Sequence[float]],
+              wall_for, max_dn: int | None = None) -> dict[str, Any]:
+    """按**实际内径**选档:从小到大试 DN,直到 `外径 − 2×标准壁厚 ≥ 计算内径`。
+
+    这一步是必须的:DN 只是公称直径,Φ273 的内径约 269 mm,若只按"DN ≥ 内径"选档,
+    会一路选大、实际流速偏低(实测 #19–#22 有 40–57 条 V2 就是这么来的)。
+
+    `wall_for(od)` 负责给出该外径最终选定的标准壁厚(build 里会连负偏差一起算)。
+    """
+    for dn in sorted(dn_to_od):
+        if max_dn is not None and dn > max_dn:
+            break
+        od = float(dn_to_od[dn])
+        wall = wall_for(od)
+        if wall is None:
+            # 没有壁厚数据时退化成"外径 ≥ 计算内径"的判断,别把整条流股判死
+            if od >= inner_d_mm - 1e-9:
+                return {"dn": dn, "od_mm": od, "wall_mm": None}
+            continue
+        if od - 2.0 * wall >= inner_d_mm - 1e-9:
+            return {"dn": dn, "od_mm": od, "wall_mm": wall}
+    return {"dn": None, "od_mm": None, "wall_mm": None}
 
 
 # --------------------------------------------------------------------------
@@ -222,16 +247,28 @@ def calc_wall_thickness(p_mpa: float, od_mm: float, stress_mpa: float,
             "note": "" if applicable else f"t={t:.2f} ≥ D/6={od_mm / 6:.2f},公式不适用,需另行校核"}
 
 
-def round_up_wall(t_required_mm: float, walls: Sequence[float] | None) -> dict[str, Any]:
-    """向上圆整到该外径的标准壁厚序列里的最小值。序列为空 = 表未录入。"""
+def round_up_wall(t_required_mm: float, walls: Sequence[float] | None,
+                  od_mm: float | None = None, grade: str | None = None) -> dict[str, Any]:
+    """向上圆整到标准壁厚。
+
+    `od_mm` + `grade` 给了的话,会**把壁厚负偏差一起算进去**:
+    选中的 S 必须满足 `S − C1(S) ≥ 所需壁厚`(C1 依赖 S,所以要逐档试),
+    否则就会出现"圆整完扣掉负偏差还不够"的情况(实测 #20 有 20 多条)。
+    """
     if not walls:
         return {"wall_mm": None, "note": "缺标准壁厚序列(T2 未录入)"}
-    usable = sorted(w for w in walls if w >= t_required_mm - 1e-9)
-    if not usable:
-        return {"wall_mm": None,
-                "note": f"所需 {t_required_mm:.2f} mm 超过该外径最大标准壁厚 "
-                        f"{max(walls):g} mm,需并联或专项设计"}
-    return {"wall_mm": float(usable[0]), "note": ""}
+    usable = sorted(walls)
+    for s in usable:
+        if s < t_required_mm - 1e-9:
+            continue
+        if od_mm and grade:
+            c1 = pipe_data.negative_deviation(od_mm, s, grade)
+            if s - c1 < t_required_mm - 1e-9:
+                continue
+        return {"wall_mm": float(s), "note": ""}
+    return {"wall_mm": None,
+            "note": f"所需 {t_required_mm:.2f} mm 超过该外径最大标准壁厚 "
+                    f"{max(usable):g} mm(含负偏差),需并联或专项设计"}
 
 
 # --------------------------------------------------------------------------
@@ -474,17 +511,40 @@ def build(streams: Iterable[Mapping[str, Any]],
         is_pump_in = name in pump_in
         v = velocity_for(phase, is_pump_in, opts)
         d_i = inner_diameter(float(q), v)
-        dn, od = pick_dn(d_i, dn_to_od)
         warnings: list[str] = []
+
+        pd = design_pressure(s.get("pressure_bar"), opts)
+        td = design_temperature(s.get("temperature_c"), opts.get("insulated"), opts)
+        material = str(opts.get("material_for_stream", {}).get(name, default_material))
+        stress_table = dict(stress)
+        od_to_walls_used = od_to_walls
+        if material.startswith("S3"):
+            od_to_walls_used = tbl.get("od_to_walls_sst", pipe_data.OD_TO_WALLS_SST) or od_to_walls
+        sigma = allowable_stress(material, td["design_c"], stress_table)
+
+        def _wall_for(od: float, sigma=sigma, pd=pd) -> float | None:
+            """某外径下,考虑许用应力与负偏差后最终选定的标准壁厚。"""
+            w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
+            if not w["applicable"]:
+                return None
+            t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
+            got = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade)
+            return got["wall_mm"]
+
+        sel = select_dn(d_i, dn_to_od, od_to_walls_used, _wall_for)
+        dn, od = sel["dn"], sel["od_mm"]
         if dn is None:
-            missing.append({"stream": name, "reason": f"计算内径 {d_i:.1f} mm 超出 DN 表"})
+            od_max = max(dn_to_od.values()) if dn_to_od else None
+            missing.append({
+                "stream": name,
+                "reason": f"计算内径 {d_i:.1f} mm 超出可选档位"
+                          + (f"(最大 Φ{od_max:g} = DN{max(dn_to_od)})" if od_max else "")
+                          + ",需并联或专项设计",
+            })
             continue
         if dn > max_dn:
             warnings.append(f"DN{dn} 超出本期上限 DN{max_dn},需专项确认")
 
-        pd = design_pressure(s.get("pressure_bar"), opts)
-        td = design_temperature(s.get("temperature_c"), opts.get("insulated"), opts)
-        sigma = allowable_stress(default_material, td["design_c"], stress)
         w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
         if not w["applicable"]:
             warnings.append(w["note"])
@@ -492,17 +552,18 @@ def build(streams: Iterable[Mapping[str, Any]],
         t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
         if pd["vacuum"]:
             warnings.append("真空流股:按最小标准壁厚,外压另行校核(不做外压计算)")
-        wall = round_up_wall(t_req, od_to_walls.get(od))
+        wall = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade)
         if wall["wall_mm"] is None:
             warnings.append(wall["note"])
         else:
             c1 = pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade)
-            if wall["wall_mm"] - c1 < (w["t_calc_mm"] or 0.0) + corrosion_c2 - 1e-9:
-                warnings.append(
-                    f"圆整后 {wall['wall_mm']:g} mm 扣负偏差 {c1:.2f} mm 后不足所需,建议升一档"
-                )
-
-        material = str(opts.get("material_for_stream", {}).get(name, default_material))
+            v_act = actual_velocity(float(q), od - 2.0 * wall["wall_mm"])
+            if v_act is not None:
+                lo, hi = VELOCITY_RANGE.get("pump_inlet" if is_pump_in else phase,
+                                            (0.0, float("inf")))
+                if not (lo - 1e-9 <= v_act <= hi + 1e-9):
+                    warnings.append(
+                        f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)")
         mcode = pipe_data.MATERIAL_CODE_BY_GRADE.get(material)
         if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
             mcode = "E"

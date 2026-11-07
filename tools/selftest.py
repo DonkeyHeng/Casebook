@@ -473,7 +473,9 @@ def test_pipe() -> None:
     check_eq("pipe: 等级号生成", by["S1"]["grade_code"].startswith("M1E"), True)
 
     try:
-        pipe_calc.build(streams, blocks, conns)  # 不传 tables → pipe_data 里还是空的
+        # 显式传空表:标准表没录/读不到时必须报错,而不是拿 0 算出一张假表
+        pipe_calc.build(streams, blocks, conns,
+                        tables={"dn_to_od": {}, "od_to_walls": {}, "stress": {}})
         check("pipe: 表未录入时必须报错", False, "应该抛 TablesNotReady")
     except pipe_calc.TablesNotReady:
         check("pipe: 表未录入时报 TablesNotReady(不静默出表)", True)

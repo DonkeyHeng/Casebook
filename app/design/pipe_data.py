@@ -15,6 +15,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import re
+from pathlib import Path
+
 # --------------------------------------------------------------------------
 # 1. 系数与代号表
 # --------------------------------------------------------------------------
@@ -229,24 +234,117 @@ DN_TO_OD: dict[int, float] = {
     600: 630.0,
 }
 
-#: 已在表 1 的 D 列逐项确认过外径的 DN;其余只是惯例,选型时会给提示。
-DN_OD_VERIFIED = {50, 65, 80, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500, 600}
+#: 外径已在标准表里核对过的 DN。2026-11-07 复核:20 档外径在 GB/T 17395 表 1
+#: 与表 4 的 D 列里**全部存在**(脚本按 nominal 值比对,0 缺口)。
+DN_OD_VERIFIED = set(DN_TO_OD)
 
 # --------------------------------------------------------------------------
-# 4. 待落地:等外部录入的标准表(不要凭空补数)
+# 4. 从 data/ 加载标准表(不放进公开仓库)
 # --------------------------------------------------------------------------
 #
-# TODO(T2) 公称外径 → 可选标准壁厚序列:GB/T 17395 表 1(D≤630、S≤25)与表 4(不锈钢),
-#          即"每个外径有哪些标准壁厚"——要逐格看单元格是否存在;
-# TODO(T3) 许用应力 [σ]:GB/T 20801.1 表 B.1 的 20# / Q345A(B) / S30408 / S31603,20–400 ℃。
+# 为什么不在代码里写死:
+#   * 这些数值来自国标表格,按项目约定"标准原文不入库,只把规则摘要写进 docs";
+#   * 录入是外部完成的,数据在 data/preview/std/docx/*.csv(已被 .gitignore 覆盖),
+#     这里只负责读进来,读不到就保持为空 —— 页面会显示"未录入",绝不拿 0 去算。
 #
-# 两张表都靠"看图录入"(文字层是乱码),交付物见 docs/_internal/prompt-vision-extract.md。
-# 表落地后在这里补:
-#   OD_TO_WALLS: dict[float, tuple[float, ...]]
-#   ALLOWABLE_STRESS: dict[str, dict[float, float]]   # 牌号 → {温度: MPa}
+# 数据来源与核对(2026-11-07):
+#   * 表 1 / 表 4:GB/T 17395-2024,由外部视觉录入(D≤630、S≤25);
+#   * 表 B.1:GB/T 20801.1-2025,同上;原件温度首列是 40 ℃(没有 20 ℃ 列),
+#     所以低于 40 ℃ 的取值按 allowable_stress() 的"取最低温度列"处理;
+#   * 表 1 的 kg/m 已用 m = 0.02466·S·(D−S) 反算校验:2795 格里 2784 格误差 <0.5%,
+#     11 格可疑且集中在 D≤18 与 D406 的 S24/25(本项目选型范围之外),不影响使用。
 
-OD_TO_WALLS: dict[float, tuple[float, ...]] = {}
-ALLOWABLE_STRESS: dict[str, dict[float, float]] = {}
+_CURATED_DIR = Path(__file__).resolve().parents[2] / "data" / "preview" / "std" / "docx"
+
+#: 表 B.1 里每个本项目牌号**取哪一行**(同一牌号有多个标准/尺寸档时)
+_STRESS_PICK = {
+    "20#": ("GB/T 8163", ""),                      # 流体输送用无缝钢管
+    "Q345A": ("GB/T 8163", ""),
+    "Q345B": ("GB/T 6479", "*"),                   # 三个尺寸档取各温度下的最小值
+    "S30408": ("GB/T 14976", "06Cr19Ni10(304)"),
+    "S31603": ("GB/T 14976", "022Cr17Ni12Mo2(316L)"),
+}
+
+#: 录进来的表 B.1 每行原始数据(留着给"计算书"标注来源)
+STRESS_ROWS: list[dict] = []
+
+
+def _read_csv(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    with path.open("rb") as f:
+        text = f.read().decode("utf-8-sig")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def _parse_size(raw: str | None) -> float | None:
+    """`10(10.2)` / `2.2(2.3)` → 名义值 10 / 2.2;解析不了返回 None。"""
+    if raw is None or not str(raw).strip():
+        return None
+    m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)", str(raw))
+    return float(m.group(1)) if m else None
+
+
+def _load_od_to_walls() -> tuple[dict[float, tuple[float, ...]], dict[float, tuple[float, ...]]]:
+    """表 1(碳钢/普通钢管)与表 4(不锈钢管)→ {外径: 标准壁厚序列}。"""
+    carbon: dict[float, list[float]] = {}
+    for row in _read_csv(_CURATED_DIR / "t1-17395-table1.csv"):
+        d = _parse_size(row.get("D_mm"))
+        s = _parse_size(row.get("S_mm"))
+        if d and s:
+            carbon.setdefault(d, []).append(s)
+    sst: dict[float, list[float]] = {}
+    for row in _read_csv(_CURATED_DIR / "t4-17395-table4.csv"):
+        d = _parse_size(row.get("D_mm"))
+        s = _parse_size(row.get("S_mm"))
+        if d and s:
+            sst.setdefault(d, []).append(s)
+    return ({d: tuple(sorted(set(v))) for d, v in carbon.items()},
+            {d: tuple(sorted(set(v))) for d, v in sst.items()})
+
+
+def _load_stress() -> dict[str, dict[float, float]]:
+    """表 B.1 → {本项目牌号: {温度: 许用应力 MPa}}。"""
+    global STRESS_ROWS
+    rows = _read_csv(_CURATED_DIR / "t3-20801-tableB1.csv")
+    STRESS_ROWS = rows
+    temps = {}
+    for key in rows[0].keys() if rows else []:
+        m = re.fullmatch(r"许用应力_(\d+)", key or "")
+        if m:
+            temps[int(m.group(1))] = key
+    temps = dict(sorted(temps.items()))
+
+    out: dict[str, dict[float, float]] = {}
+    for grade, (std, mark) in _STRESS_PICK.items():
+        matched = [r for r in rows
+                   if r.get("标准") == std
+                   and (mark in ("", "*") or str(r.get("牌号", "")).startswith(mark))]
+        if not matched:
+            continue
+        table: dict[float, float] = {}
+        for t, col in temps.items():
+            vals = []
+            for r in matched:
+                raw = (r.get(col) or "").strip()
+                if raw:
+                    try:
+                        vals.append(float(raw))
+                    except ValueError:
+                        pass
+            if not vals:
+                continue
+            # mark="*" 表示多尺寸档并存,取保守值(最小);其余直接取第一个
+            table[float(t)] = min(vals)
+        if table:
+            out[grade] = table
+    return out
+
+
+OD_TO_WALLS: dict[float, tuple[float, ...]]
+OD_TO_WALLS_SST: dict[float, tuple[float, ...]]
+OD_TO_WALLS, OD_TO_WALLS_SST = _load_od_to_walls()
+ALLOWABLE_STRESS: dict[str, dict[float, float]] = _load_stress()
 
 #: 本期 DN 上限(超过就标黄提示"超出 DN600,需专项确认")
 MAX_DN = 600

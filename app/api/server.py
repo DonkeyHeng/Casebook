@@ -366,13 +366,25 @@ class Handler(BaseHTTPRequestHandler):
         标准表没录全时返回 409 并说明缺哪张,而不是吐一张空表。
         """
         from app.design import pipe as pipe_calc
+        from app.design import pipe_data
+
+        # query 的值是 list(parse_qs 的行为),取第一个;不取的话 float(list) 会失败,
+        # 参数就被静默换成默认值了(界面改了流速、结果却不变,就是这样来的)
+        def _q(key: str):
+            val = query.get(key)
+            if isinstance(val, (list, tuple)):
+                return val[0] if val else None
+            return val
 
         def _f(key: str, default: float) -> float:
             try:
-                return float(query[key])
-            except (KeyError, TypeError, ValueError):
+                return float(_q(key))
+            except (TypeError, ValueError):
                 return default
 
+        material = _q("material") or "S30408"
+        if material not in pipe_data.MATERIAL_CODE_BY_GRADE:
+            material = "S30408"      # 认不出的牌号不硬套,退回默认并在页面提示
         options = {
             "velocity": {
                 "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"]),
@@ -383,7 +395,7 @@ class Handler(BaseHTTPRequestHandler):
             "pressure_factor": _f("factor", 1.1),
             "pressure_floor_mpa": _f("floor", 1.0),
             "max_dn": int(_f("max_dn", 600)),
-            "material": query.get("material", "S30408"),
+            "material": material,
         }
 
         streams = [dict(r) for r in db.read_streams(conn, case_id)]
@@ -562,6 +574,68 @@ class Handler(BaseHTTPRequestHandler):
             stage_rows,
             [12, 8, 12, 12, 16, 16, 14],
         )
+
+        # --- 管道(管路选型:实时算,不写库)---
+        # 标准表没录全时不硬造表,只写一张说明页
+        try:
+            from app.design import pipe as pipe_calc
+
+            pres = pipe_calc.build([dict(s) for s in streams], [dict(b) for b in blocks],
+                                   [dict(c) for c in connections])
+            pchecks = pipe_calc.validate(pres["rows"])
+            hit_by_stream: dict[str, list[str]] = {}
+            for f in pchecks["findings"]:
+                hit_by_stream.setdefault(f["stream"], []).append(f["code"])
+
+            phase_text = {"liquid": "液体", "gas": "气体", "two": "气液共存"}
+            ws = wb.create_sheet("管道")
+            fill_sheet(
+                ws,
+                ["流股", "温度 ℃", "压力 MPa(绝)", "状态", "体积流量 m³/h", "公称直径",
+                 "壁厚 mm", "管材", "类型", "等级号", "校验", "备注"],
+                [(
+                    r["stream"],
+                    next((s["temperature_c"] for s in streams if s["name"] == r["stream"]), None),
+                    next((s["pressure_bar"] / 10.0 for s in streams
+                          if s["name"] == r["stream"]), None),
+                    phase_text.get(r["phase"], r["phase"]),
+                    r["vol_flow_m3h"], r["dn"], r["wall_mm"], r["material"], "无缝",
+                    r["grade_code"], " ".join(hit_by_stream.get(r["stream"], [])),
+                    "; ".join(r["warnings"]),
+                ) for r in pres["rows"]],
+                [16, 12, 16, 12, 18, 12, 10, 12, 8, 12, 12, 52],
+            )
+            if pres["missing"]:
+                ws.append([])
+                ws.append(["未选型的流股(缺数据或超出 DN600)"])
+                for m in pres["missing"]:
+                    ws.append([m["stream"], "", "", "", "", "", "", "", "", "", "", m["reason"]])
+
+            ws = wb.create_sheet("管道计算书")
+            fill_sheet(
+                ws,
+                ["流股", "相态", "介质代号", "流速 m/s", "计算内径 mm", "外径 mm",
+                 "设计压力 MPa", "表压 MPa", "设计温度 ℃", "许用应力 MPa", "计算壁厚 mm",
+                 "腐蚀裕量 mm", "所需壁厚 mm", "选定壁厚 mm", "负偏差 mm", "等级号"],
+                [(
+                    r["stream"], r["phase"], r["medium_code"], r["velocity_ms"],
+                    r["inner_d_mm"], r["od_mm"], r["design_pressure_mpa"],
+                    r["gauge_pressure_mpa"], r["design_temp_c"], r["stress_mpa"],
+                    r["t_calc_mm"], r["c2_mm"], r["t_required_mm"], r["wall_mm"],
+                    (pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
+                     if r["wall_mm"] else None),
+                    r["grade_code"],
+                ) for r in pres["rows"]],
+                [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 12, 12],
+            )
+        except pipe_calc.TablesNotReady as exc:   # 标准表没录:写明原因,不造数
+            ws = wb.create_sheet("管道")
+            ws.append(["管路选型暂时不可用"])
+            ws.append([str(exc)])
+        except Exception as exc:                  # 选型出问题不该拖垮整份 Excel
+            ws = wb.create_sheet("管道")
+            ws.append(["管路选型出错"])
+            ws.append([f"{type(exc).__name__}: {exc}"])
 
         bio = io.BytesIO()
         wb.save(bio)

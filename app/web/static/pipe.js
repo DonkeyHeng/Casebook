@@ -239,6 +239,20 @@ function bindPipeEvents() {
   if (recalc) recalc.addEventListener("click", () => {
     if (!readPipeParamsFromDom().length) runPipeCalc({ force: true });
   });
+
+  // 导出:整份工况的 Excel / AI 包(里面已含「管道」「管道计算书」与 pipe_schedule.csv)
+  const expX = document.getElementById("pipeExportXlsx");
+  if (expX) expX.addEventListener("click", () => {
+    const c = state.current;
+    if (!c) return;
+    window.location.href = `/api/cases/${c.id}/export.xlsx`;
+  });
+  const expAi = document.getElementById("pipeExportAi");
+  if (expAi) expAi.addEventListener("click", () => {
+    const c = state.current;
+    if (!c) return;
+    window.location.href = `/api/cases/${c.id}/export.ai.zip`;
+  });
 }
 
 function onPipeParamInput(evt) {

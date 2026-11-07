@@ -291,7 +291,7 @@ def _composition_csv(rows) -> bytes:
 
 
 def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
-               composition, connections) -> bytes:
+               composition, connections, has_pipe: bool = False) -> bytes:
     files = {
         "README.md": "说明书 + 数据字典(先读这个)",
         "metrics.csv": "精简指标:概览 / 状态码 / 异常清单",
@@ -305,6 +305,8 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
         files["connections.csv"] = "设备 ↔ 流股连接关系(拓扑)"
     if composition["rows"]:
         files["composition.csv"] = "已读流股的逐组分摩尔分数"
+    if has_pipe:
+        files["pipe_schedule.csv"] = "管路选型(实时算,不写库;校验码见「校验码」列)"
 
     payload = {
         "generator": "aspen-insight",
@@ -654,6 +656,40 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
 
 # ---------------------------------------------------------------- 总入口
 
+def _pipe_result(streams, blocks, connections):
+    """管路选型结果;标准表没录全时返回 (None, None),不硬造数据。"""
+    from app.design import pipe as pipe_calc
+
+    try:
+        res = pipe_calc.build([dict(s) for s in streams], [dict(b) for b in blocks],
+                              [dict(c) for c in connections])
+    except pipe_calc.TablesNotReady:
+        return None, None
+    except Exception:            # 选型出问题不该拖垮整个分析包
+        return None, None
+    return res, pipe_calc.validate(res["rows"])
+
+
+def _pipe_csv(rows, checks) -> bytes:
+    """管路选型表:一行一条流股,校验码写在一列里。"""
+    hit: dict[str, list[str]] = {}
+    for f in checks["findings"]:
+        hit.setdefault(f["stream"], []).append(f["code"])
+    header = ["流股", "相态", "介质代号", "体积流量_m3h", "公称直径", "外径_mm", "壁厚_mm",
+              "管材", "等级号", "设计压力_MPa", "设计温度_C", "许用应力_MPa",
+              "计算壁厚_mm", "所需壁厚_mm", "实际流速_ms", "校验码", "备注"]
+    body = []
+    for r in rows:
+        body.append([
+            r["stream"], r["phase"], r["medium_code"], _num(r["vol_flow_m3h"]),
+            r["dn"], _num(r["od_mm"]), _num(r["wall_mm"]), r["material"], r["grade_code"],
+            _num(r["design_pressure_mpa"]), _num(r["design_temp_c"]), _num(r["stress_mpa"]),
+            _num(r["t_calc_mm"]), _num(r["t_required_mm"]), _num(r["velocity_ms"]),
+            " ".join(hit.get(r["stream"], [])), "; ".join(r["warnings"]),
+        ])
+    return _csv_bytes(header, body)
+
+
 def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     """生成整个分析包。返回 (zip 字节, 建议文件名)。
 
@@ -700,9 +736,12 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
     if comp_rows:
         files.append(("composition.csv", _composition_csv(comp_rows)))
+    pipe_res, pipe_checks = _pipe_result(streams, blocks, connections)
+    if pipe_res:
+        files.append(("pipe_schedule.csv", _pipe_csv(pipe_res["rows"], pipe_checks)))
     files.append(("case.json", _case_json(case, columns, stage_counts, reasons,
                                           codes, tears, blocks, composition,
-                                          connections)))
+                                          connections, has_pipe=bool(pipe_res))))
 
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
