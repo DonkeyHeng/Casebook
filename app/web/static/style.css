@@ -1046,3 +1046,6 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   background: var(--bg); border: 1px solid var(--line);
   border-radius: 4px; padding: 0 4px; font-size: 12px;
 }
+
+/* 等级表:表头说明挪到悬停,表头只留列名;带 title 的表头给个"可悬停"的手势 */
+#pipeClassTable thead th[title] { cursor: help; }
