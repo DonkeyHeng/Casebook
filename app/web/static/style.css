@@ -1031,3 +1031,18 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 #pipeClassTable th:nth-child(4) { width: 16%; }
 #pipeClassTable th:nth-child(5) { width: 20%; }
 #pipeClassTable th:nth-child(6) { width: 6%; }
+
+/* 等级表弹窗:表头允许换行(全局 thead th 是 nowrap,长提示会被截断) */
+#pipeClassTable thead th { white-space: normal; line-height: 1.45; vertical-align: bottom; }
+/* 弹窗略加宽,给「备注」列留位置 */
+.pipe-modal-box { width: min(1020px, 96vw); }
+#pipeClassTable th:nth-child(1) { width: 20%; }
+#pipeClassTable th:nth-child(2) { width: 20%; }
+#pipeClassTable th:nth-child(3) { width: 12%; }
+#pipeClassTable th:nth-child(4) { width: 14%; }
+#pipeClassTable th:nth-child(5) { width: 28%; }
+/* 说明段里行内代码的样式(之前是裸文本) */
+.pipe-class-hint code {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; font-size: 12px;
+}
