@@ -224,6 +224,11 @@ aspen-insight/
 3. 请不要提交模型文件、标准 PDF 原文或本地工况库(已在 `.gitignore` 中)
 4. 发现安全问题请走 [`SECURITY.md`](SECURITY.md) 的私密渠道,不要开公开 issue
 
+## 联系方式
+- QQ：2655972249
+- WeChat：User_DonkeyHeng
+- 各位如果有问题也可以添加上述联系方式联系我
+
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE) 许可,可自由使用、修改与再分发,
