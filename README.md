@@ -249,7 +249,7 @@ Casebook/
 
 - QQ:2655972249
 - WeChat:User_DonkeyHeng
-
+- 各位如果有需求建议优先提issue，如果长时间未回复可以添加我的联系方式沟通
 ## 许可证
 
 本项目采用 [Apache License 2.0](LICENSE) 许可,可自由使用、修改与再分发,
