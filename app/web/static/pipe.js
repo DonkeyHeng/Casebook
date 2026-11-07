@@ -47,7 +47,7 @@ const PIPE_CODE_TEXT = {
   V7: "超出材料使用温度", V8: "泵出口按泵入口流速", V9: "高温未加保温代号",
 };
 
-/* 列定义:group=calc 的列勾选「计算书列」才显示 */
+/* 列定义:group=calc 的列勾选「显示计算过程」才显示 —— 那一组就是每个数字怎么来的 */
 const PIPE_COLUMNS = [
   { key: "stream", label: "流股", cls: "sticky-col pipe-name" },
   { key: "temperature", label: "温度 ℃", num: true, digits: 2 },
@@ -62,12 +62,12 @@ const PIPE_COLUMNS = [
   { key: "grade_code", label: "等级号", mono: true },
   { key: "findings", label: "校验", cls: "pipe-chips" },
   { key: "warnings", label: "备注" },
-  { key: "od_mm", label: "外径 mm", num: true, digits: 1, group: "calc" },
+  { key: "od_mm", label: "管外径 mm", num: true, digits: 1, group: "calc" },
   { key: "design_pressure_mpa", label: "设计压力", num: true, group: "calc" },
   { key: "design_temp_c", label: "设计温度 ℃", num: true, digits: 2, group: "calc" },
   { key: "stress_mpa", label: "许用应力 MPa", num: true, digits: 1, group: "calc" },
-  { key: "t_calc_mm", label: "计算壁厚 mm", num: true, digits: 2, group: "calc" },
-  { key: "t_required_mm", label: "含附加量 mm", num: true, digits: 2, group: "calc" },
+  { key: "t_calc_mm", label: "计算厚度 mm", num: true, digits: 2, group: "calc" },
+  { key: "t_required_mm", label: "加裕量后 mm", num: true, digits: 2, group: "calc" },
 ];
 
 const PIPE_DEBOUNCE_MS = 350;
@@ -281,6 +281,8 @@ function bindPipeEvents() {
 
 const PIPE_CLASS_GRADES = ["20#", "Q345A", "Q345B", "S30408", "S31603"];
 
+let pipeClassAutoOpened = false;   // #pipes/class 深链只自动开一次
+
 function openPipeClass() {
   const modal = document.getElementById("pipeClassModal");
   if (!modal) return;
@@ -290,7 +292,7 @@ function openPipeClass() {
     const grades = (data && data.grades) || PIPE_CLASS_GRADES;
     const defaultSel = document.getElementById("pipeClassDefault");
     if (defaultSel) {
-      defaultSel.innerHTML = '<option value="">(不设兜底:未命中的走默认材质)</option>'
+      defaultSel.innerHTML = '<option value="">(不指定,走页面上的默认管材)</option>'
         + grades.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
       defaultSel.value = (data && data.default && data.default.grade) || "";
     }
@@ -409,6 +411,7 @@ async function runPipeCalc({ force = false } = {}) {
   pipeState.abort = abort;
   pipeState.status = "loading";
   renderPipeNotice();            // 只更新状态条,旧表先留着,避免整页闪白
+  renderPipeStatus();
 
   let out;
   try {
@@ -589,7 +592,6 @@ function drawPipeTable() {
   if (!data) {
     thead.innerHTML = "";
     tbody.innerHTML = "";
-    if (wrap) wrap.classList.remove("stale");
     return 0;
   }
 
@@ -614,7 +616,6 @@ function drawPipeTable() {
   tbody.querySelectorAll(".pipe-chip").forEach((b) => {
     b.addEventListener("click", () => highlightPipeRow(b.dataset.stream));
   });
-  if (wrap) wrap.classList.toggle("stale", pipeState.status === "loading");
 
   renderPipeCount(rows.length);
   return rows.length;
@@ -693,10 +694,9 @@ function renderPipeNotice() {
   if (!el) return;
   let cls = "";
   let text = "";
-  if (pipeState.status === "loading" && pipeState.data) {
-    cls = "running";
-    text = "正在按新参数重算…(下表还是上一次的结果,算完自动替换)";
-  } else if (pipeState.status === "invalid") {
+  // 「正在重算」不再插一条横幅:快速改参数时会一闪而过,体验差。
+  // 计算中改由参数条右侧的 #pipeStatus 表示(见 renderPipeStatus)。
+  if (pipeState.status === "invalid") {
     cls = "warn"; text = pipeState.error;
   } else if (pipeState.status === "error") {
     cls = "err"; text = pipeState.error;
@@ -707,6 +707,36 @@ function renderPipeNotice() {
   if (!text) { el.className = "pipe-notice hidden"; el.innerHTML = ""; return; }
   el.className = `pipe-notice ${cls}`;
   el.innerHTML = `<span>${esc(text)}</span>`;
+}
+
+/* 参数条右侧的状态标记:位置固定、文字短,不插横幅也不整表变淡
+   - 只有连续计算超过 400 ms 才出现「更新中…」,避免快速输入时闪一下
+   - 算完显示「已更新」1.6 s 后自动消失 */
+let pipeStatusTimer = null;
+let pipeStatusClear = null;
+function renderPipeStatus() {
+  const el = document.getElementById("pipeStatus");
+  if (!el) return;
+  clearTimeout(pipeStatusTimer);
+  clearTimeout(pipeStatusClear);
+  el.className = "pipe-status";
+  el.textContent = "";
+  if (pipeState.status === "loading") {
+    pipeStatusTimer = setTimeout(() => {
+      if (pipeState.status !== "loading") return;
+      el.textContent = "更新中…";
+      el.className = "pipe-status busy";
+    }, 400);
+    return;
+  }
+  if (pipeState.status === "ok") {
+    el.textContent = "已更新";
+    el.className = "pipe-status ok";
+    pipeStatusClear = setTimeout(() => {
+      el.textContent = "";
+      el.className = "pipe-status";
+    }, 1600);
+  }
 }
 
 /* 200 但 ready=false:只可能是壁厚序列(T2)没录 —— 表能出、DN 与等级号有效,只有壁厚是「—」 */
@@ -758,6 +788,12 @@ function renderPipes() {
   const c = state.current;
   if (!empty) return;
 
+  // #pipes/class 可直接打开等级表弹窗(方便把配置页加入书签)
+  if (!pipeClassAutoOpened && location.hash.endsWith("/class")) {
+    pipeClassAutoOpened = true;
+    openPipeClass();
+  }
+
   const hideExtras = () => {
     ["pipeMissing", "pipeFindings", "pipeTablesHint"].forEach((id) => {
       const el = document.getElementById(id);
@@ -785,6 +821,7 @@ function renderPipes() {
 
   fillPipeSelects(pipeState.tables);
   renderPipeNotice();
+  renderPipeStatus();
 
   if (pipeState.status === "not-ready") {
     drawPipeTable();

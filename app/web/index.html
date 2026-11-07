@@ -107,30 +107,33 @@
 
       <form id="pipeParams" class="pipe-params" autocomplete="off">
         <fieldset class="pipe-group">
-          <legend>流速 m/s</legend>
-          <label title="推荐 1.0–2.5">液<input id="ppLiquid" type="number" step="0.1" inputmode="decimal"></label>
-          <label title="推荐 10–25">气<input id="ppGas" type="number" step="0.5" inputmode="decimal"></label>
-          <label title="推荐 5–10">两相<input id="ppTwo" type="number" step="0.5" inputmode="decimal"></label>
-          <label title="泵入口单独一档,推荐 0.5–1.0">泵入口<input id="ppPumpInlet" type="number" step="0.1" inputmode="decimal"></label>
+          <legend>流速(米/秒)</legend>
+          <label title="液体在管子里跑多快。一般 1.0–2.5 米/秒">液<input id="ppLiquid" type="number" step="0.1" inputmode="decimal"></label>
+          <label title="气体在管子里跑多快。一般 10–25 米/秒">气<input id="ppGas" type="number" step="0.5" inputmode="decimal"></label>
+          <label title="气体和液体混在一起时用。一般 5–10 米/秒">两相<input id="ppTwo" type="number" step="0.5" inputmode="decimal"></label>
+          <label title="进入泵之前的管段要慢一点,避免泵抽空。一般 0.5–1.0 米/秒">泵入口<input id="ppPumpInlet" type="number" step="0.1" inputmode="decimal"></label>
         </fieldset>
         <fieldset class="pipe-group">
-          <legend>压力口径</legend>
-          <label title="设计压力 =(绝压 − 0.1013 MPa)× 系数">系数<input id="ppFactor" type="number" step="0.05" min="1"></label>
-          <label title="设计压力下限 MPa">下限<input id="ppFloor" type="number" step="0.1" min="0"></label>
-          <label>单位<select id="ppUnit">
+          <legend>设计压力</legend>
+          <label title="按操作压力再放一点余量,一般 1.1 倍">放大系数<input id="ppFactor" type="number" step="0.05" min="1"></label>
+          <label title="不管实际压力多低,设计压力不低于这个值。常规取 1.0 MPa">最低值 MPa<input id="ppFloor" type="number" step="0.1" min="0"></label>
+          <label>显示单位<select id="ppUnit">
             <option value="kpa">kPa</option>
             <option value="mpa">MPa</option>
             <option value="bar">bar</option>
           </select></label>
         </fieldset>
         <fieldset class="pipe-group">
-          <legend>边界</legend>
-          <label>DN 上限<select id="ppMaxDn"></select></label>
-          <label>材质<select id="ppMaterial"></select></label>
+          <legend>其他</legend>
+          <label title="本期只做到 DN600(外径 630 mm),更大的会在表尾单独列出">最大管径<select id="ppMaxDn"></select></label>
+          <label title="没有配置管道等级表时,所有流股都用这个管材">默认管材<select id="ppMaterial"></select></label>
         </fieldset>
-        <label class="pipe-toggle"><input id="ppShowCalc" type="checkbox"> 计算书列</label>
-        <label class="pipe-toggle"><input id="ppOnlyBad" type="checkbox"> 只看有问题的</label>
+        <label class="pipe-toggle" title="多出几列中间结果:管外径、设计压力、设计温度、许用应力、计算厚度、加裕量后厚度 —— 想核对每个数字怎么来的就勾上">
+          <input id="ppShowCalc" type="checkbox"> 显示计算过程
+        </label>
+        <label class="pipe-toggle" title="只显示有校验提示的行(流速不合适、真空、超温等)"><input id="ppOnlyBad" type="checkbox"> 只看有提示的</label>
         <input id="ppFilter" type="search" placeholder="按流股名筛选…">
+        <span id="pipeStatus" class="pipe-status"></span>
         <span id="pipeClassHint" class="muted" title="管道等级表:可选的覆盖规则(材质 / 腐蚀裕量)"></span>
         <span id="pipeCount" class="muted"></span>
       </form>
@@ -153,27 +156,29 @@
         <div id="pipeFindingsBody"></div>
       </section>
 
-      <!-- 管道等级表:可选的覆盖规则。关掉这个弹窗就还是"全部按默认材质" -->
+      <!-- 管道等级表:可选的覆盖规则。关掉这个弹窗就还是"全部按默认管材" -->
       <div id="pipeClassModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pipeClassTitle">
         <div class="pipe-modal-box">
           <header class="panel-head">
-            <h3 id="pipeClassTitle">管道等级表</h3>
-            <button id="pipeClassClose" class="close" title="关闭(不保存)">✕</button>
+            <h3 id="pipeClassTitle">管道等级表(可选)</h3>
+            <button id="pipeClassClose" class="close" title="关闭,不保存">✕</button>
           </header>
           <p class="pipe-class-hint">
-            可选:命中就按表里的材质/腐蚀裕量算,没配就全部按上面的默认材质。
-            工具只按表套用,<b>不判断介质是否腐蚀</b> —— 耐蚀性由设计人员定。
-            保存后立即重算,不用重启服务。
+            <b>不知道这是什么就不用管它</b> —— 关掉这个窗口,所有管子都按页面上的「默认管材」计算。<br>
+            只有当某些流股要用别的管材时才需要填:一行写一条规则,<b>流股名开头</b>或<b>介质类型</b>对上的流股,
+            就用这一行指定的管材和"多留的厚度"。
+            比如:开头填 <code>CW</code>、管材选 <code>20#</code>、多留 <code>1</code> mm → 冷却水管(名字以 CW 开头)按碳钢算,壁厚多留 1 mm。<br>
+            <span class="muted">工具只按表套用,<b>不判断介质会不会腐蚀</b> —— 用哪种管材由你(或材料专业)定。</span>
           </p>
           <div class="table-wrap small">
             <table id="pipeClassTable">
               <thead>
                 <tr>
-                  <th>流股名前缀<br><span class="muted">逗号分隔,可留空</span></th>
-                  <th>介质代号<br><span class="muted">PL/PG/PGL,可留空</span></th>
-                  <th>牌号</th>
-                  <th>腐蚀裕量 mm</th>
-                  <th>说明</th>
+                  <th>流股名的开头<br><span class="muted">多个用逗号隔开</span></th>
+                  <th>介质类型<br><span class="muted">PL=液体 PG=气体 PGL=两者都有</span></th>
+                  <th>用哪种管材</th>
+                  <th>多留厚度 mm<br><span class="muted">不锈钢常填 0,碳钢常填 1</span></th>
+                  <th>备注<br><span class="muted">给自己看,可不填</span></th>
                   <th></th>
                 </tr>
               </thead>
@@ -182,14 +187,14 @@
           </div>
           <div class="pipe-class-actions">
             <button id="pipeClassAdd" class="btn" type="button">+ 加一条</button>
-            <label class="pipe-class-default">兜底材质
+            <label class="pipe-class-default">上面都没对上时用
               <select id="pipeClassDefault">
-                <option value="">(不设兜底:未命中的走默认材质)</option>
+                <option value="">(不指定,走页面上的默认管材)</option>
               </select>
             </label>
             <span class="spacer"></span>
-            <button id="pipeClassSave" class="btn primary" type="button">保存并重算</button>
-            <button id="pipeClassClear" class="btn" type="button">清除(用默认材质)</button>
+            <button id="pipeClassSave" class="btn primary" type="button">保存并重新计算</button>
+            <button id="pipeClassClear" class="btn" type="button">清除(恢复默认管材)</button>
             <button id="pipeClassCancel" class="btn" type="button">取消</button>
           </div>
           <div id="pipeClassError" class="pipe-notice err hidden"></div>

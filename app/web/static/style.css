@@ -927,8 +927,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 /* 表体撑满剩余高度:这一页有参数面板,不能用 .page .table-wrap 的 max-height 公式 */
 .pipe-wrap { margin-top: 10px; max-height: none; }
 .pipe-wrap table { min-width: 1080px; }
-/* 结果还没回来时旧表淡一点,但不清空 —— 整页闪白比慢更难受 */
-.pipe-wrap.stale { opacity: .55; transition: opacity .12s; }
+/* 结果还没回来时**不整表变淡**(会闪) —— 状态改由参数条右侧的 .pipe-status 表示 */
 
 /* 首列吸左(横向滚动时不丢流股名) */
 #pipeTable th.sticky-col, #pipeTable td.sticky-col {
@@ -1016,3 +1015,19 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 }
 #pipeClassTable input.pc-c2 { width: 80px; text-align: right; }
 #pipeClassTable .pc-del { padding: 2px 8px; }
+
+/* 参数条右侧的重算状态:位置固定、字短,不插横幅、不整表变淡 */
+.pipe-status { font-size: 12.5px; color: var(--muted); min-width: 52px; text-align: right; }
+.pipe-status.busy { color: var(--accent); }
+.pipe-status.ok { color: var(--ok); }
+
+/* 等级表弹窗:表格固定列宽,别让长表头把弹窗撑破 */
+.pipe-modal-box { min-width: 0; }
+#pipeClassTable { table-layout: fixed; width: 100%; }
+#pipeClassTable th, #pipeClassTable td { font-size: 12px; word-break: break-word; }
+#pipeClassTable th:nth-child(1) { width: 22%; }
+#pipeClassTable th:nth-child(2) { width: 22%; }
+#pipeClassTable th:nth-child(3) { width: 14%; }
+#pipeClassTable th:nth-child(4) { width: 16%; }
+#pipeClassTable th:nth-child(5) { width: 20%; }
+#pipeClassTable th:nth-child(6) { width: 6%; }
