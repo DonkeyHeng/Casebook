@@ -37,14 +37,24 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest().upper()
 
 
-def _add_file(zip_path: Path, arcname: str, source: Path) -> None:
+def _txt_bytes() -> bytes:
+    """`安装说明.txt` 的字节内容。
+
+    仓库里是 LF,但下载的人是拿记事本打开的 —— 统一转成 CRLF,
+    免得老系统上整份文档挤成一行。
+    """
+    raw = TXT_SRC.read_bytes().replace(b"\r\n", b"\n")
+    return raw.replace(b"\n", b"\r\n")
+
+
+def _add_file(zip_path: Path, arcname: str, content: bytes) -> None:
     """往已有 zip 里加一个文件(git archive 不支持指定目标路径,只能改写一遍)。"""
     tmp = zip_path.with_name(zip_path.name + ".tmp")
     with zipfile.ZipFile(zip_path) as zin, \
             zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
             zout.writestr(item, zin.read(item.filename))
-        zout.writestr(arcname, source.read_bytes())
+        zout.writestr(arcname, content)
     tmp.replace(zip_path)
 
 
@@ -53,7 +63,7 @@ def build_source_zip() -> Path:
     out.unlink(missing_ok=True)
     subprocess.run(["git", "archive", "--format=zip", f"--prefix={PREFIX}/",
                     "-o", str(out), "HEAD"], cwd=str(ROOT), check=True)
-    _add_file(out, f"{PREFIX}/{TXT_NAME}", TXT_SRC)
+    _add_file(out, f"{PREFIX}/{TXT_NAME}", _txt_bytes())
     return out
 
 
@@ -63,7 +73,7 @@ def build_exe_zip() -> Path:
         raise FileNotFoundError(f"没有 exe,先跑 python -m tools.build_exe:{EXE}")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         z.write(EXE, f"{PREFIX}/{EXE.name}")
-        z.write(TXT_SRC, f"{PREFIX}/{TXT_NAME}")
+        z.writestr(f"{PREFIX}/{TXT_NAME}", _txt_bytes())
         z.write(ROOT / "LICENSE", f"{PREFIX}/LICENSE")
     return out
 
