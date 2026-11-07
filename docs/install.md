@@ -45,8 +45,9 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
    - 解压后只有三个文件:`Casebook.exe`、`安装说明.txt`、`LICENSE`
 4. 双击 `Casebook.exe`:弹出一个黑色窗口(程序本体,别关),浏览器自动打开界面
    - 不用装 Python、不用 pip、不用改系统设置
-   - 没有 Aspen 想先看界面:关掉窗口,在文件夹里执行 `.\Casebook.exe --sample`
-     (装入内置示例工况,原来的库会先备份成 `cases.db.bak`)
+   - 没有 Aspen 想先看界面:**不用开命令行** —— 首页提示「还没有工况」时,
+     点卡片里的 **「载入示例工况」** 按钮(原库会先备份成 `cases.db.bak`)
+   - 命令行方式也可以:关掉窗口后执行 `.\Casebook.exe --sample`
 
 > exe 没有代码签名,个别杀毒软件会提示"未知程序";它只监听本机 `127.0.0.1`,不往外网发数据。
 
@@ -185,7 +186,8 @@ copy samples\case-23-error.db data\cases.db     # 覆盖前先备份你自己的
 python -m app.api
 ```
 
-Windows 包(exe,示例库已经打进程序里):
+Windows 包(exe,示例库已经打进程序里):双击 `Casebook.exe` 打开界面,首页点
+**「载入示例工况」** 按钮即可;命令行方式:
 
 ```powershell
 .\Casebook.exe --sample

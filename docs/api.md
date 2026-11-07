@@ -15,6 +15,7 @@
 | GET | `/api/pipe-tables` | 管路选型依赖的三张标准表录到什么程度(不需要工况) |
 | GET | `/api/pipe-standards` | 三张标准表对应的 CSV 各自有没有、多少行、什么时候放进来的(导入弹窗用) |
 | POST | `/api/pipe-standards` | **导入标准表**:校验 → 写 `data/preview/std/docx/` → 立即重新加载,不用重启 |
+| POST | `/api/sample/install` | 把内置示例工况装进当前库(**先备份原库为 `cases.db.bak`**);首页「载入示例工况」按钮用它,效果同 `--sample` |
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股 / 设备 / 连接 / 塔剖面 / 组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |

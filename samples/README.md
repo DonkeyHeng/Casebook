@@ -19,6 +19,12 @@
 
 ## 怎么用
 
+**exe 版最简单**:双击 `Casebook.exe` 打开界面,首页提示「还没有工况」时点
+**「载入示例工况」** 按钮,示例会装进本地库(原库先备份成 `cases.db.bak`),不用复制任何文件。
+命令行方式 `Casebook.exe --sample` 效果相同。
+
+**源码版**(示例库就在本目录):
+
 ```bash
 # 想直接看界面(不需要 Aspen)。先备份原来的库!
 cp data/cases.db data/cases.local.db
