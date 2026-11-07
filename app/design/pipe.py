@@ -267,20 +267,150 @@ def grade_code(design_mpa: float, material_code: str,
 
 
 # --------------------------------------------------------------------------
+# 校验规则(V1–V9,见 docs/pipe-selection-plan.md §6)
+# --------------------------------------------------------------------------
+
+def actual_velocity(vol_flow_m3h: float, inner_d_mm: float) -> float | None:
+    """按实际内径反算流速 m/s(内径 = 外径 − 2×壁厚)。"""
+    if not inner_d_mm or inner_d_mm <= 0:
+        return None
+    area = math.pi * (inner_d_mm / 1000.0) ** 2 / 4.0
+    return (vol_flow_m3h / 3600.0) / area
+
+
+#: 各相态推荐流速区间(m/s),来自 §14.1 第 3 步
+VELOCITY_RANGE = {
+    "liquid": (1.0, 2.5),
+    "gas": (10.0, 25.0),
+    "two": (5.0, 10.0),
+    "pump_inlet": (0.5, 1.0),
+}
+
+
+def validate(rows: Iterable[Mapping[str, Any]],
+             options: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """对选型结果跑 §6 的 V1–V9,只陈述事实,不给"该怎么改模型"的建议。
+
+    返回 `{"findings": [...], "summary": {"error": n, "warn": n}}`,
+    每条 finding 是 `{stream, code, level, message}`。
+    """
+    opts = options or {}
+    low_c = float(opts.get("material_low_c", -20.0))
+    high_c = float(opts.get("material_high_c", 450.0))
+    hot_c = float(opts.get("hot_insulation_c", 80.0))
+    findings: list[dict[str, Any]] = []
+
+    def add(stream: str, code: str, level: str, message: str) -> None:
+        findings.append({"stream": stream, "code": code, "level": level, "message": message})
+
+    for r in rows:
+        name = r.get("stream")
+        dn = r.get("dn")
+        od = r.get("od_mm")
+        wall = r.get("wall_mm")
+        v_used = r.get("velocity_ms")
+        phase = r.get("phase")
+
+        # V1 编号里的 DN ≠ 公称直径列(没有编号的工况跳过)
+        pipe_no = r.get("pipe_no")
+        if pipe_no:
+            tail = str(pipe_no).split("-")[-1]
+            if tail.isdigit() and dn is not None and int(tail) != int(dn):
+                add(name, "V1", "error",
+                    f"管道编号里的口径 {tail} 与选出的 DN{dn} 不一致")
+
+        # V5 气液共存但按单相流速选型(先判,好在 V2 里避免同一个问题报两次)
+        v5_hit = False
+        if phase == "two" and v_used is not None:
+            lo2, hi2 = VELOCITY_RANGE["two"]
+            if not (lo2 - 1e-9 <= v_used <= hi2 + 1e-9):
+                v5_hit = True
+                add(name, "V5", "warn",
+                    f"两相流按 {v_used:g} m/s(单相口径)选型,超出两相 {lo2:g}–{hi2:g} m/s")
+
+        # V2 实际流速超出推荐区间(两相已由 V5 覆盖,不重复报)
+        id_mm = (od - 2.0 * wall) if (od and wall) else None
+        v_act = None
+        if id_mm:
+            area = math.pi * (id_mm / 1000.0) ** 2 / 4.0
+            v_act = (float(r["vol_flow_m3h"]) / 3600.0) / area if r.get("vol_flow_m3h") else None
+        key = "pump_inlet" if r.get("pump_inlet") else phase
+        lo, hi = VELOCITY_RANGE.get(key, (0.0, float("inf")))
+        if v_act is not None and not v5_hit and not (lo - 1e-9 <= v_act <= hi + 1e-9):
+            add(name, "V2", "warn",
+                f"实际流速 {v_act:.2f} m/s 超出 {phase} 推荐区间 {lo:g}–{hi:g} m/s"
+                + ("(泵入口)" if r.get("pump_inlet") else ""))
+
+        # V3 计算壁厚 + 附加量 > 所选标准壁厚
+        need = r.get("t_required_mm")
+        if need is not None and wall is not None and need > wall + 1e-9:
+            add(name, "V3", "error",
+                f"所需壁厚 {need:.2f} mm 超过所选标准壁厚 {wall:g} mm")
+
+        # V4 等级号的压力代号 < 设计压力
+        code = r.get("grade_code") or ""
+        if code and r.get("design_pressure_mpa") is not None:
+            pn = pipe_data.PN_CODES.get(code[:1])
+            if pn is None:
+                add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里")
+            elif pn < float(r["design_pressure_mpa"]) - 1e-9:
+                add(name, "V4", "error",
+                    f"等级号 {code} 的公称压力 {pn:g} MPa 低于设计压力 "
+                    f"{float(r['design_pressure_mpa']):.2f} MPa")
+
+        # V5 已在前面先判(与 V2 互斥,避免同一个问题报两次)
+
+        # V6 真空流股
+        if r.get("vacuum"):
+            add(name, "V6", "warn", "真空流股:按外压 0.1 MPa 另行校核")
+
+        # V7 超出材料使用温度
+        dt = r.get("design_temp_c")
+        if dt is not None and (dt < low_c or dt > high_c):
+            add(name, "V7", "warn",
+                f"设计温度 {dt:g} ℃ 超出材料常规使用区间 {low_c:g}–{high_c:g} ℃")
+
+        # V8 泵出口流股用了泵入口流速
+        if r.get("pump_outlet") and r.get("pump_inlet"):
+            add(name, "V8", "error", "泵出口流股被按泵入口流速选型")
+
+        # V9 高温但没加保温代号
+        if dt is not None and dt >= hot_c and not r.get("insulation"):
+            add(name, "V9", "warn",
+                f"设计温度 {dt:g} ℃ ≥ {hot_c:g} ℃,等级号却未加保温代号 -H")
+
+    return {
+        "findings": findings,
+        "summary": {
+            "error": sum(1 for f in findings if f["level"] == "error"),
+            "warn": sum(1 for f in findings if f["level"] == "warn"),
+        },
+    }
+
+
+# --------------------------------------------------------------------------
 # 批量:一张表(§14.5 主表 + 工作表 2「计算书」)
 # --------------------------------------------------------------------------
 
-def _pump_inlets(connections: Iterable[Mapping[str, Any]],
-                 blocks: Iterable[Mapping[str, Any]]) -> set[str]:
-    """找出"去向是泵"的流股名 —— 这类流股要按泵入口流速选型。
+def _pump_streams(connections: Iterable[Mapping[str, Any]],
+                  blocks: Iterable[Mapping[str, Any]]) -> tuple[set[str], set[str]]:
+    """分出"泵入口流股"与"泵出口流股"。
 
     `connections` 的行是 (block, direction, stream):`direction="in"` 表示
-    该流股**进入**这台设备,所以泵入口流股 = 泵的入向连接。
+    该流股**进入**这台设备,`"out"` 表示由这台设备产出。
+    泵入口按 0.8 m/s 选型,泵出口不能沿用这个口径(V8)。
     """
     pump_names = {b["name"] for b in blocks if str(b.get("type", "")).lower() == "pump"}
-    return {c["stream"] for c in connections
-            if str(c.get("direction", "")).lower() == "in"
-            and c.get("block") in pump_names}
+    inlets, outlets = set(), set()
+    for c in connections:
+        if c.get("block") not in pump_names:
+            continue
+        d = str(c.get("direction", "")).lower()
+        if d == "in":
+            inlets.add(c["stream"])
+        elif d == "out":
+            outlets.add(c["stream"])
+    return inlets, outlets
 
 
 def build(streams: Iterable[Mapping[str, Any]],
@@ -313,7 +443,7 @@ def build(streams: Iterable[Mapping[str, Any]],
         )
 
     blocks = list(blocks or [])
-    pump_in = _pump_inlets(list(connections or []), blocks)
+    pump_in, pump_out = _pump_streams(list(connections or []), blocks)
     max_dn = int(opts.get("max_dn", pipe_data.MAX_DN))
     default_material = str(opts.get("material", "S30408"))
     wall_grade = str(opts.get("wall_tol_grade", pipe_data.DEFAULT_WALL_TOL_GRADE))
@@ -378,11 +508,14 @@ def build(streams: Iterable[Mapping[str, Any]],
             "medium_code": medium_code(phase, opts.get("medium_codes")),
             "velocity_ms": v,
             "pump_inlet": is_pump_in,
+            "pump_outlet": name in pump_out,
             "inner_d_mm": d_i,
             "dn": dn,
             "od_mm": od,
+            "vol_flow_m3h": float(q),
             "design_pressure_mpa": pd["design_mpa"],
             "gauge_pressure_mpa": pd["gauge_mpa"],
+            "vacuum": pd["vacuum"],
             "design_temp_c": td["design_c"],
             "insulated": td["insulated"],
             "material": material,
@@ -392,6 +525,7 @@ def build(streams: Iterable[Mapping[str, Any]],
             "t_required_mm": t_req,
             "wall_mm": wall["wall_mm"],
             "grade_code": gc["code"],
+            "insulation": gc.get("insulation", ""),
             "warnings": warnings,
         })
 

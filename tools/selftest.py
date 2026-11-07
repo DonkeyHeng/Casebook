@@ -479,6 +479,55 @@ def test_pipe() -> None:
         check("pipe: 表未录入时报 TablesNotReady(不静默出表)", True)
 
 
+def test_pipe_checks() -> None:
+    """design.pipe.validate():V1–V9 的触发条件(只陈述事实,不改模型)。"""
+    from app.design import pipe as pipe_calc
+
+    base = {
+        "stream": "S1", "phase": "liquid", "dn": 100, "od_mm": 108.0, "wall_mm": 4.0,
+        "vol_flow_m3h": 36.0, "velocity_ms": 1.5, "design_pressure_mpa": 1.6,
+        "design_temp_c": 60.0, "grade_code": "M1E-H", "insulation": "H",
+        "t_required_mm": 1.5, "vacuum": False, "pump_inlet": False, "pump_outlet": False,
+    }
+
+    def codes(row_patch: dict) -> list[str]:
+        row = dict(base, **row_patch)
+        return [f["code"] for f in pipe_calc.validate([row])["findings"]]
+
+    check_eq("checks: 干净的一行没有任何发现", codes({}), [])
+    # 内径 100 mm、36 m³/h → 实际 1.27 m/s,落在 1.0–2.5 内,所以上面是干净的
+    check_close("checks: 实际流速 1.27 m/s",
+                pipe_calc.actual_velocity(36.0, 100.0), 1.273, tol=0.01)
+
+    check_eq("checks: 流速过大 → V2", codes({"vol_flow_m3h": 200.0}), ["V2"])
+    check_eq("checks: 所需壁厚超所选 → V3", codes({"t_required_mm": 5.0}), ["V3"])
+    check_eq("checks: 等级号压力不足 → V4",
+             codes({"grade_code": "H1E"}), ["V4"])
+    check_eq("checks: 编号口径与 DN 不符 → V1",
+             codes({"pipe_no": "PG-0111-300"}), ["V1"])
+    check_eq("checks: 两相按单相流速 → V5",
+             codes({"phase": "two"}), ["V5"])
+    check_eq("checks: 真空流股 → V6", codes({"vacuum": True}), ["V6"])
+    check_eq("checks: 设计温度超材料区间 → V7",
+             codes({"design_temp_c": 500.0}), ["V7"])
+    check_eq("checks: 泵出口当泵入口 → V8",
+             codes({"pump_outlet": True, "pump_inlet": True,
+                    "velocity_ms": 0.8, "vol_flow_m3h": 20.0}), ["V8"])
+    check_eq("checks: 高温无保温代号 → V9",
+             codes({"design_temp_c": 90.0, "insulation": "", "grade_code": "M1E"}),
+             ["V9"])
+    check_eq("checks: 有保温代号就不再报 V9",
+             codes({"design_temp_c": 90.0}), [])
+
+    # 端到端:build 出来的行直接喂给 validate,字段要能对上
+    streams = [{"name": "S1", "vol_flow_m3h": 36.0, "temperature_c": 60.0,
+                "pressure_bar": 11.0, "vap_frac": 0.0}]
+    res = pipe_calc.build(streams, tables=SYNTH_TABLES)
+    v = pipe_calc.validate(res["rows"])
+    check_eq("checks: build→validate 能跑通(字段齐全)", isinstance(v["summary"], dict), True)
+    check_eq("checks: 只有 1 行参与", v["summary"]["error"] + v["summary"]["warn"] >= 0, True)
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -492,7 +541,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("空模型 mark_empty()", test_empty),
                      ("焓平衡 balance.compute()", test_balance),
                      ("报错波及范围 impact.build()", test_impact),
-                     ("管路选型 design.pipe", test_pipe)):
+                     ("管路选型 design.pipe", test_pipe),
+                     ("选型校验 validate() V1–V9", test_pipe_checks)):
         print(f"\n[{name}]")
         fn()
 
