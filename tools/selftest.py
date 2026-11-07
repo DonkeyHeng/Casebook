@@ -350,6 +350,135 @@ def test_db(db_path: str) -> None:
         conn.close()
 
 
+# ---------------------------------------------------------------- 管路选型
+
+def check_close(label: str, got, want: float, tol: float = 1e-6) -> None:
+    ok = got is not None and abs(float(got) - want) <= tol
+    check(label, ok, f"期望 {want!r} ±{tol},实际 {got!r}")
+
+
+# 注意:这是**测试用的合成表**,不是标准值。真实表要等 GB/T 17395 表 1/表 4
+# 与 GB/T 20801.1 表 B.1 录入(见 docs/_internal/prompt-vision-extract.md)。
+SYNTH_TABLES = {
+    "dn_to_od": {15: 22.0, 25: 32.0, 50: 57.0, 100: 108.0, 600: 610.0},
+    "od_to_walls": {22.0: (2.0, 2.5), 32.0: (2.5, 3.0), 57.0: (3.0, 3.5),
+                    108.0: (4.0, 4.5), 610.0: (6.0, 8.0)},
+    "stress": {"S30408": {20: 137.0, 100: 130.0, 200: 118.0, 300: 106.0, 400: 95.0}},
+}
+
+
+def test_pipe() -> None:
+    """design.pipe 的算术口径:相态 / DN / 压力 / 温度 / [σ] / 壁厚 / 等级号。"""
+    from app.design import pipe as pipe_calc
+
+    # ① 相态:痕量汽化率(库里实测 1e-8)必须按全液处理,不能 ==0 判
+    check_eq("pipe: vap_frac=0 → 液", pipe_calc.phase_of(0.0), "liquid")
+    check_eq("pipe: vap_frac=1e-8 → 仍算液(痕量)", pipe_calc.phase_of(1e-8), "liquid")
+    check_eq("pipe: vap_frac=0.5 → 两相", pipe_calc.phase_of(0.5), "two")
+    check_eq("pipe: vap_frac=1 → 气", pipe_calc.phase_of(1.0), "gas")
+    check_eq("pipe: vap_frac=None → 按液处理", pipe_calc.phase_of(None), "liquid")
+
+    # ② 内径:36 m³/h、1.5 m/s → √(4·0.01/(π·1.5)) = 92.13 mm
+    check_close("pipe: 内径 36 m³/h @1.5 m/s = 92.13 mm",
+                pipe_calc.inner_diameter(36.0, 1.5), 92.13, tol=0.05)
+
+    # ③ DN 向上取整 + 查外径
+    dn, od = pipe_calc.pick_dn(92.13, SYNTH_TABLES["dn_to_od"])
+    check_eq("pipe: 92.13 mm → DN100", dn, 100)
+    check_close("pipe: DN100 外径 108", od, 108.0)
+    check_eq("pipe: 内径 20 mm → DN25(不能选 DN15)",
+             pipe_calc.pick_dn(20.0, SYNTH_TABLES["dn_to_od"])[0], 25)
+    check_eq("pipe: 无表时 pick_dn 返回 None(不当 0)",
+             pipe_calc.pick_dn(20.0, {})[0], None)
+
+    # ④ 设计压力:绝压 11 bar → 表压 0.9987 → ×1.1 ≈ 1.0986 MPa
+    pd = pipe_calc.design_pressure(11.0)
+    check_close("pipe: 11 bar 绝压 → 设计压力 ≈1.0986 MPa", pd["design_mpa"], 1.09857, tol=1e-4)
+    check("pipe: 11 bar 不算真空", pd["vacuum"] is False)
+    # 常压死区:1.0 bar 绝压(表压 −0.0013 MPa)属常压操作,不能判真空
+    pa = pipe_calc.design_pressure(1.0)
+    check("pipe: 1.0 bar 绝压不算真空", pa["vacuum"] is False)
+    check_close("pipe: 1.0 bar 绝压 → 1.0 MPa 下限", pa["design_mpa"], 1.0)
+    # 真正低于常压(0.5 bar 绝压 = 表压 −0.05 MPa)才算真空
+    pv = pipe_calc.design_pressure(0.05)
+    check("pipe: 绝压 0.05 bar → 真空", pv["vacuum"] is True)
+    check_close("pipe: 真空设计压力取 0.1 MPa", pv["design_mpa"], 0.1)
+
+    # ⑤ 设计温度:≥50 ℃ 自动算保温(取介质温度);65–80 且无保温才折 0.95
+    check_close("pipe: 60 ℃ 自动保温 → 取 60 ℃", pipe_calc.design_temperature(60.0)["design_c"], 60.0)
+    t70 = pipe_calc.design_temperature(70.0, insulated=False)
+    check_close("pipe: 70 ℃ 无保温 → 66.5 ℃", t70["design_c"], 66.5)
+    check("pipe: 70 ℃ 无保温标记 folded", t70["folded"] is True)
+    check_close("pipe: 90 ℃ → 取 90 ℃(不折)", pipe_calc.design_temperature(90.0)["design_c"], 90.0)
+
+    # ⑥ 许用应力:缺温度内插;T<40 取 40 ℃ 值;超范围返回 None(不猜)
+    stress = SYNTH_TABLES["stress"]
+    check_close("pipe: [σ] 150 ℃ 内插 = 124",
+                pipe_calc.allowable_stress("S30408", 150.0, stress), 124.0)
+    check_close("pipe: [σ] 20 ℃ → 137", pipe_calc.allowable_stress("S30408", 20.0, stress), 137.0)
+    check_close("pipe: [σ] -10 ℃ 取 20 ℃ 值", pipe_calc.allowable_stress("S30408", -10.0, stress), 137.0)
+    check_eq("pipe: [σ] 450 ℃ 超范围 → None", pipe_calc.allowable_stress("S30408", 450.0, stress), None)
+
+    # ⑦ 壁厚公式 t = P·D/(2(S·Φw + P·Y)):1.6 MPa / Φ108 / [σ]=130 / Y=0.4
+    w = pipe_calc.calc_wall_thickness(1.6, 108.0, 130.0)
+    check_close("pipe: t_calc = 1.6×108/(2×(130+0.64)) ≈ 0.6614", w["t_calc_mm"], 0.66137, tol=1e-4)
+    check("pipe: t < D/6 → 公式适用", w["applicable"] is True)
+    check("pipe: 超大壁厚判公式不适用",
+          pipe_calc.calc_wall_thickness(100.0, 108.0, 130.0)["applicable"] is False)
+    check_eq("pipe: 缺 [σ] 不硬算", pipe_calc.calc_wall_thickness(1.6, 108.0, None)["t_calc_mm"], None)
+
+    # ⑧ 圆整到标准壁厚:取"不小于所需"的最小值;超上限返回 None
+    check_close("pipe: 需 1.0 mm → 圆整到 4.0 mm",
+                pipe_calc.round_up_wall(1.0, SYNTH_TABLES["od_to_walls"][108.0])["wall_mm"], 4.0)
+    check_close("pipe: 需 4.2 mm → 圆整到 4.5 mm",
+                pipe_calc.round_up_wall(4.2, SYNTH_TABLES["od_to_walls"][108.0])["wall_mm"], 4.5)
+    check_eq("pipe: 需 5.0 mm 超过序列 → None",
+             pipe_calc.round_up_wall(5.0, SYNTH_TABLES["od_to_walls"][108.0])["wall_mm"], None)
+    check_eq("pipe: 无壁厚序列(T2 未录)→ None",
+             pipe_calc.round_up_wall(1.0, None)["wall_mm"], None)
+
+    # ⑨ 等级号:PN 代号 + 顺序号 + 材质代号 + 绝热后缀
+    check_eq("pipe: 1.6 MPa → 压力代号 M", pipe_calc.pn_code_for(1.6), "M")
+    check_eq("pipe: 1.7 MPa → 升到 N", pipe_calc.pn_code_for(1.7), "N")
+    check_eq("pipe: 0.2 MPa → 压力代号 H", pipe_calc.pn_code_for(0.2), "H")
+    check_eq("pipe: 1.6 MPa/不锈钢 → M1E", pipe_calc.grade_code(1.6, "E")["code"], "M1E")
+    check_eq("pipe: 设计温度 90 ℃ → 自动加 -H",
+             pipe_calc.grade_code(1.6, "E", 90.0)["code"], "M1E-H")
+    check_eq("pipe: 设计温度 30 ℃ → 不加后缀",
+             pipe_calc.grade_code(1.6, "E", 30.0)["code"], "M1E")
+
+    # ⑩ 端到端 build():泵入口流速、DN 超限提示、缺流量流股、表未录入的明确报错
+    streams = [
+        {"name": "S1", "vol_flow_m3h": 36.0, "temperature_c": 60.0,
+         "pressure_bar": 11.0, "vap_frac": 0.0},
+        {"name": "S2", "vol_flow_m3h": 3.0, "temperature_c": 60.0,
+         "pressure_bar": 11.0, "vap_frac": 0.0},
+        {"name": "S3", "vol_flow_m3h": None, "temperature_c": 60.0,
+         "pressure_bar": 11.0, "vap_frac": 0.0},
+    ]
+    blocks = [{"name": "P1", "type": "Pump"}]
+    conns = [{"block": "P1", "direction": "in", "stream": "S2"}]
+
+    res = pipe_calc.build(streams, blocks, conns, options={"max_dn": 50}, tables=SYNTH_TABLES)
+    check_eq("pipe: build 选出 2 条、缺 1 条", (res["summary"]["selected"], res["summary"]["missing"]), (2, 1))
+    check_eq("pipe: 缺体积流量的流股进 missing", res["missing"][0]["stream"], "S3")
+    by = {r["stream"]: r for r in res["rows"]}
+    check_eq("pipe: S1 → DN100", by["S1"]["dn"], 100)
+    check("pipe: DN100 超本期上限 DN50 → 有提示",
+          any("超出本期上限" in w for w in by["S1"]["warnings"]))
+    check_eq("pipe: S2 是泵入口流股", by["S2"]["pump_inlet"], True)
+    check_close("pipe: 泵入口按 0.8 m/s 选型", by["S2"]["velocity_ms"], 0.8)
+    check("pipe: 泵入口内径比常规液速更大",
+          by["S2"]["inner_d_mm"] > pipe_calc.inner_diameter(3.0, 1.5))
+    check_eq("pipe: 等级号生成", by["S1"]["grade_code"].startswith("M1E"), True)
+
+    try:
+        pipe_calc.build(streams, blocks, conns)  # 不传 tables → pipe_data 里还是空的
+        check("pipe: 表未录入时必须报错", False, "应该抛 TablesNotReady")
+    except pipe_calc.TablesNotReady:
+        check("pipe: 表未录入时报 TablesNotReady(不静默出表)", True)
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -362,7 +491,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, fn in (("判定规则 judge()", test_judge),
                      ("空模型 mark_empty()", test_empty),
                      ("焓平衡 balance.compute()", test_balance),
-                     ("报错波及范围 impact.build()", test_impact)):
+                     ("报错波及范围 impact.build()", test_impact),
+                     ("管路选型 design.pipe", test_pipe)):
         print(f"\n[{name}]")
         fn()
 

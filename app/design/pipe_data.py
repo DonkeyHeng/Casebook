@@ -50,6 +50,15 @@ MATERIAL_CODES = {
     "H": "衬里/内防腐",
 }
 
+#: 牌号 → 材质类别代号(本项目只用到这五个,见 pipe-selection-plan.md §14.4)
+MATERIAL_CODE_BY_GRADE = {
+    "20#": "B",
+    "Q345A": "C",
+    "Q345B": "C",
+    "S30408": "E",
+    "S31603": "E",
+}
+
 #: 绝热代号(HG/T 20519.6;C/P/T 需人工勾选)
 INSULATION_CODES = {
     "H": "保温",
