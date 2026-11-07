@@ -67,6 +67,10 @@ python -m app.api          # 打开 http://127.0.0.1:8000
 ```
 
 Windows 下也可以直接双击 `start.cmd`(开控制台,方便看日志)。
+不想用 git 的话,从 [Releases](https://github.com/DonkeyHeng/aspen-insight/releases) 下载压缩包解压也行。
+
+> **给要转给同学测试的**:一步步的安装说明(装 Python、装依赖、接自己的 Aspen、
+> 没有 Aspen 怎么先看界面、常见报错)见 [`docs/install.md`](docs/install.md)。
 
 然后:
 
@@ -108,6 +112,7 @@ python -m app.api
 | [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型方案(口径与开工清单) |
 | [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验记录 |
 | [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
+| [`docs/install.md`](docs/install.md) | 安装与试用说明(装 Python / 依赖、启动、接 Aspen、常见报错) |
 | [`docs/api.md`](docs/api.md) | 本地 HTTP 接口参考(排错 / 集成用) |
 | [`docs/conventions.md`](docs/conventions.md) | 文件命名、目录与 README 规范(贡献者必读) |
 | [`app/README.md`](app/README.md) / [`tools/README.md`](tools/README.md) | 代码分层 / 脚本用途 |
