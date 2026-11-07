@@ -83,6 +83,7 @@ const pipeState = {
   status: "idle",        // idle / loading / ok / invalid / not-ready / error
   error: "",
   tables: null,          // 三张标准表录入状态
+  setup: null,           // 表没录时后端给的补录说明(要哪两份标准、放哪、什么格式)
   tablesLoading: false,
   seq: 0,                // 只认最后一次请求
   timer: null,
@@ -463,6 +464,7 @@ async function runPipeCalc({ force = false } = {}) {
   if (out.status === 409) {
     pipeState.status = "not-ready";
     pipeState.error = out.body.error || "标准表未录入,暂时算不出管道表。";
+    pipeState.setup = out.body.setup || null;
     pipeState.data = null;
     renderPipes();
     return;
@@ -780,11 +782,15 @@ function renderPipeTablesHint() {
   if (!pipeState.data || !t2 || t2.loaded) { el.classList.add("hidden"); return; }
   el.className = "pipe-notice warn";
   el.innerHTML = "<span><b>标准壁厚序列(T2)未录入</b>:壁厚列会全是「—」,备注里每行也会写一句。"
-    + "DN、等级号、设计压力不受影响 —— 录完 T2 重算即可。</span>";
+    + "DN、等级号、设计压力不受影响。"
+    + "补录办法:把 GB/T 17395-2024 的表 1、表 4 整理成 "
+    + "<code>t1-17395-table1.csv</code> / <code>t4-17395-table4.csv</code>,"
+    + "放进 <code>data/preview/std/docx/</code>,重启服务后重算"
+    + "(页码见 <code>docs/pipe-standards-index.md</code>)。</span>";
 }
 
-/* 409 卡片:三张标准表录入状态 + 下一步。这里要明确说「改参数没用」 */
-function pipeBlockedHtml(message, tables) {
+/* 409 卡片:三张标准表录入状态 + 下一步。这里要明确说「改参数没用」,并把补录办法列全 */
+function pipeBlockedHtml(message, tables, setup) {
   const t = tables || {};
   const t1 = t.dn_to_od || {};
   const t2 = t.od_to_walls || {};
@@ -794,6 +800,18 @@ function pipeBlockedHtml(message, tables) {
     return `<li><span class="badge ${ok ? "ok" : "err"}">${ok ? "已录" : "未录"}</span> `
       + `${label}<span class="muted">${extra || ""}</span></li>`;
   };
+  const guide = setup ? `<div class="pipe-setup">
+      <h4>怎么补上</h4>
+      <p class="muted">${esc(setup.why)}</p>
+      <table class="pipe-setup-files">
+        <thead><tr><th>放到 <code>${esc(setup.dir)}</code> 下的文件</th><th>来自哪张表</th><th>必需列</th></tr></thead>
+        <tbody>${(setup.files || []).map((f) => `<tr>
+          <td><code>${esc(f.name)}</code></td><td>${esc(f.from)}</td><td>${esc(f.columns)}</td>
+        </tr>`).join("")}</tbody>
+      </table>
+      <ol class="pipe-setup-steps">${(setup.steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+      <p class="muted">表格页码、分页结构与数据校验方法见 <code>${esc(setup.doc)}</code>。</p>
+    </div>` : "";
   return `<div class="pipe-blocked">
     <h3>管道表暂时算不出来:标准表没录全</h3>
     <p class="muted">${esc(message)}</p>
@@ -802,8 +820,8 @@ function pipeBlockedHtml(message, tables) {
       ${line("外径 → 标准壁厚(T2)", t2, t2.loaded ? ` ${t2.count} 个外径` : "")}
       ${line("许用应力(T3)", t3, t3.loaded ? ` ${t3.count} 个温度点,牌号 ${(t3.grades || []).join("、")}` : "")}
     </ul>
-    <p class="muted">表没录全之前,这一页不会显示任何「估出来」的管径 —— 宁可空着。
-      录完改 <span class="mono">app/design/pipe_data.py</span>,重启服务(改了 Python 必须重启)再刷新。</p>
+    <p class="muted">表没录全之前,这一页不会显示任何「估出来」的管径 —— 宁可空着。</p>
+    ${guide}
   </div>`;
 }
 
@@ -859,7 +877,7 @@ function renderPipes() {
   if (pipeState.status === "not-ready") {
     drawPipeTable();
     hideExtras();
-    empty.innerHTML = pipeBlockedHtml(pipeState.error, pipeState.tables);
+    empty.innerHTML = pipeBlockedHtml(pipeState.error, pipeState.tables, pipeState.setup);
     empty.classList.remove("hidden");
     document.getElementById("pipeCount").textContent = "";
     return;

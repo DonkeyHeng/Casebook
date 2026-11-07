@@ -299,6 +299,50 @@ _STRESS_PICK = {
 STRESS_ROWS: list[dict] = []
 
 
+# --------------------------------------------------------------------------
+# 4.1 表没录时,告诉使用者「要做什么」(页面与导出都直接显示这段)
+# --------------------------------------------------------------------------
+#
+# 为什么仓库里不带这些数据:数值来自 GB/T 国家标准原文,受著作权保护,
+# 不能随开源项目分发(Release 里也不放),所以仓库里是空目录 + 这份说明。
+# 使用者需要自己从合法渠道取得标准,再整理成 CSV 放进 data/preview/std/docx/。
+
+SETUP_GUIDE: dict = {
+    "why": "这些数值来自 GB/T 国家标准原文,受著作权保护,不能随本项目分发,"
+           "所以仓库和安装包里都不带。请从合法渠道取得标准后自行整理一份。",
+    "dir": "data/preview/std/docx",
+    "doc": "docs/pipe-standards-index.md",
+    "standards": [
+        {"code": "GB/T 17395-2024", "title": "无缝钢管尺寸、外形、重量及允许偏差",
+         "tables": "表 1(普通钢管)、表 4(不锈钢管);本工具用到 D ≤ 630、S ≤ 25 的部分"},
+        {"code": "GB/T 20801.1-2025", "title": "压力管道规范 工业管道 第 1 部分:总则",
+         "tables": "表 B.1(材料许用应力)"},
+    ],
+    "steps": [
+        "取得上面两份标准(正版纸质/电子,或单位订阅的标准库),找到对应表。",
+        "按下面的文件清单整理成 3 个 CSV(UTF-8、第一行表头);每张表在哪一页、"
+        "分页怎么拼,见 docs/pipe-standards-index.md。",
+        "把 3 个 CSV 放进 data/preview/std/docx/(目录不存在就新建),然后重启服务"
+        "(Python 只在启动时读一次)。",
+        "回到「管道」页刷新,上面的状态会变成「已录」,管道表自动算出来。",
+    ],
+    "files": [
+        {"name": "t1-17395-table1.csv", "from": "GB/T 17395-2024 表 1",
+         "columns": "D_mm, S_mm(其余列可留空;表号/PDF页/系列/kg_per_m 有就带上)"},
+        {"name": "t4-17395-table4.csv", "from": "GB/T 17395-2024 表 4",
+         "columns": "D_mm, S_mm(其余列同上)"},
+        {"name": "t3-20801-tableB1.csv", "from": "GB/T 20801.1-2025 表 B.1",
+         "columns": "标准, 牌号, 许用应力_20 … 许用应力_400(每个温度一列,列名必须是 "
+                    "许用应力_<整数温度>)"},
+    ],
+}
+
+
+def setup_guide() -> dict:
+    """标准表没录时给使用者的操作说明(深拷贝,避免调用方改到常量)。"""
+    return json.loads(json.dumps(SETUP_GUIDE, ensure_ascii=False))
+
+
 def _read_csv(path: Path) -> list[dict]:
     if not path.is_file():
         return []

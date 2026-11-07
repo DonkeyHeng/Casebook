@@ -568,6 +568,30 @@ def test_pipe_checks() -> None:
     check_eq("checks: 只有 1 行参与", v["summary"]["error"] + v["summary"]["warn"] >= 0, True)
 
 
+def test_pipe_setup() -> None:
+    """标准表没录时给使用者的说明:要哪两份标准、什么文件、放哪、为什么不在仓库里。"""
+    from app.design import pipe_data
+
+    g = pipe_data.setup_guide()
+    check("setup: 说明了版权原因", ("著作权" in g["why"]) or ("版权" in g["why"]),
+          f"why={g['why']!r}")
+    check_eq("setup: 目标目录", g["dir"], "data/preview/std/docx")
+    check_eq("setup: 两份标准", len(g["standards"]), 2)
+    codes = {s["code"] for s in g["standards"]}
+    check("setup: 标准号齐全", {"GB/T 17395-2024", "GB/T 20801.1-2025"} <= codes,
+          f"实际 {codes}")
+    names = {f["name"] for f in g["files"]}
+    check("setup: 三个 CSV 文件名齐全",
+          {"t1-17395-table1.csv", "t4-17395-table4.csv", "t3-20801-tableB1.csv"} <= names,
+          f"实际 {names}")
+    check("setup: 每个文件都写了来源与必需列",
+          all(f.get("from") and f.get("columns") for f in g["files"]))
+    check("setup: 至少 3 步操作", len(g["steps"]) >= 3)
+    check("setup: 指向页码索引文档", g["doc"].endswith("pipe-standards-index.md"))
+    check("setup: 返回的是拷贝,改它不影响常量",
+          pipe_data.setup_guide() is not g and pipe_data.setup_guide() is not pipe_data.SETUP_GUIDE)
+
+
 def test_piping_class() -> None:
     """管道等级表:按「流股名前缀 + 介质代号」匹配,工具只套用不判断腐蚀性。"""
     from app.design import pipe_data
@@ -635,6 +659,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("报错波及范围 impact.build()", test_impact),
                      ("管路选型 design.pipe", test_pipe),
                      ("选型校验 validate() V1–V9", test_pipe_checks),
+                     ("标准表补录说明 setup_guide()", test_pipe_setup),
                      ("管道等级表 piping-class", test_piping_class)):
         print(f"\n[{name}]")
         fn()

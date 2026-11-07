@@ -497,10 +497,12 @@ def build(streams: Iterable[Mapping[str, Any]],
     stress = tbl.get("stress", pipe_data.ALLOWABLE_STRESS)
 
     if not dn_to_od or not stress:
+        empty = [label for label, tbl in (("DN→外径(T1)", dn_to_od),
+                                          ("许用应力(T3)", stress)) if not tbl]
         raise TablesNotReady(
-            "标准表未录入:DN→外径(T1)或许用应力(T3)为空。"
-            "先把 GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 录进 pipe_data.py"
-            "(任务单见 docs/_internal/prompt-vision-extract.md)"
+            "标准表未录入:" + "、".join(empty) + " 为空。"
+            "把 GB/T 17395-2024 表 1/表 4 与 GB/T 20801.1-2025 表 B.1 整理成 CSV,"
+            "放进 data/preview/std/docx/,再重启服务(页码与列名见 docs/pipe-standards-index.md)。"
         )
 
     blocks = list(blocks or [])

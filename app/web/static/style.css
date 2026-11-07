@@ -958,6 +958,22 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .pipe-table-status li .muted { color: var(--muted); }
 .pipe-missing { margin: 0; padding-left: 18px; line-height: 1.9; font-size: 13px; }
 
+/* 标准表没录时的补录说明:文件清单 + 步骤。窄窗口也要能读,不横向滚 */
+.pipe-setup {
+  margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg);
+}
+.pipe-setup h4 { margin: 0 0 6px; font-size: 13.5px; }
+.pipe-setup p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.75; }
+.pipe-setup-files { width: 100%; border-collapse: collapse; margin: 0 0 10px; font-size: 12.5px; }
+.pipe-setup-files th, .pipe-setup-files td {
+  border-bottom: 1px solid var(--line); padding: 5px 6px;
+  text-align: left; vertical-align: top; word-break: break-word;
+}
+.pipe-setup-files th { color: var(--muted); font-weight: 600; }
+.pipe-setup-steps { margin: 0 0 8px; padding-left: 20px; font-size: 12.5px; line-height: 1.8; }
+.pipe-setup-steps li { margin: 2px 0; }
+
 /* 校验发现:按码分组,同一码的修法一样,分码看才像清单 */
 .pipe-finding-group { margin-bottom: 12px; }
 .pipe-finding-group h4 {

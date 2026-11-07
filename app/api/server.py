@@ -452,7 +452,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             result = pipe_calc.build(streams, blocks, conns, options=options)
         except pipe_calc.TablesNotReady as exc:
-            payload = {"error": str(exc), "tables": _pipe_table_status()}
+            # 表没录不是错误,是"还没装数据"——把要做什么一并给出来,别只丢一句报错
+            payload = {"error": str(exc), "tables": _pipe_table_status(),
+                       "setup": pipe_data.setup_guide()}
             self._json(payload, 409)
             return
 
@@ -678,10 +680,24 @@ class Handler(BaseHTTPRequestHandler):
                 ) for r in pres["rows"]],
                 [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 14, 12, 14, 12],
             )
-        except pipe_calc.TablesNotReady as exc:   # 标准表没录:写明原因,不造数
+        except pipe_calc.TablesNotReady as exc:   # 标准表没录:写明原因与补录办法,不造数
             ws = wb.create_sheet("管道")
             ws.append(["管路选型暂时不可用"])
             ws.append([str(exc)])
+            guide = pipe_calc.pipe_data.setup_guide()
+            ws.append([])
+            ws.append(["为什么不在安装包里:", guide["why"]])
+            ws.append(["放进哪个目录:", guide["dir"]])
+            ws.append([])
+            ws.append(["要准备的文件"])
+            for item in guide["files"]:
+                ws.append([item["name"], item["from"], item["columns"]])
+            ws.append([])
+            ws.append(["步骤"])
+            for i, step in enumerate(guide["steps"], 1):
+                ws.append([i, step])
+            ws.append([])
+            ws.append(["详细页码与分页结构:", guide["doc"]])
         except Exception as exc:                  # 选型出问题不该拖垮整份 Excel
             ws = wb.create_sheet("管道")
             ws.append(["管路选型出错"])
