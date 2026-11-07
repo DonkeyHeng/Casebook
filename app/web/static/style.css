@@ -997,10 +997,11 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   position: fixed; inset: 0; z-index: 50; padding: 24px;
   background: rgba(17, 24, 39, .45);
   display: flex; align-items: center; justify-content: center;
+  overflow: hidden;   /* 弹窗内只允许纵向滚动,横向一律不出现滚动条 */
 }
 .pipe-modal-box {
   background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
-  width: min(940px, 96vw); max-height: 88vh; overflow: auto;
+  width: min(940px, 100%); max-height: 88vh; overflow-y: auto; overflow-x: hidden;
   padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 10px;
 }
 .pipe-class-hint { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.75; }
@@ -1034,8 +1035,9 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 
 /* 等级表弹窗:表头允许换行(全局 thead th 是 nowrap,长提示会被截断) */
 #pipeClassTable thead th { white-space: normal; line-height: 1.45; vertical-align: bottom; }
-/* 弹窗略加宽,给「备注」列留位置 */
-.pipe-modal-box { width: min(1020px, 96vw); }
+/* 弹窗略加宽,给「备注」列留位置;用 100% 而不是 96vw —— 外层还有 24px 内边距,
+   96vw 在窄窗口下会比可用宽度大,整个遮罩就冒出横向滚动条 */
+.pipe-modal-box { width: min(1020px, 100%); }
 #pipeClassTable th:nth-child(1) { width: 20%; }
 #pipeClassTable th:nth-child(2) { width: 20%; }
 #pipeClassTable th:nth-child(3) { width: 12%; }
@@ -1051,14 +1053,20 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 #pipeClassTable thead th[title] { cursor: help; }
 
 /* ---------------------------------------------------------------- 管道计算说明弹窗
-   纯文字说明,窄一点更好读;内容长就整体滚动(.pipe-modal-box 已经 overflow:auto) */
-.pipe-doc { width: min(860px, 96vw); font-size: 13px; line-height: 1.8; }
+   纯文字说明,窄一点更好读;只纵向滚动,不允许出现横向滚动条 */
+.pipe-doc {
+  width: min(900px, 100%); font-size: 13px; line-height: 1.85;
+  overflow-wrap: anywhere;      /* 长代号/公式在这个宽度里也要能折行 */
+}
 .pipe-doc h4 { margin: 14px 0 6px; font-size: 13.5px; }
 .pipe-doc h4:first-of-type { margin-top: 2px; }
 .pipe-doc p { margin: 0; }
+/* 弹窗是 flex 列容器,子项默认 min-width:auto 会被表格/代码撑宽 → 允许收缩 */
+.pipe-doc > * { min-width: 0; max-width: 100%; }
 .pipe-doc code {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px;
   background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+  white-space: normal; overflow-wrap: anywhere;
 }
 .pipe-doc-callout, .pipe-doc-warn, .pipe-doc-note {
   padding: 9px 12px; border-radius: 8px; font-size: 12.8px; line-height: 1.75;
@@ -1066,16 +1074,27 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .pipe-doc-callout { background: var(--panel); border: 1px solid var(--line); }
 .pipe-doc-warn { background: var(--state-warn-bg); border: 1px solid var(--state-warn-line); color: #7c3d05; }
 .pipe-doc-note { background: var(--bg); border: 1px dashed var(--line); }
-.pipe-doc-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: fixed; }
+/* 表格用自适应布局:列宽由内容决定、长句折行,不靠固定列宽硬撑 */
+.pipe-doc-table { width: 100%; border-collapse: collapse; font-size: 12.5px; table-layout: auto; }
 .pipe-doc-table th, .pipe-doc-table td {
   border-bottom: 1px solid var(--line); padding: 6px 8px;
-  vertical-align: top; text-align: left; word-break: break-word;
+  vertical-align: top; text-align: left;
+  word-break: break-word; overflow-wrap: anywhere;
 }
-.pipe-doc-table th { font-weight: 600; color: var(--muted); white-space: nowrap; }
-.pipe-doc-table th:nth-child(1) { width: 36px; }
-.pipe-doc-table th:nth-child(2) { width: 92px; }
+.pipe-doc-table th { font-weight: 600; color: var(--muted); white-space: normal; }
+/* 前两列是"步"和"做什么",内容短,按 1% 收窄让第三列吃掉剩余宽度 */
+.pipe-doc-table th:nth-child(1), .pipe-doc-table td:nth-child(1) { width: 1%; white-space: nowrap; }
+.pipe-doc-table th:nth-child(2), .pipe-doc-table td:nth-child(2) { width: 1%; white-space: nowrap; }
 .pipe-doc-table td:nth-child(1) { text-align: right; color: var(--muted); }
 .pipe-doc-list { margin: 0; padding-left: 20px; }
 .pipe-doc-list li { margin: 3px 0; }
-.pipe-doc-codes { columns: 2; column-gap: 28px; }
+/* 窄窗口自动并成一列,不硬撑两栏 */
+.pipe-doc-codes { columns: 220px 2; column-gap: 28px; }
+.pipe-doc-codes li { break-inside: avoid; }
 .pipe-doc-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* 窄窗口/小窗口:留白收紧,别把内容挤到要横向拖 */
+@media (max-width: 720px) {
+  .pipe-modal { padding: 8px; }
+  .pipe-modal-box { border-radius: 10px; }
+}
