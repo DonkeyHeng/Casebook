@@ -19,8 +19,16 @@ app/
     composition.py 组成按需读(先校验模型与运行 ID,避免旧快照串味)
     aipack.py     AI 分析包(Markdown + CSV + JSON → zip)
     window.py     窗口几何记忆(ctypes)
-  web/     零构建前端:index.html + static/{app.js,style.css}
+  design/  管路选型:纯计算,不碰 Aspen、不读写库
+    pipe_data.py  标准数据表(表 8/9 壁厚偏差、Y 值、PN/材质代号、DN→外径)+ 运行时加载
+                  表 1/表 4/表 B.1 的 CSV(`data/preview/std/docx/`,不入库)+ 管道等级表(用户配)
+    pipe.py       十步选型:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → [σ] → 壁厚 →
+                  圆整(含负偏差)→ 等级号;外加校验 V1–V9
+  web/     零构建前端:index.html + static/{app.js,pipe.js,style.css}
 ```
+
+> `design/` 故意不依赖 `aspen/` 与 `store/`:它只接收"流股数值 + 配置",算出一张表。
+> 这样数据没录全时它直接抛 `TablesNotReady`,而不是拿 0 算出一张看起来正常的假表。
 
 ## 改代码的三条硬规则
 

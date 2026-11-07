@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import re
 from pathlib import Path
 
@@ -348,3 +349,75 @@ ALLOWABLE_STRESS: dict[str, dict[float, float]] = _load_stress()
 
 #: 本期 DN 上限(超过就标黄提示"超出 DN600,需专项确认")
 MAX_DN = 600
+
+
+# --------------------------------------------------------------------------
+# 5. 介质 → 管道等级(材质 / 腐蚀裕量):用户定义,工具不猜
+# --------------------------------------------------------------------------
+#
+# 工程上"这个介质该用什么材质"由设计人员按**管道等级表**定,不是拿组分算出来的:
+# 腐蚀取决于浓度、温度、含水量、氯离子 ppm、流速……同一物质在不同工况下结论可以相反
+# (干氯气对碳钢几乎不腐蚀,痕量水就变成剧腐蚀)。所以工具只做两件事:
+#   ① 按表**一致地套用**材质与腐蚀裕量;② 把**表里没定义过**的流股明确暴露出来。
+# 它不判断某种介质是否腐蚀、也不给你推荐牌号 —— 那属于材料/腐蚀专业的活儿。
+#
+# 配置文件:`data/config/piping-classes.json`(`data/` 已 gitignore)
+#   {
+#     "rules": [
+#       {"stream_prefix": ["CW", "CWR"], "grade": "20#", "corrosion_mm": 1.0, "note": "循环冷却水"},
+#       {"medium": ["PL", "PGL"], "grade": "S30408", "corrosion_mm": 0.0, "note": "工艺液体"}
+#     ],
+#     "default": {"grade": "S30408", "corrosion_mm": 0.0}
+#   }
+# 没配这个文件也能跑:退回全局默认材质,不提示"未定义"。
+
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "config"
+
+#: 规则列表(按顺序匹配,先命中先用)
+PIPING_CLASS_RULES: list[dict] = []
+#: 兜底等级(可为 None,表示"没匹配就退回全局默认材质")
+PIPING_CLASS_DEFAULT: dict | None = None
+
+
+def _load_piping_classes() -> tuple[list[dict], dict | None]:
+    path = _CONFIG_DIR / "piping-classes.json"
+    if not path.is_file():
+        return [], None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], None      # 配置写坏了当没配,不要因此让整个选型挂掉
+    rules = [r for r in (data.get("rules") or []) if isinstance(r, dict)]
+    default = data.get("default") if isinstance(data.get("default"), dict) else None
+    return rules, default
+
+
+PIPING_CLASS_RULES, PIPING_CLASS_DEFAULT = _load_piping_classes()
+
+
+def resolve_piping_class(stream: str, medium: str,
+                         rules: list[dict] | None = None,
+                         default: dict | None = None) -> dict:
+    """按「流股名前缀 + 介质代号」查管道等级。
+
+    返回 `{grade, corrosion_mm, note, source}`:
+    `source="rule"` 命中某条规则、`"default"` 落兜底、`"none"` 都没命中
+    (由调用方决定是标"待人工指定"还是退回全局默认材质)。
+    """
+    use_rules = PIPING_CLASS_RULES if rules is None else rules
+    use_default = PIPING_CLASS_DEFAULT if default is None else default
+    name = str(stream or "").upper()
+    for rule in use_rules:
+        prefixes = rule.get("stream_prefix") or []
+        media = rule.get("medium") or []
+        if prefixes and not any(name.startswith(str(p).upper()) for p in prefixes):
+            continue
+        if media and medium not in media:
+            continue
+        return {"grade": rule.get("grade"), "corrosion_mm": rule.get("corrosion_mm"),
+                "note": rule.get("note", ""), "source": "rule"}
+    if use_default:
+        return {"grade": use_default.get("grade"),
+                "corrosion_mm": use_default.get("corrosion_mm"),
+                "note": use_default.get("note", ""), "source": "default"}
+    return {"grade": None, "corrosion_mm": None, "note": "", "source": "none"}

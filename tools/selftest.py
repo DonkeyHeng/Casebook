@@ -533,6 +533,34 @@ def test_pipe_checks() -> None:
     check_eq("checks: 只有 1 行参与", v["summary"]["error"] + v["summary"]["warn"] >= 0, True)
 
 
+def test_piping_class() -> None:
+    """管道等级表:按「流股名前缀 + 介质代号」匹配,工具只套用不判断腐蚀性。"""
+    from app.design import pipe_data
+
+    rules = [
+        {"stream_prefix": ["CW", "CWR"], "grade": "20#", "corrosion_mm": 1.0, "note": "循环水"},
+        {"medium": ["PGL"], "grade": "S31603", "corrosion_mm": 0.0, "note": "两相工艺流"},
+    ]
+    default = {"grade": "S30408", "corrosion_mm": 0.0}
+
+    r = pipe_data.resolve_piping_class("CW-0101", "PL", rules=rules, default=default)
+    check_eq("piping: 前缀命中循环水规则", (r["grade"], r["source"]), ("20#", "rule"))
+    check_close("piping: 循环水腐蚀裕量 1.0 mm", r["corrosion_mm"], 1.0)
+
+    r = pipe_data.resolve_piping_class("0101", "PGL", rules=rules, default=default)
+    check_eq("piping: 两相介质命中第二类规则", r["grade"], "S31603")
+
+    r = pipe_data.resolve_piping_class("0101", "PL", rules=rules, default=default)
+    check_eq("piping: 没命中规则就走兜底", (r["grade"], r["source"]), ("S30408", "default"))
+
+    r = pipe_data.resolve_piping_class("0101", "PL", rules=rules, default=None)
+    check_eq("piping: 既没命中也没兜底 → none", r["source"], "none")
+
+    # 配错/没配文件都不能让选型挂掉
+    check_eq("piping: 空规则+空兜底不抛异常",
+             pipe_data.resolve_piping_class("X", "PL", rules=[], default=None)["grade"], None)
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -547,7 +575,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("焓平衡 balance.compute()", test_balance),
                      ("报错波及范围 impact.build()", test_impact),
                      ("管路选型 design.pipe", test_pipe),
-                     ("选型校验 validate() V1–V9", test_pipe_checks)):
+                     ("选型校验 validate() V1–V9", test_pipe_checks),
+                     ("管道等级表 piping-class", test_piping_class)):
         print(f"\n[{name}]")
         fn()
 

@@ -495,7 +495,8 @@ def build(streams: Iterable[Mapping[str, Any]],
     max_dn = int(opts.get("max_dn", pipe_data.MAX_DN))
     default_material = str(opts.get("material", "S30408"))
     wall_grade = str(opts.get("wall_tol_grade", pipe_data.DEFAULT_WALL_TOL_GRADE))
-    corrosion_c2 = float(opts.get("corrosion_mm", 1.0 if default_material == "20#" else 0.0))
+    # 腐蚀裕量:显式给了就用;否则按材质给默认值(碳钢 1.0、不锈钢 0)
+    global_c2 = opts.get("corrosion_mm")
 
     rows: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
@@ -515,7 +516,25 @@ def build(streams: Iterable[Mapping[str, Any]],
 
         pd = design_pressure(s.get("pressure_bar"), opts)
         td = design_temperature(s.get("temperature_c"), opts.get("insulated"), opts)
-        material = str(opts.get("material_for_stream", {}).get(name, default_material))
+        medium = medium_code(phase, opts.get("medium_codes"))
+
+        # 材质来源优先级:人工指定 > 管道等级表 > 全局默认
+        # 工具**不判断介质是否腐蚀**,只按用户定义的表套用(见 pipe_data 第 5 节)
+        cls = pipe_data.resolve_piping_class(
+            name, medium,
+            rules=opts.get("piping_rules"), default=opts.get("piping_default"))
+        override = (opts.get("material_for_stream") or {}).get(name)
+        material = str(override or cls["grade"] or default_material)
+        if not override and cls["source"] == "none" and (opts.get("piping_rules")
+                                                        or pipe_data.PIPING_CLASS_RULES):
+            warnings.append(f"介质 {medium} 未在管道等级表里定义材质,按默认 {default_material} 暂算")
+        if cls["corrosion_mm"] is not None:
+            corrosion_c2 = float(cls["corrosion_mm"])
+        elif global_c2 is not None:
+            corrosion_c2 = float(global_c2)
+        else:
+            corrosion_c2 = 1.0 if material == "20#" else 0.0
+
         stress_table = dict(stress)
         od_to_walls_used = od_to_walls
         if material.startswith("S3"):
@@ -577,7 +596,10 @@ def build(streams: Iterable[Mapping[str, Any]],
         rows.append({
             "stream": name,
             "phase": phase,
-            "medium_code": medium_code(phase, opts.get("medium_codes")),
+            "medium_code": medium,
+            "material_grade": material,
+            "piping_class_note": cls["note"],
+            "piping_class_source": cls["source"],
             "velocity_ms": v,
             "pump_inlet": is_pump_in,
             "pump_outlet": name in pump_out,

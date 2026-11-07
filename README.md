@@ -43,7 +43,8 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | 流程图 | 设备连接图,自动分层、缩放平移、点设备聚焦上下游两层;可导出 SVG / PNG 贴进报告 |
 | 多工况对比 | 任选两个工况,按流股或按设备对比 A / B / 差值,并标出状态与焓平衡的变化 |
 | 塔剖面 | 逐板温度、压力、液/气流量、热负荷,含曲线与联动表格 |
-| 导出 | Excel 五张表(概要 / 流股 / 设备 / 连接 / 塔剖面);或 AI 分析包(README + 多份 CSV + JSON 的 zip) |
+| 管路选型 | 按流股实时算管径与壁厚:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → 许用应力 → 壁厚 → 圆整(含负偏差)→ 管道等级号;附 V1–V9 校验(流速超区间、真空、超温、泵入口等) |
+| 导出 | Excel 七张表(概要 / 流股 / 设备 / 连接 / 塔剖面 / 管道 / 管道计算书);或 AI 分析包(README + 多份 CSV + JSON 的 zip,含 `pipe_schedule.csv`) |
 | 问题横幅 | 第一行直接给结论(「本次运行有 2 个模块报错,不建议用它算收率」),下面是明细,可收起 |
 
 ## 环境要求
@@ -99,8 +100,9 @@ python -m app.api
 | 文档 | 内容 |
 | --- | --- |
 | [`docs/aspen-field-map.md`](docs/aspen-field-map.md) | Aspen 的真实字段路径(给开发者/排错) |
-| [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(正在做的管路选型功能) |
+| [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(管路选型用) |
 | [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型方案(口径与开工清单) |
+| [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验记录 |
 | [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
 | [`docs/api.md`](docs/api.md) | 本地 HTTP 接口参考(排错 / 集成用) |
 | [`docs/conventions.md`](docs/conventions.md) | 文件命名、目录与 README 规范(贡献者必读) |
@@ -138,6 +140,16 @@ aspen-insight/
 **不收敛的模型能读吗?**
 能。读数照存,但会标黄并禁止进入统计对比;状态码与模块报错原文都会列出。
 
+**管路选型用的国标表格为什么不在仓库里?**
+那三张表来自 GB/T 17395 与 GB/T 20801.1 的表格原文,按项目约定**标准原文与派生数据都不入库**。
+所以仓库里是空的:管道页会显示「标准表未录入」并列出缺哪张,不会算出一张假表。
+录入说明与页码索引见 [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md)。
+
+**管路选型会自动判断该用什么材质吗?**
+不会,也不该。腐蚀取决于浓度、温度、含水量、氯离子 ppm 等因素,不是靠组分清单能定的;
+工具只按你给的**管道等级表**(`data/config/piping-classes.json`,示例见 `samples/`)套用材质与腐蚀裕量,
+表里没覆盖的流股会明确标出来。
+
 **会改动我的模型吗?**
 不会。工具只读取节点值,不调用 Run / Reinit,也不会保存模型。
 
@@ -147,6 +159,8 @@ aspen-insight/
 ## 已知限制
 
 - 只读工具,不做闭环优化,也不写回 Aspen
+- 管路选型本期只到 **DN600**(更大的标"需并联/专项设计");不计算管长压降、外压稳定与管道应力
+- 材质与腐蚀裕量来自**用户定义的管道等级表**,工具不判断介质耐蚀性
 - 塔与反应器不参与焓平衡校验(这类设备的能量关系不适用简单加和)
 - 只在 Aspen Plus V15 上实测过,其它版本行为未验证
 - 个人项目,非官方产品;Aspen Plus 是 Aspen Technology, Inc. 的商标

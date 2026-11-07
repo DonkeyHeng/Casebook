@@ -1,0 +1,33 @@
+{
+  "_说明": "管道等级表的示例。把它复制到 data/config/piping-classes.json 后生效(该目录不入库)。",
+  "_规则": [
+    "按顺序匹配,先命中先用;stream_prefix 匹配流股名前缀(不区分大小写),medium 匹配介质代号(PL/PG/PGL)",
+    "工具只按这张表套用材质与腐蚀裕量,**不判断介质是否腐蚀** —— 耐蚀性由设计人员/材料专业定",
+    "某条流股没命中又没 default 时,材质退回全局默认并在备注里提示"
+  ],
+  "rules": [
+    {
+      "stream_prefix": ["CW", "CWR", "CWS"],
+      "grade": "20#",
+      "corrosion_mm": 1.0,
+      "note": "循环冷却水:碳钢 + 1.0 mm 腐蚀裕量(示例,按项目水质改)"
+    },
+    {
+      "stream_prefix": ["LS", "MS", "HS"],
+      "grade": "20#",
+      "corrosion_mm": 1.0,
+      "note": "蒸汽 / 冷凝水(示例)"
+    },
+    {
+      "medium": ["PL", "PGL", "PG"],
+      "grade": "S30408",
+      "corrosion_mm": 0.0,
+      "note": "工艺流:默认不锈钢,无腐蚀裕量(示例)"
+    }
+  ],
+  "default": {
+    "grade": "S30408",
+    "corrosion_mm": 0.0,
+    "note": "兜底:没匹配到的流股按这个来"
+  }
+}
