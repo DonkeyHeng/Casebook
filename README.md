@@ -156,7 +156,9 @@ aspen-insight/
 3. 放进 `data/preview/std/docx/`,重启服务,刷新「管道」页
 
 页码、分页结构与数据校验方法见 [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md);
-页面在「标准表未录入」的提示里也会直接显示这段说明。
+懒得自己抄的话,[`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md)
+里有一份可以直接交给 AI 的录入提示词(要哪几张表、CSV 列名、格式要求、自检方法都写好了)。
+页面在「标准表未录入」的提示里也会显示这段说明。
 
 **管路选型会自动判断该用什么材质吗?**
 不会,也不该。腐蚀取决于浓度、温度、含水量、氯离子 ppm 等因素,不是靠组分清单能定的;

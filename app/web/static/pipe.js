@@ -810,7 +810,9 @@ function pipeBlockedHtml(message, tables, setup) {
         </tr>`).join("")}</tbody>
       </table>
       <ol class="pipe-setup-steps">${(setup.steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
-      <p class="muted">表格页码、分页结构与数据校验方法见 <code>${esc(setup.doc)}</code>。</p>
+      <p class="muted">表格页码、分页结构与数据校验方法见 <code>${esc(setup.doc)}</code>${
+        setup.prompt ? `;要交给 AI 帮着抄数,可以用 <code>${esc(setup.prompt)}</code> 里的提示词` : ""
+      }。</p>
     </div>` : "";
   return `<div class="pipe-blocked">
     <h3>管道表暂时算不出来:标准表没录全</h3>

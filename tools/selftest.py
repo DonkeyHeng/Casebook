@@ -588,6 +588,12 @@ def test_pipe_setup() -> None:
           all(f.get("from") and f.get("columns") for f in g["files"]))
     check("setup: 至少 3 步操作", len(g["steps"]) >= 3)
     check("setup: 指向页码索引文档", g["doc"].endswith("pipe-standards-index.md"))
+    check("setup: 指向录入提示词", g["prompt"].endswith("pipe-standards-extract-prompt.md"))
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    check("setup: 提示词文件确实在仓库里", (root / g["prompt"]).is_file(), g["prompt"])
+    check("setup: 提示词里不含标准数值(版权)",
+          "0.035" not in (root / g["prompt"]).read_text(encoding="utf-8"))
     check("setup: 返回的是拷贝,改它不影响常量",
           pipe_data.setup_guide() is not g and pipe_data.setup_guide() is not pipe_data.SETUP_GUIDE)
 

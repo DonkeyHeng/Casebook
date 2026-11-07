@@ -312,6 +312,7 @@ SETUP_GUIDE: dict = {
            "所以仓库和安装包里都不带。请从合法渠道取得标准后自行整理一份。",
     "dir": "data/preview/std/docx",
     "doc": "docs/pipe-standards-index.md",
+    "prompt": "docs/pipe-standards-extract-prompt.md",
     "standards": [
         {"code": "GB/T 17395-2024", "title": "无缝钢管尺寸、外形、重量及允许偏差",
          "tables": "表 1(普通钢管)、表 4(不锈钢管);本工具用到 D ≤ 630、S ≤ 25 的部分"},
@@ -322,6 +323,8 @@ SETUP_GUIDE: dict = {
         "取得上面两份标准(正版纸质/电子,或单位订阅的标准库),找到对应表。",
         "按下面的文件清单整理成 3 个 CSV(UTF-8、第一行表头);每张表在哪一页、"
         "分页怎么拼,见 docs/pipe-standards-index.md。",
+        "整理时可以整段复制 docs/pipe-standards-extract-prompt.md 里的提示词给一个能看图的 AI,"
+        "连同标准页面一起交给它,让它照格式抄成 CSV。",
         "把 3 个 CSV 放进 data/preview/std/docx/(目录不存在就新建),然后重启服务"
         "(Python 只在启动时读一次)。",
         "回到「管道」页刷新,上面的状态会变成「已录」,管道表自动算出来。",

@@ -22,6 +22,9 @@
 **步骤**:取得标准 → 按上表整理 CSV(UTF-8、第一行表头)→ 放进 `data/preview/std/docx/`
 → 重启服务(Python 只在启动时读一次)→ 刷新「管道」页,状态变成"已录"。
 
+> 整理 CSV 时可以直接用 [`pipe-standards-extract-prompt.md`](pipe-standards-extract-prompt.md)
+> 里的提示词:整段复制给一个能看图的 AI,连同标准页面一起交给它,让它照格式抄。
+
 > 同样的说明在页面里也会显示(`app/design/pipe_data.py` 的 `SETUP_GUIDE`,由
 > `/api/cases/{id}/pipes` 的 409 响应带给前端),这里只是同一份内容的长版本。
 
