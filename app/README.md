@@ -4,6 +4,8 @@
 
 ```
 app/
+  paths.py 运行期基准目录:只读资源(app/web、assets)与可写数据(data/)分开 ——
+           打包成 exe 后前者在临时解包目录,后者在 exe 旁边(见文件头说明)
   aspen/   与 Aspen COM 打交道的唯一地方
     connect.py    附着(ROT → GetObject),把 COM 异常翻成人话
     reader.py     读流股/组成/设备/收敛;judge() 是唯一的判定入口

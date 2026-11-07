@@ -24,6 +24,8 @@ import shutil
 import time
 from pathlib import Path
 
+from app import paths
+
 # --------------------------------------------------------------------------
 # 1. 系数与代号表
 # --------------------------------------------------------------------------
@@ -287,7 +289,7 @@ def minimum_wall(dn: int | None) -> float | None:
 #   * 表 1 的 kg/m 已用 m = 0.02466·S·(D−S) 反算校验:2795 格里 2784 格误差 <0.5%,
 #     11 格可疑且集中在 D≤18 与 D406 的 S24/25(本项目选型范围之外),不影响使用。
 
-_CURATED_DIR = Path(__file__).resolve().parents[2] / "data" / "preview" / "std" / "docx"
+_CURATED_DIR = paths.data_dir("preview", "std", "docx")
 
 #: 表 B.1 里每个本项目牌号**取哪一行**(同一牌号有多个标准/尺寸档时)
 _STRESS_PICK = {
@@ -450,7 +452,7 @@ ALLOWABLE_STRESS: dict[str, dict[float, float]] = _load_stress()
 #
 # 导入后不重启服务 —— 直接替换本模块的三份表,下一次算管道就用新数据。
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = paths.app_root()
 
 #: 三个 CSV 的规格。页面按它渲染上传位,后端按它校验;与 `SETUP_GUIDE["files"]` 对应。
 STD_FILES: tuple[dict, ...] = (
@@ -659,7 +661,7 @@ MAX_DN = 600
 #   }
 # 没配这个文件也能跑:退回全局默认材质,不提示"未定义"。
 
-_CONFIG_DIR = Path(__file__).resolve().parents[2] / "data" / "config"
+_CONFIG_DIR = paths.data_dir("config")
 
 #: 规则列表(按顺序匹配,先命中先用)
 PIPING_CLASS_RULES: list[dict] = []

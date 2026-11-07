@@ -3,6 +3,8 @@
 > 这份文档写给**第一次用、不写代码**的人:从零开始装到能在浏览器里看到自己的 Aspen 模型。
 > 全程都是复制粘贴,不需要编译器、不需要 Node、不需要动系统设置。
 >
+> 不想看 markdown 的话:下载包里根目录有一份纯文本的 **`安装说明.txt`**,内容一样,记事本就能看。
+>
 > 只想看看界面、手头没有 Aspen?跳到 **§6 没有 Aspen 也能先看界面**。
 > 想知道管路选型要额外准备什么,见 **§7**。
 
@@ -33,19 +35,35 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 > 本项目**只读** Aspen:不调用 Run / Reinit,也不会保存你的模型。
 > 但它必须和 Aspen **同一权限**运行 —— 如果 Aspen 是"以管理员身份运行",本工具也要。
 
-## 2. 拿到项目文件(二选一)
+## 2. 拿到项目文件(三选一)
 
-### 2.1 下载压缩包(推荐给测试的同学)
+### 2.1 Windows 包(给不装 Python 的同学,推荐)
 
 1. 打开 <https://github.com/DonkeyHeng/aspen-insight/releases>
-2. 下载最新一个 **Source code (zip)** 资产,例如 `aspen-insight-1.0.1.zip`(约 600 KB)
+2. 下载 `aspen-insight-windows-x64.zip`(约 30 MB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\aspen-insight`
-   - 解压后应该是一个 `aspen-insight` 文件夹,里面能看到 `start.cmd`、`requirements.txt`、`app`
+   - 解压后只有三个文件:`aspen-insight.exe`、`安装说明.txt`、`LICENSE`
+4. 双击 `aspen-insight.exe`:弹出一个黑色窗口(程序本体,别关),浏览器自动打开界面
+   - 不用装 Python、不用 pip、不用改系统设置
+   - 没有 Aspen 想先看界面:关掉窗口,在文件夹里执行 `.\aspen-insight.exe --sample`
+     (装入内置示例工况,原来的库会先备份成 `cases.db.bak`)
+
+> exe 没有代码签名,个别杀毒软件会提示"未知程序";它只监听本机 `127.0.0.1`,不往外网发数据。
+
+### 2.2 源码压缩包(有 Python 的同学)
+
+1. 打开 <https://github.com/DonkeyHeng/aspen-insight/releases>
+2. 下载 **Source code (zip)** 资产,例如 `aspen-insight-1.0.1.zip`(约 600 KB)
+3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\aspen-insight`
+   - 解压后是一个 `aspen-insight` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
+     `安装说明.txt`、`app`
+   - 只给开发者看的 `AGENTS.md` / `CONTRIBUTING.md` / `SECURITY.md` 与 `model/`、`standards/`
+     等占位目录**不在包里**(见 `.gitattributes` 的 `export-ignore`)
 
 > 压缩包里**没有** Aspen 模型、**没有**标准 PDF 原文、**没有**你自己的本地工况库(`data/cases.db`);
 > 它附带一份示例工况库 `samples/case-23-error.db`,用来离线看界面(见 §6)。
 
-### 2.2 git clone(要跟着更新的人)
+### 2.3 git clone(要跟着更新的人)
 
 ```bash
 git clone https://github.com/DonkeyHeng/aspen-insight.git
@@ -100,6 +118,9 @@ python -c "import win32com.client, openpyxl; print('依赖就绪')"
 
 ## 4. 启动
 
+> 用的是 **Windows 包(exe)** 的话,第 2.1 节的"双击 exe"就是这一步;
+> 下面的命令行参数对 exe 同样适用,只是把 `python -m app.api` 换成 `.\aspen-insight.exe`。
+
 ### 4.1 双击 `start.cmd`(最省事)
 
 它会依次检查 Python、检查依赖、启动服务,并自动打开浏览器;
@@ -118,7 +139,8 @@ python -m app.api
 ```bash
 python -m app.api --port 8001            # 8000 被占用时换端口
 python -m app.api --no-browser           # 不自动开浏览器
-python -m app.api --db data/cases.db      # 指定工况库位置(默认就是它)
+python -m app.api --db data/cases.db      # 指定工况库位置(默认就在 data/ 下)
+python -m app.api --sample                # 装入内置示例工况(原库备份成 .bak)
 ```
 
 停止服务:网页左下角的「退出」按钮,或者直接关掉那个命令行窗口。
@@ -154,11 +176,19 @@ python tools/probe_aspen.py
 ## 6. 没有 Aspen 也能先看界面
 
 仓库里带了一份**真实但失败**的工况快照(121 流股 / 77 模块,含两个塔的报错),
-用来演示界面和判定逻辑,不需要 Aspen、不需要许可证:
+用来演示界面和判定逻辑,不需要 Aspen、不需要许可证。
+
+源码包(有 `samples` 目录):
 
 ```bash
 copy samples\case-23-error.db data\cases.db     # 覆盖前先备份你自己的 data\cases.db
 python -m app.api
+```
+
+Windows 包(exe,示例库已经打进程序里):
+
+```powershell
+.\aspen-insight.exe --sample
 ```
 
 打开网页就能看到这个工况的流股、设备、问题横幅、流程图与对比页。

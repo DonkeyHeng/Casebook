@@ -33,6 +33,7 @@ import io
 import json
 import mimetypes
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -41,17 +42,21 @@ import time
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
+from app import paths
 from app.store import db, flowsheet, impact
 from app.api import read_job
 from app.api import window as win
 
-WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
-PROJECT_ROOT = os.path.dirname(os.path.dirname(WEB_DIR))
-DEFAULT_DB = "data/cases.db"
-DEFAULT_LOG = "data/server.log"
-STATE_PATH = os.path.join(PROJECT_ROOT, "data", "window.json")
+# 只读资源(网页、图标)与可写数据(data/)分开:打包成 exe 后前者在临时解包目录,
+# 后者必须在 exe 旁边,否则一关程序数据就没了(见 app/paths.py)
+WEB_DIR = os.path.join(str(paths.resource_root()), "app", "web")
+PROJECT_ROOT = str(paths.resource_root())
+DEFAULT_DB = str(paths.data_dir("cases.db"))
+DEFAULT_LOG = str(paths.data_dir("server.log"))
+STATE_PATH = str(paths.data_dir("window.json"))
 
 # 桌面快捷方式用的图标,同时当作网页 favicon —— 应用窗口在任务栏里才会是这张脸
 ICON_PATH = os.path.join(PROJECT_ROOT, "assets", "app-icon.ico")
@@ -950,6 +955,27 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
         httpd.server_close()
 
 
+def _install_sample(db_path: str) -> bool:
+    """把内置的示例工况库装成当前库(`--sample` 用:没有 Aspen 也能先看界面)。
+
+    会先把已有的库备份成 `*.bak`,不覆盖掉用户自己的数据。
+    """
+    src = paths.resource_root() / "samples" / "case-23-error.db"
+    if not src.is_file():
+        _say(f"没有内置示例工况库:{src}")
+        _alert("这个版本里没有内置示例工况库。\n可以到仓库的 samples/ 目录拿 case-23-error.db。")
+        return False
+    dst = Path(db_path)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.is_file():
+        backup = dst.with_name(dst.name + ".bak")
+        shutil.copy2(dst, backup)
+        _say(f"已把原工况库备份成:{backup}")
+    shutil.copy2(src, dst)
+    _say(f"已装入示例工况库:{dst}(121 流股 / 77 模块,含两个塔的报错)")
+    return True
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="aspen-insight 本地服务")
     ap.add_argument("--db", default=DEFAULT_DB, help=f"工况库路径(默认 {DEFAULT_DB})")
@@ -958,10 +984,14 @@ def main() -> int:
     ap.add_argument("--no-browser", action="store_true", help="启动后不自动打开界面")
     ap.add_argument("--app", action="store_true", help="用无地址栏的应用窗口打开(默认用普通浏览器标签页)")
     ap.add_argument("--log", default=DEFAULT_LOG, help=f"无控制台时的日志文件(默认 {DEFAULT_LOG})")
+    ap.add_argument("--sample", action="store_true",
+                    help="把内置的示例工况库装进当前库(没有 Aspen 也能先看界面;原库会备份成 .bak)")
     args = ap.parse_args()
 
     _ensure_logging(args.log)
     _say(f"启动 aspen-insight (pid={os.getpid()})")
+    if args.sample:
+        _install_sample(args.db)
     try:
         serve(args.db, args.host, args.port,
               open_browser=not args.no_browser,

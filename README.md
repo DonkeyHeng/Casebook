@@ -53,11 +53,18 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | --- | --- |
 | 系统 | Windows 10 / 11(唯一支持平台) |
 | Aspen | Aspen Plus **V15**(实测版本;其它版本未验证),需自备正版许可证 |
-| Python | 3.10 及以上,依赖 `pywin32`、`openpyxl` |
+| Python | 3.10 及以上 —— **只有跑源码才需要**;用 Release 的 `aspen-insight-windows-x64.zip` 时不用装 |
+| 依赖 | `pywin32`、`openpyxl`(源码运行时 `pip install -r requirements.txt`) |
 | 会话 | 必须在**真实桌面会话**运行,Aspen 与本工具需要同权限级别 |
 | 浏览器 | Edge / Chrome 等现代浏览器(前端零构建,不需要 Node) |
 
 ## 快速开始
+
+**不想装 Python**:到 [Releases](https://github.com/DonkeyHeng/aspen-insight/releases)
+下载 `aspen-insight-windows-x64.zip`(约 30 MB),解压后双击 `aspen-insight.exe`,
+浏览器会自动打开界面。包里根目录有一份纯文本的 `安装说明.txt`。
+
+**有 Python,或者要跑源码**:
 
 ```bash
 git clone https://github.com/DonkeyHeng/aspen-insight.git
@@ -67,10 +74,11 @@ python -m app.api          # 打开 http://127.0.0.1:8000
 ```
 
 Windows 下也可以直接双击 `start.cmd`(开控制台,方便看日志)。
-不想用 git 的话,从 [Releases](https://github.com/DonkeyHeng/aspen-insight/releases) 下载压缩包解压也行。
+不想用 git 的话,下载 Release 里的源码压缩包解压也行。
 
 > **给要转给同学测试的**:一步步的安装说明(装 Python、装依赖、接自己的 Aspen、
-> 没有 Aspen 怎么先看界面、常见报错)见 [`docs/install.md`](docs/install.md)。
+> 没有 Aspen 怎么先看界面、常见报错)见 [`docs/install.md`](docs/install.md);
+> 纯文本版是 [`docs/install-text.txt`](docs/install-text.txt),发布包里改名为 `安装说明.txt`。
 
 然后:
 
@@ -113,6 +121,7 @@ python -m app.api
 | [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验记录 |
 | [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
 | [`docs/install.md`](docs/install.md) | 安装与试用说明(装 Python / 依赖、启动、接 Aspen、常见报错) |
+| [`docs/install-text.txt`](docs/install-text.txt) | 上面那份的纯文本版(发布包根目录里叫 `安装说明.txt`) |
 | [`docs/api.md`](docs/api.md) | 本地 HTTP 接口参考(排错 / 集成用) |
 | [`docs/conventions.md`](docs/conventions.md) | 文件命名、目录与 README 规范(贡献者必读) |
 | [`app/README.md`](app/README.md) / [`tools/README.md`](tools/README.md) | 代码分层 / 脚本用途 |

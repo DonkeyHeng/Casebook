@@ -10,3 +10,16 @@
 *.jpg binary
 *.ico binary
 *.xlsx binary
+*.db binary
+
+# ---- 发布包(Release 的源码 zip)里不带这些东西 ----
+# 只给开发者 / AI 助手看的说明与占位目录,下载的人用不上;
+# 去掉之后解压出来根目录干净得多(见 tools/make_release.py)
+AGENTS.md       export-ignore
+CONTRIBUTING.md export-ignore
+SECURITY.md     export-ignore
+.gitattributes  export-ignore
+.gitignore      export-ignore
+model/          export-ignore
+model-full/     export-ignore
+standards/      export-ignore
