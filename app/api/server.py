@@ -143,6 +143,8 @@ def _pipe_table_status() -> dict:
         "stress": {"loaded": bool(pipe_data.ALLOWABLE_STRESS),
                    "grades": stress_grades,
                    "count": sum(len(v) for v in pipe_data.ALLOWABLE_STRESS.values())},
+        # 管道等级表:不填也能跑 —— 全部流股按页面上的默认材质
+        "piping_class": pipe_data.piping_class_status(),
         "ready": bool(pipe_data.DN_TO_OD and pipe_data.ALLOWABLE_STRESS
                       and pipe_data.OD_TO_WALLS),
     }

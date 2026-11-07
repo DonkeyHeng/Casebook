@@ -421,3 +421,17 @@ def resolve_piping_class(stream: str, medium: str,
                 "corrosion_mm": use_default.get("corrosion_mm"),
                 "note": use_default.get("note", ""), "source": "default"}
     return {"grade": None, "corrosion_mm": None, "note": "", "source": "none"}
+
+
+def piping_class_status() -> dict:
+    """管道等级表的配置状态 —— 给页面/接口显示"现在是配了表还是全按默认"。
+
+    默认口径:**不填表就全部按页面上的默认材质**(默认 S30408),不会因为"没配"而少算或报错。
+    """
+    return {
+        "configured": bool(PIPING_CLASS_RULES),
+        "rule_count": len(PIPING_CLASS_RULES),
+        "has_default": PIPING_CLASS_DEFAULT is not None,
+        "default_grade": (PIPING_CLASS_DEFAULT or {}).get("grade"),
+        "note": "" if PIPING_CLASS_RULES else "未配置管道等级表:全部流股按页面上的默认材质计算",
+    }

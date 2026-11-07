@@ -182,6 +182,14 @@ function fillPipeSelects(tables) {
     mat.innerHTML = list.map((g) => `<option value="${esc(g)}">${esc(g)}${suffix}</option>`).join("");
     if (list.includes(pipeState.params.material)) mat.value = pipeState.params.material;
   }
+  // 管道等级表只是**可选的覆盖**:没配就全部按上面选的默认材质,不要让人以为漏了什么
+  const hint = document.getElementById("pipeClassHint");
+  if (hint) {
+    const pc = (tables && tables.piping_class) || {};
+    hint.textContent = pc.configured
+      ? `等级表 ${pc.rule_count} 条`
+      : "等级表:未配置(全部按默认材质)";
+  }
 }
 
 function initPipePanel() {
