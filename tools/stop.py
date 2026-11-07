@@ -1,6 +1,6 @@
-"""停止 aspen-insight 服务(按端口找进程,确认是 python 才杀)。
+"""停止 Casebook 服务(按端口找进程,确认是 python 才杀)。
 
-由桌面的「停止 aspen-insight」快捷方式调用:
+由桌面的「停止 Casebook」快捷方式调用:
     pythonw.exe tools\\stop.py 8000
 
 注意(pythonw 下的两个坑):
@@ -55,7 +55,7 @@ def _msg(text: str, icon: int = 0x40) -> None:
     if QUIET:
         return
     try:
-        ctypes.windll.user32.MessageBoxW(0, text, "aspen-insight", icon)
+        ctypes.windll.user32.MessageBoxW(0, text, "Casebook", icon)
     except Exception as exc:
         _log(f"弹窗失败: {type(exc).__name__}: {exc}")
 

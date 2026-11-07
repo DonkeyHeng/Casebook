@@ -1,4 +1,4 @@
-/* aspen-insight 前端:零构建,原生 JS */
+/* Casebook 前端:零构建,原生 JS */
 
 const state = {
   cases: [],
@@ -1938,7 +1938,7 @@ async function deleteCurrentCase() {
 
 /* 退出:停服务并关掉窗口(应用窗口模式下 window.close() 生效) */
 async function quitApp() {
-  if (!confirm("确定退出 aspen-insight 吗?\n后台服务会一起停止。")) return;
+  if (!confirm("确定退出 Casebook 吗?\n后台服务会一起停止。")) return;
   const btn = document.getElementById("quitBtn");
   btn.disabled = true;
   btn.textContent = "正在退出…";

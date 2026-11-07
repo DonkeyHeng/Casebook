@@ -1,4 +1,4 @@
-# aspen-insight — 协作约定
+# Casebook — 协作约定
 
 本文件写给在本仓库工作的开发者与 AI 助手。动手改代码前,先读
 [`docs/conventions.md`](docs/conventions.md) 第 5 节的命名与文档检查清单。

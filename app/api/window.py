@@ -30,7 +30,7 @@ EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 def find_window(keyword: str, class_name: str = "Chrome_WidgetWin_1") -> int:
     """找标题含 keyword、窗口类为浏览器窗口的顶层窗口。
 
-    必须同时按窗口类过滤:否则标题里带 "aspen-insight" 的资源管理器窗口也会被误判成应用窗口。
+    必须同时按窗口类过滤:否则标题里带 "Casebook" 的资源管理器窗口也会被误判成应用窗口。
     """
     hits: list[int] = []
 

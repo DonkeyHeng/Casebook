@@ -749,7 +749,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--verbose", action="store_true", help="逐条打印通过的用例")
     args = parser.parse_args(argv)
 
-    print("aspen-insight 自测")
+    print("Casebook 自测")
     for name, fn in (("判定规则 judge()", test_judge),
                      ("空模型 mark_empty()", test_empty),
                      ("焓平衡 balance.compute()", test_balance),

@@ -62,7 +62,7 @@ STATE_PATH = str(paths.data_dir("window.json"))
 ICON_PATH = os.path.join(PROJECT_ROOT, "assets", "app-icon.ico")
 
 # 页面标题(窗口标题也是它),用来定位应用窗口;改 <title> 时要同步改这里
-WINDOW_KEY = "aspen-insight · 工况数据"
+WINDOW_KEY = "Casebook · 工况数据"
 
 # 用「应用窗口模式」打开,窗口是浏览器给这个页面单独开的,
 # 所以页面里的 window.close() 能把窗口真的关掉(普通标签页不行)。
@@ -126,7 +126,7 @@ def _alert(msg: str) -> None:
     try:
         import ctypes
 
-        ctypes.windll.user32.MessageBoxW(0, msg, "aspen-insight", 0x10)
+        ctypes.windll.user32.MessageBoxW(0, msg, "Casebook", 0x10)
     except Exception:
         pass
 
@@ -737,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
         data = bio.getvalue()
 
         stamp = time.strftime("%Y%m%d_%H%M")
-        fname = f"aspen-insight_case{case_id}_{stamp}.xlsx"
+        fname = f"Casebook_case{case_id}_{stamp}.xlsx"
         self.send_response(200)
         self.send_header(
             "Content-Type",
@@ -936,7 +936,7 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
             open_ui(url, app_window, win.load_state(STATE_PATH))
         return
 
-    _say(f"aspen-insight 已启动:{url}")
+    _say(f"Casebook 已启动:{url}")
     _say(f"工况库:{os.path.abspath(db_path)}")
     if open_browser:
         state = win.load_state(STATE_PATH)
@@ -977,7 +977,7 @@ def _install_sample(db_path: str) -> bool:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="aspen-insight 本地服务")
+    ap = argparse.ArgumentParser(description="Casebook 本地服务")
     ap.add_argument("--db", default=DEFAULT_DB, help=f"工况库路径(默认 {DEFAULT_DB})")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
@@ -989,7 +989,7 @@ def main() -> int:
     args = ap.parse_args()
 
     _ensure_logging(args.log)
-    _say(f"启动 aspen-insight (pid={os.getpid()})")
+    _say(f"启动 Casebook (pid={os.getpid()})")
     if args.sample:
         _install_sample(args.db)
     try:
@@ -998,7 +998,7 @@ def main() -> int:
               app_window=args.app)
     except Exception as exc:
         traceback.print_exc()
-        _alert(f"aspen-insight 启动失败:\n{type(exc).__name__}: {exc}\n\n详情见 {args.log}")
+        _alert(f"Casebook 启动失败:\n{type(exc).__name__}: {exc}\n\n详情见 {args.log}")
         return 1
     return 0
 

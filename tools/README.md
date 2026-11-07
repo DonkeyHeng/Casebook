@@ -15,7 +15,7 @@
 | `make_icon.py` | 源图 → `.ico`(圆形抠底 + 6 个尺寸),并部署副本到 `%LOCALAPPDATA%` | ❌ | 写 `assets/` 和用户目录 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
 | `check_public_safe.py` | 开源 / 提交前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
-| `build_exe.py` | 用 PyInstaller 打单文件 `aspen-insight.exe`(需要 `pip install pyinstaller`) | ❌ | 写 `data/preview/{dist,build}` |
+| `build_exe.py` | 用 PyInstaller 打单文件 `Casebook.exe`(需要 `pip install pyinstaller`) | ❌ | 写 `data/preview/{dist,build}` |
 | `make_release.py` | 打源码 zip 与 Windows zip 两个发布包,打印大小与 SHA-256 | ❌ | 写 `data/preview/dist` |
 
 ## 什么时候跑哪个

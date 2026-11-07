@@ -11,8 +11,8 @@
 ## 环境
 
 ```bash
-git clone https://github.com/DonkeyHeng/aspen-insight.git
-cd aspen-insight
+git clone https://github.com/DonkeyHeng/Casebook.git
+cd Casebook
 python -m pip install -r requirements.txt
 ```
 

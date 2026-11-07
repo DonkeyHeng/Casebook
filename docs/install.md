@@ -11,8 +11,8 @@
 ## 0. 一句话版本
 
 ```bash
-git clone https://github.com/DonkeyHeng/aspen-insight.git
-cd aspen-insight
+git clone https://github.com/DonkeyHeng/Casebook.git
+cd Casebook
 python -m pip install -r requirements.txt
 python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ```
@@ -39,23 +39,23 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 
 ### 2.1 Windows 包(给不装 Python 的同学,推荐)
 
-1. 打开 <https://github.com/DonkeyHeng/aspen-insight/releases>
-2. 下载 `aspen-insight-windows-x64.zip`(约 30 MB)
-3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\aspen-insight`
-   - 解压后只有三个文件:`aspen-insight.exe`、`安装说明.txt`、`LICENSE`
-4. 双击 `aspen-insight.exe`:弹出一个黑色窗口(程序本体,别关),浏览器自动打开界面
+1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
+2. 下载 `Casebook-windows-x64.zip`(约 30 MB)
+3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
+   - 解压后只有三个文件:`Casebook.exe`、`安装说明.txt`、`LICENSE`
+4. 双击 `Casebook.exe`:弹出一个黑色窗口(程序本体,别关),浏览器自动打开界面
    - 不用装 Python、不用 pip、不用改系统设置
-   - 没有 Aspen 想先看界面:关掉窗口,在文件夹里执行 `.\aspen-insight.exe --sample`
+   - 没有 Aspen 想先看界面:关掉窗口,在文件夹里执行 `.\Casebook.exe --sample`
      (装入内置示例工况,原来的库会先备份成 `cases.db.bak`)
 
 > exe 没有代码签名,个别杀毒软件会提示"未知程序";它只监听本机 `127.0.0.1`,不往外网发数据。
 
 ### 2.2 源码压缩包(有 Python 的同学)
 
-1. 打开 <https://github.com/DonkeyHeng/aspen-insight/releases>
-2. 下载 **Source code (zip)** 资产,例如 `aspen-insight-1.0.1.zip`(约 600 KB)
-3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\aspen-insight`
-   - 解压后是一个 `aspen-insight` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
+1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
+2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.0.2.zip`(约 610 KB)
+3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
+   - 解压后是一个 `Casebook` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
      `安装说明.txt`、`app`
    - 只给开发者看的 `AGENTS.md` / `CONTRIBUTING.md` / `SECURITY.md` 与 `model/`、`standards/`
      等占位目录**不在包里**(见 `.gitattributes` 的 `export-ignore`)
@@ -66,8 +66,8 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.3 git clone(要跟着更新的人)
 
 ```bash
-git clone https://github.com/DonkeyHeng/aspen-insight.git
-cd aspen-insight
+git clone https://github.com/DonkeyHeng/Casebook.git
+cd Casebook
 ```
 
 以后更新就是 `git pull`。
@@ -119,7 +119,7 @@ python -c "import win32com.client, openpyxl; print('依赖就绪')"
 ## 4. 启动
 
 > 用的是 **Windows 包(exe)** 的话,第 2.1 节的"双击 exe"就是这一步;
-> 下面的命令行参数对 exe 同样适用,只是把 `python -m app.api` 换成 `.\aspen-insight.exe`。
+> 下面的命令行参数对 exe 同样适用,只是把 `python -m app.api` 换成 `.\Casebook.exe`。
 
 ### 4.1 双击 `start.cmd`(最省事)
 
@@ -188,7 +188,7 @@ python -m app.api
 Windows 包(exe,示例库已经打进程序里):
 
 ```powershell
-.\aspen-insight.exe --sample
+.\Casebook.exe --sample
 ```
 
 打开网页就能看到这个工况的流股、设备、问题横幅、流程图与对比页。
@@ -249,11 +249,13 @@ Windows 包(exe,示例库已经打进程序里):
 
 ## 10. 实测记录
 
-- 2026-11-07:把 Release 的 `aspen-insight-1.0.1.zip`(625,100 字节,68 个文件,解压出 `aspen-insight/`
-  文件夹)解压到干净目录,按 §3 装好依赖后 `python -m app.api` 启动成功;首次启动自动创建
-  `data/cases.db`,首页返回 200,`/api/cases` 返回 `[]`(空库),`/api/pipe-standards` 正常返回
-  三张表的状态 —— 与 §4.3、§7 的描述一致。
-- 想核对下载是否完整:命令行执行 `certutil -hashfile aspen-insight-1.0.1.zip SHA256`,
+- 2026-11-07:把 Release 的 `Casebook-1.0.2.zip` 解压到干净目录,按 §3 装好依赖后
+  `python -m app.api` 启动成功;首次启动自动创建 `data/cases.db`,首页返回 200,
+  `/api/cases` 返回 `[]`(空库),`/api/pipe-standards` 正常返回三张表的状态 ——
+  与 §4.3、§7 的描述一致。
+- 精确体积与文件数、SHA-256 见 Release 说明。**这几个数每次重打都会变**,所以不写死在这里 ——
+  写死过一次,下一轮就过时了(文档写 603,400,实际已经 625,100)。
+- 想核对下载是否完整:命令行执行 `certutil -hashfile Casebook-1.0.2.zip SHA256`,
   和 Release 说明里那行 SHA-256 对比即可。
 - 读数与导出在同一天用 Aspen Plus V15 + Python 3.15 验证过;其它 Aspen 版本、其它 Python 版本
   **未验证**,遇到问题请提 issue 并附 `python --version` 与报错原文。

@@ -1,11 +1,11 @@
 ========================================================
- aspen-insight 使用说明
+ Casebook 使用说明
  把 Aspen Plus 的仿真结果读成可查、可对比、可导出的本地数据
 ========================================================
 
 先看你手里是哪一种:
 
-  A. 有一个 aspen-insight.exe
+  A. 有一个 Casebook.exe
      → 看第 1 节。双击就能用,不用装 Python。
 
   B. 是一个文件夹,里面有 start.cmd、app 文件夹,没有 exe
@@ -19,11 +19,11 @@
 --------------------------------------------------------
 
  1.1 放哪儿
-     把整个文件夹放到路径里没有空格的地方,例如 D:\aspen-insight。
+     把整个文件夹放到路径里没有空格的地方,例如 D:\Casebook。
      不要放在 OneDrive / 网盘同步目录里,读库时容易冲突。
 
  1.2 启动
-     双击 aspen-insight.exe。
+     双击 Casebook.exe。
      会弹出一个黑色窗口(那是程序本体,别关它),
      几秒后浏览器自动打开 http://127.0.0.1:8000  就是界面。
 
@@ -36,7 +36,7 @@
      先关掉黑色窗口,然后在这个文件夹里:
        按住 Shift 键 + 鼠标右键 → 「在此处打开 PowerShell 窗口」
        输入并回车:
-           .\aspen-insight.exe --sample
+           .\Casebook.exe --sample
      程序会把内置的示例工况装进去(121 条流股、含两个塔的报错),
      原来的库会先备份成 cases.db.bak,不会覆盖丢数据。
      之后页面就能看到流股、设备、流程图、对比页。
@@ -153,8 +153,8 @@
 
  问:双击 exe 黑窗口一闪就没了?
  答:多半是端口被占或被杀软拦。在这个文件夹里按住 Shift 右键 →
-     「在此处打开 PowerShell 窗口」,手动执行 .\aspen-insight.exe,
-     就能看到具体报错。也可以换端口:.\aspen-insight.exe --port 8001
+     「在此处打开 PowerShell 窗口」,手动执行 .\Casebook.exe,
+     就能看到具体报错。也可以换端口:.\Casebook.exe --port 8001
 
  问:浏览器没自动打开?
  答:手动访问 http://127.0.0.1:8000 。
@@ -194,12 +194,12 @@
 
  Release 页面说明里有一行 SHA-256。下载后在这个文件夹执行:
 
-     certutil -hashfile aspen-insight.exe SHA256
+     certutil -hashfile Casebook.exe SHA256
 
  与页面上的值对比,一致就说明文件没坏、没被改过。
 
 ========================================================
- 项目地址:https://github.com/DonkeyHeng/aspen-insight
+ 项目地址:https://github.com/DonkeyHeng/Casebook
  许可证:Apache License 2.0(可自由使用、修改、再分发,
          条件见同目录 LICENSE)
  Aspen Plus 是 Aspen Technology, Inc. 的商标,

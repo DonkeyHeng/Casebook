@@ -309,7 +309,7 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
         files["pipe_schedule.csv"] = "管路选型(实时算,不写库;校验码见「校验码」列)"
 
     payload = {
-        "generator": "aspen-insight",
+        "generator": "Casebook",
         "pack_version": PACK_VERSION,
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "units": UNITS,
@@ -377,7 +377,7 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     out: list[str] = []
     w = out.append
 
-    w("# aspen-insight · AI 分析包")
+    w("# Casebook · AI 分析包")
     w("")
     w("> 本文件是整个数据包的使用说明,给 AI 和人读都行。")
     w("> 数据来自一次 **Aspen Plus 模拟运行**的读数,只做**分析**,不含任何修改模型的建议。")
@@ -650,7 +650,7 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("")
     w("---")
     w("")
-    w(f"由 aspen-insight 生成 · 数据包格式版本 {PACK_VERSION} · {generated}")
+    w(f"由 Casebook 生成 · 数据包格式版本 {PACK_VERSION} · {generated}")
     return "\n".join(out) + "\n"
 
 
@@ -753,5 +753,5 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
 
     stamp = time.strftime("%Y%m%d_%H%M")
     # 文件名用 ASCII:HTTP 头的 Content-Disposition 对非 ASCII 支持不一致,避免踩坑
-    filename = f"aspen-insight_case{case_id}_ai-pack_{stamp}.zip"
+    filename = f"Casebook_case{case_id}_ai-pack_{stamp}.zip"
     return bio.getvalue(), filename

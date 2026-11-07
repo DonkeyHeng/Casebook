@@ -1,6 +1,6 @@
-# aspen-insight
+# Casebook
 
-<img src="assets/app-icon_256.png" width="96" align="right" alt="aspen-insight 图标">
+<img src="assets/app-icon_256.png" width="96" align="right" alt="Casebook 图标">
 
 把 **Aspen Plus** 的仿真结果变成可查、可对比、可导出的本地数据工具。
 
@@ -53,22 +53,22 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | --- | --- |
 | 系统 | Windows 10 / 11(唯一支持平台) |
 | Aspen | Aspen Plus **V15**(实测版本;其它版本未验证),需自备正版许可证 |
-| Python | 3.10 及以上 —— **只有跑源码才需要**;用 Release 的 `aspen-insight-windows-x64.zip` 时不用装 |
+| Python | 3.10 及以上 —— **只有跑源码才需要**;用 Release 的 `Casebook-windows-x64.zip` 时不用装 |
 | 依赖 | `pywin32`、`openpyxl`(源码运行时 `pip install -r requirements.txt`) |
 | 会话 | 必须在**真实桌面会话**运行,Aspen 与本工具需要同权限级别 |
 | 浏览器 | Edge / Chrome 等现代浏览器(前端零构建,不需要 Node) |
 
 ## 快速开始
 
-**不想装 Python**:到 [Releases](https://github.com/DonkeyHeng/aspen-insight/releases)
-下载 `aspen-insight-windows-x64.zip`(约 30 MB),解压后双击 `aspen-insight.exe`,
+**不想装 Python**:到 [Releases](https://github.com/DonkeyHeng/Casebook/releases)
+下载 `Casebook-windows-x64.zip`(约 30 MB),解压后双击 `Casebook.exe`,
 浏览器会自动打开界面。包里根目录有一份纯文本的 `安装说明.txt`。
 
 **有 Python,或者要跑源码**:
 
 ```bash
-git clone https://github.com/DonkeyHeng/aspen-insight.git
-cd aspen-insight
+git clone https://github.com/DonkeyHeng/Casebook.git
+cd Casebook
 python -m pip install -r requirements.txt
 python -m app.api          # 打开 http://127.0.0.1:8000
 ```
@@ -129,7 +129,7 @@ python -m app.api
 ## 项目结构
 
 ```
-aspen-insight/
+Casebook/
   app/           应用代码:aspen(COM)、store(本地库)、design(管路选型纯计算)、api(HTTP)、web(零构建前端)
   tools/         调试与回算脚本:探测、基准、塔诊断、组成补读、回归自测
   docs/          字段地图与功能方案

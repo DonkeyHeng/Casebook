@@ -1,10 +1,10 @@
 @echo off
-rem aspen-insight launcher: check env -> start server -> wait for port -> open browser
+rem Casebook launcher: check env -> start server -> wait for port -> open browser
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
 
-echo Starting aspen-insight ...
+echo Starting Casebook ...
 echo.
 
 rem ---------- 1) Python ----------
@@ -40,7 +40,7 @@ if not errorlevel 1 (
 )
 
 rem ---------- 4) start the server ----------
-start "aspen-insight server" cmd /k %PY% -m app.api --port 8000
+start "Casebook server" cmd /k %PY% -m app.api --port 8000
 
 rem wait for the port (max 15 s). ping is used instead of timeout:
 rem Git Bash / MSYS ships a GNU timeout that shadows the Windows one.
@@ -54,7 +54,7 @@ if %tries% lss 15 goto wait
 
 echo.
 echo [ERROR] Service did not start: 127.0.0.1:8000 is not responding.
-echo Open the 'aspen-insight server' window for the traceback. Common causes:
+echo Open the 'Casebook server' window for the traceback. Common causes:
 echo   1) dependencies not installed: python -m pip install -r requirements.txt
 echo   2) port 8000 already in use: python -m app.api --port 8001
 echo.

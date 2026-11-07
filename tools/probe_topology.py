@@ -1562,7 +1562,7 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     out_path = args.out or os.path.join(_ROOT, "data", "probe_topology.txt")
     rep = Report()
-    rep.say("aspen-insight 拓扑 / 焓字段探测报告")
+    rep.say("Casebook 拓扑 / 焓字段探测报告")
     rep.say(f"生成时间:{time.strftime('%Y-%m-%d %H:%M:%S')}")
     rep.say(f"脚本:{os.path.abspath(__file__)}")
     rep.say(f"Python:{sys.version.split()[0]}")

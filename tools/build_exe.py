@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """tools/build_exe.py —— 打 Windows 单文件 exe(PyInstaller)。
 
-产物:`data/preview/dist/aspen-insight.exe`(单文件,双击即用,不需要装 Python)。
+产物:`data/preview/dist/Casebook.exe`(单文件,双击即用,不需要装 Python)。
 
 ```bash
 python -m tools.build_exe           # 直接打包
@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "data" / "preview" / "dist"
 BUILD = ROOT / "data" / "preview" / "build"
-EXE_NAME = "aspen-insight"
+EXE_NAME = "Casebook"
 
 ENTRY = '''# -*- coding: utf-8 -*-
 """PyInstaller 入口:等价于 `python -m app.api`(由 tools/build_exe.py 生成)。"""

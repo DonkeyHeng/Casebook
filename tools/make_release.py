@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """tools/make_release.py —— 打两个发布包(都在 `data/preview/dist/` 下)。
 
-1. **源码包** `aspen-insight-<版本>.zip`
-   `git archive HEAD`,带 `aspen-insight/` 前缀;只保留运行需要的东西 ——
+1. **源码包** `Casebook-<版本>.zip`
+   `git archive HEAD`,带 `Casebook/` 前缀;只保留运行需要的东西 ——
    开发者文档 / 占位目录靠 `.gitattributes` 的 `export-ignore` 挡掉,
    再塞一份中文 `安装说明.txt`(来自 `docs/install-text.txt`)。
-2. **Windows 包** `aspen-insight-windows-x64.zip`
-   `aspen-insight.exe` + `安装说明.txt` + `LICENSE`,解压出来只有这三个文件,
+2. **Windows 包** `Casebook-windows-x64.zip`
+   `Casebook.exe` + `安装说明.txt` + `LICENSE`,解压出来只有这三个文件,
    给不装 Python 的同学用。
 
 ```bash
@@ -28,9 +28,9 @@ ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "data" / "preview" / "dist"
 TXT_SRC = ROOT / "docs" / "install-text.txt"
 TXT_NAME = "安装说明.txt"
-PREFIX = "aspen-insight"
-EXE = DIST / "aspen-insight.exe"
-VERSION = "1.0.1"
+PREFIX = "Casebook"
+EXE = DIST / "Casebook.exe"
+VERSION = "1.0.2"
 
 
 def _sha256(path: Path) -> str:

@@ -1,1 +1,1 @@
-"""aspen-insight 应用包。"""
+"""Casebook 应用包。"""

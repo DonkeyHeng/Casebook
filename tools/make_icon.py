@@ -27,7 +27,7 @@ Pillow 会把**每个尺寸都写成 PNG 压缩条目**。浏览器(Chromium 读
 ----------------------------------------
 实测(2026-11-01):同一个 .ico,放在项目目录 `<项目根>\assets\` 下,
 资源管理器取不到 —— 桌面快捷方式显示通用的白色文件图标;
-复制到 `%LOCALAPPDATA%\aspen-insight\` 后立刻正常。
+复制到 `%LOCALAPPDATA%\Casebook\` 后立刻正常。
 
 疑因:项目目录带 DSH 沙箱加的 Deny ACE(`Everyone: DeleteSubdirectoriesAndFiles`),
 Explorer 走那条"从 .lnk 的 IconLocation 取图标"的路径时失败。
@@ -53,7 +53,7 @@ SIZES = [16, 24, 32, 48, 64, 128]
 
 # 桌面快捷方式用这份副本(项目目录里那份只给网页 favicon 用)
 DEPLOY_DIR = os.path.join(
-    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "aspen-insight"
+    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Casebook"
 )
 
 
