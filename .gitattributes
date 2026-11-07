@@ -13,11 +13,9 @@
 *.db binary
 
 # ---- 发布包(Release 的源码 zip)里不带这些东西 ----
-# 只给开发者 / AI 助手看的说明与占位目录,下载的人用不上;
-# 去掉之后解压出来根目录干净得多(见 tools/make_release.py)
-AGENTS.md       export-ignore
-CONTRIBUTING.md export-ignore
-SECURITY.md     export-ignore
+# 只挡版本控制元数据与占位目录:前者对下载的人没意义,
+# 后者本身是空的(内容不入库),带上只会多两个空壳目录。
+# 贡献指南 / 安全策略 / 开发约束是给外部贡献者看的,要带上,不挡。
 .gitattributes  export-ignore
 .gitignore      export-ignore
 model/          export-ignore
