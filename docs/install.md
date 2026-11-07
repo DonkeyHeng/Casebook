@@ -38,7 +38,7 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.1 下载压缩包(推荐给测试的同学)
 
 1. 打开 <https://github.com/DonkeyHeng/aspen-insight/releases>
-2. 下载最新一个 **Source code (zip)** 资产,例如 `aspen-insight-1.0.1.zip`(约 580 KB)
+2. 下载最新一个 **Source code (zip)** 资产,例如 `aspen-insight-1.0.1.zip`(约 600 KB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\aspen-insight`
    - 解压后应该是一个 `aspen-insight` 文件夹,里面能看到 `start.cmd`、`requirements.txt`、`app`
 
@@ -219,8 +219,11 @@ python -m app.api
 
 ## 10. 实测记录
 
-- 2026-11-07:把 Release 的 `aspen-insight-1.0.1.zip`(588,223 字节,83 个文件)解压到干净目录,
-  按 §3 装依赖后 `python -m app.api` 启动成功;首次启动自动创建 `data/cases.db`,
-  首页返回 200,`/api/cases` 返回 `[]`(空库),符合 §4.3 的描述。
-- 同一份文件在 Windows 10/11 + Aspen Plus V15 + Python 3.15 上验证过读数与导出;
-  其它 Aspen 版本、其它 Python 版本**未验证**,遇到问题请提 issue 并附 `python --version` 与报错原文。
+- 2026-11-07:把 Release 的 `aspen-insight-1.0.1.zip`(603,400 字节,68 个文件,解压出 `aspen-insight/`
+  文件夹)解压到干净目录,按 §3 装好依赖后 `python -m app.api` 启动成功;首次启动自动创建
+  `data/cases.db`,首页返回 200,`/api/cases` 返回 `[]`(空库),`/api/pipe-standards` 正常返回
+  三张表的状态 —— 与 §4.3、§7 的描述一致。
+- 想核对下载是否完整:命令行执行 `certutil -hashfile aspen-insight-1.0.1.zip SHA256`,
+  和 Release 说明里那行 SHA-256 对比即可。
+- 读数与导出在同一天用 Aspen Plus V15 + Python 3.15 验证过;其它 Aspen 版本、其它 Python 版本
+  **未验证**,遇到问题请提 issue 并附 `python --version` 与报错原文。
