@@ -4,9 +4,9 @@
 
 动手前请先读:
 
-1. [`AGENTS.md`](AGENTS.md) —— 改代码的硬约束与命名规范(摘要版)
-2. [`docs/conventions.md`](docs/conventions.md) —— 文件命名、文档与提交信息的完整规范
-3. [`app/README.md`](app/README.md) —— 代码分层
+1. [`AGENTS.md`](../AGENTS.md) —— 改代码的硬约束与命名规范(摘要版)
+2. [`docs/conventions.md`](../docs/conventions.md) —— 文件命名、文档与提交信息的完整规范
+3. [`app/README.md`](../app/README.md) —— 代码分层
 
 ## 环境
 

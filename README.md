@@ -5,17 +5,21 @@
 把 **Aspen Plus** 的仿真结果变成可查、可对比、可导出的本地数据工具。
 
 打开已经跑好的 Aspen 模型,点一下「读取当前工况」,就能在本地网页里查看整条流程的流股、
-设备、塔板剖面与连接图,做多工况对比,**按流股自动选管径与壁厚**,导出 Excel,或打包一份给 AI 阅读的结构化数据。
+设备、塔板剖面与连接图,做多工况对比,**按流股自动选管径与壁厚**,导出 Excel,或打包一份结构化的数据包。
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Built with DeepSeek Harness](https://img.shields.io/badge/built%20with-DeepSeek%20Harness-4D6BFE)](https://www.deepseek.com/en/harness/)
+[![安装说明](https://img.shields.io/badge/%E5%AE%89%E8%A3%85%E8%AF%B4%E6%98%8E-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
-> **⚠️ 关于本项目的两点说明**
+> **第一次使用?**
+> 不想装 Python:到 [Releases](https://github.com/DonkeyHeng/Casebook/releases) 下载 `Casebook-windows-x64.zip`,解压后双击 `Casebook.exe`。
+> 有 Python:双击仓库根目录的 **`start.cmd`**。
+> 装不上或有报错:看 **[安装说明 docs/install.md](docs/install.md)**,发布包里对应根目录的 `安装说明.txt`。
+
+> **关于本项目的两点说明**
 >
-> **1. 本项目依托于正版 Aspen Plus V15，项目中示例数据来源于本人独立完成的 Aspen 设计，由于本人能力有限，其中的数据可能存在较多错误以及不合理之处，但对于项目的适配是有利的，望各位多多担待。**
->
-> **2. 本项目使用 [DeepSeek Harness（DSH）](https://www.deepseek.com/en/harness/) 完成** —— 代码、文档与整理均在 DSH 中协助生成。
-> 这是一个个人项目,与 AspenTech 没有任何关联,使用前请自备正版 Aspen Plus 许可证。
+> 1. 仓库里的示例数据来自项目作者自己完成的 Aspen 设计,只用于演示工具能力。这些数据可能存在错误或不合理之处,
+>    **不能作为工程设计依据**;换成你自己的模型后,结论以你的模型为准。
+> 2. 本项目是个人项目,与 AspenTech 没有任何关联,也不包含任何 Aspen 软件。使用前请自备正版 Aspen Plus 许可证。
 
 ---
 
@@ -30,7 +34,17 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 - 附着到**已经打开**的 Aspen 实例,只读,不启动新会话、不额外占许可证
 - 一键把全流程读数存成本地 SQLite 快照,之后不连 Aspen 也能看
 - 判定只看硬错误,不收敛的模型**照读但明确标记**
-- 导出一份给人看的 Excel,和一份给 AI 读的文本包
+- 导出一份给人看的 Excel,和一份便于程序或 AI 继续分析的结构化数据包
+
+## 第一期范围
+
+当前版本是**第一期**,只做「读」与「看」:
+
+**能做**:读取已打开模型的仿真结果并存成本地快照、查看流股/组成/设备/塔剖面/连接图、
+多工况对比、管路选型计算、导出 Excel 与分析数据包。
+
+**不做**:修改模型、调用 Run / Reinit / Save、闭环优化,也不会把结果写回 Aspen。
+管路的压降、外压稳定与管道应力计算也不在本期范围内。
 
 ## 功能
 
@@ -44,7 +58,7 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | 多工况对比 | 任选两个工况,按流股或按设备对比 A / B / 差值,并标出状态与焓平衡的变化 |
 | 塔剖面 | 逐板温度、压力、液/气流量、热负荷,含曲线与联动表格 |
 | 管路选型 | 按流股实时算管径与壁厚:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → 许用应力 → 壁厚 → 圆整(含负偏差)→ 管道等级号;附 V1–V9 校验(流速超区间、真空、超温、泵入口等) |
-| 导出 | Excel 七张表(概要 / 流股 / 设备 / 连接 / 塔剖面 / 管道 / 管道计算书);或 AI 分析包(README + 多份 CSV + JSON 的 zip,含 `pipe_schedule.csv`) |
+| 导出 | Excel 七张表(概要 / 流股 / 设备 / 连接 / 塔剖面 / 管道 / 管道计算书);或分析数据包(说明 Markdown + 多份 CSV + JSON 的 zip) |
 | 问题横幅 | 第一行直接给结论(「本次运行有 2 个模块报错,不建议用它算收率」),下面是明细,可收起 |
 
 ## 环境要求
@@ -58,13 +72,16 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | 会话 | 必须在**真实桌面会话**运行,Aspen 与本工具需要同权限级别 |
 | 浏览器 | Edge / Chrome 等现代浏览器(前端零构建,不需要 Node) |
 
-## 快速开始
+## 开始使用
 
-**不想装 Python**:到 [Releases](https://github.com/DonkeyHeng/Casebook/releases)
-下载 `Casebook-windows-x64.zip`(约 30 MB),解压后双击 `Casebook.exe`,
-浏览器会自动打开界面。包里根目录有一份纯文本的 `安装说明.txt`。
+| 你的情况 | 怎么做 |
+| --- | --- |
+| 不想装 Python | 到 [Releases](https://github.com/DonkeyHeng/Casebook/releases) 下载 `Casebook-windows-x64.zip`(约 30 MB),解压后双击 `Casebook.exe`;包里根目录有一份 `安装说明.txt` |
+| 有 Python,直接启动 | 双击仓库根目录的 **`start.cmd`**(开控制台,方便看日志) |
+| 有 Python,命令行 | 见下方命令 |
+| 第一次装 / 有报错 | 看 **[安装说明 docs/install.md](docs/install.md)**(纯文本版 [`docs/install-text.txt`](docs/install-text.txt),发布包里叫 `安装说明.txt`) |
 
-**有 Python,或者要跑源码**:
+**源码运行**:
 
 ```bash
 git clone https://github.com/DonkeyHeng/Casebook.git
@@ -73,14 +90,9 @@ python -m pip install -r requirements.txt
 python -m app.api          # 打开 http://127.0.0.1:8000
 ```
 
-Windows 下也可以直接双击 `start.cmd`(开控制台,方便看日志)。
 不想用 git 的话,下载 Release 里的源码压缩包解压也行。
 
-> **给要转给同学测试的**:一步步的安装说明(装 Python、装依赖、接自己的 Aspen、
-> 没有 Aspen 怎么先看界面、常见报错)见 [`docs/install.md`](docs/install.md);
-> 纯文本版是 [`docs/install-text.txt`](docs/install-text.txt),发布包里改名为 `安装说明.txt`。
-
-然后:
+**页面上手**:
 
 1. **打开模型** —— 在 Aspen Plus 里加载 `.apw` 并完成一次计算
 2. **点「读取当前工况」** —— 左上角蓝色按钮,等进度条走完
@@ -115,29 +127,30 @@ python -m app.api
 
 | 文档 | 内容 |
 | --- | --- |
-| [`docs/aspen-field-map.md`](docs/aspen-field-map.md) | Aspen 的真实字段路径(给开发者/排错) |
-| [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(管路选型用) |
-| [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型方案(口径与开工清单) |
-| [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验记录 |
-| [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
 | [`docs/install.md`](docs/install.md) | 安装与试用说明(装 Python / 依赖、启动、接 Aspen、常见报错) |
 | [`docs/install-text.txt`](docs/install-text.txt) | 上面那份的纯文本版(发布包根目录里叫 `安装说明.txt`) |
+| [`docs/aspen-field-map.md`](docs/aspen-field-map.md) | Aspen 的真实字段路径(排错与二次开发用) |
 | [`docs/api.md`](docs/api.md) | 本地 HTTP 接口参考(排错 / 集成用) |
-| [`docs/conventions.md`](docs/conventions.md) | 文件命名、目录与 README 规范(贡献者必读) |
-| [`app/README.md`](app/README.md) / [`tools/README.md`](tools/README.md) | 代码分层 / 脚本用途 |
+| [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(管路选型用) |
+| [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型口径说明 |
+| [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验方法 |
+| [`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md) | 标准表录入提示词(可整段交给能看图的 AI) |
+| [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
 
 ## 项目结构
 
 ```
 Casebook/
+  start.cmd      启动入口:双击即起服务(有控制台,方便看日志)
+  requirements.txt  Python 依赖(pywin32、openpyxl)
   app/           应用代码:aspen(COM)、store(本地库)、design(管路选型纯计算)、api(HTTP)、web(零构建前端)
-  tools/         调试与回算脚本:探测、基准、塔诊断、组成补读、回归自测
-  docs/          字段地图与功能方案
+  tools/         调试与维护脚本:探测、基准、塔诊断、组成补读、回归自测、发布打包
+  docs/          安装、接口、字段地图与管路选型文档
   assets/        图标
   samples/       公开样本数据(可离线演示)
-  standards/     标准 PDF 原文(不入库)
-  model/         32 股精简模型与运行文件(不入库)
-  model-full/    121 股全流程模型(不入库)
+  standards/     标准 PDF 原文(不入库,需自备)
+  model/         放你自己的 Aspen 模型(不入库)
+  model-full/    放规模更大的全流程模型(不入库)
   data/          本地工况库与运行产物(不入库)
 ```
 
@@ -168,13 +181,14 @@ Casebook/
 2. 整理成三个 CSV:`t1-17395-table1.csv`、`t4-17395-table4.csv`(都需要 `D_mm`、`S_mm` 两列),
    `t3-20801-tableB1.csv`(需要 `标准`、`牌号` 和 `许用应力_<温度>` 各列)
 3. 打开「管道」页右上角的 **「标准表」** 按钮,选文件 → 导入并立即生效(不用重启服务);
+
    也可以手工放进 `data/preview/std/docx/` 再重启服务
 
 导入前会先校验:文件名对不对、是不是 UTF-8、必需列在不在、行数够不够;
 只要有一个文件不合格就整单不写,不会留下半份坏数据。
 
 页码、分页结构与数据校验方法见 [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md);
-懒得自己抄的话,[`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md)
+不想自己抄的话,[`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md)
 里有一份可以直接交给 AI 的录入提示词(要哪几张表、CSV 列名、格式要求、自检方法都写好了)。
 页面在「标准表未录入」的提示里也会显示这段说明,并带一个直接弹出导入窗口的按钮。
 
@@ -186,11 +200,6 @@ Casebook/
 **管道页的流速 / 最大管径 / 默认管材能改吗?**
 能,都在管道页顶部的参数条上改,改完自动重算(不用点按钮)。默认流速是液体 1.5、气体 15、
 两相 8、泵入口 0.8 米/秒;本期限定 DN600,更大的流股会单独列在表尾提示"需并联或专项设计"。
-
-**管道等级表在哪配、要不要配?**
-管道页右上角「等级表」。**不配也能用**——所有流股按默认管材算;只有某些流股要换管材时才填,
-比如"名字以 CW 开头 → 20# 碳钢、多留 1 mm"。保存后自动重算,配置存在
-`data/config/piping-classes.json`(本机,不入库)。
 
 **壁厚为什么不是按公式算出来的那么薄?**
 壁厚先按 GB/T 20801.1 内压公式算出承压所需厚度(再加腐蚀裕量),圆整到标准壁厚,
@@ -208,26 +217,31 @@ Casebook/
 
 - 只读工具,不做闭环优化,也不写回 Aspen
 - 管路选型本期只到 **DN600**(更大的标"需并联/专项设计");不计算管长压降、外压稳定与管道应力
-- 壁厚含一层**工艺最小壁厚下限**(DN10–100 为 2–3 mm),不是纯承压公式值;下限可按项目口径在代码里改
+- 壁厚含一层**工艺最小壁厚下限**(DN10–100 为 2–3 mm),不是纯承压公式值
 - 两相流按 8 m/s 保守取流速,选出的管径偏大;引用结论时要注明这一口径
-- 材质与腐蚀裕量来自**用户定义的管道等级表**,工具不判断介质耐蚀性;标准表数据不入库,换机器要重新录入
+- 材质与腐蚀裕量来自**你定义的管道等级表**,工具不判断介质耐蚀性;标准表数据不入库,换机器要重新录入
 - 塔与反应器不参与焓平衡校验(这类设备的能量关系不适用简单加和)
 - 只在 Aspen Plus V15 上实测过,其它版本行为未验证
 - 个人项目,非官方产品;Aspen Plus 是 Aspen Technology, Inc. 的商标
 
+## 成本
+
+- 本工具免费,采用 Apache License 2.0;没有云端服务,也不产生任何使用费用
+- 唯一需要自备的是 **Aspen Plus 许可证**(读取数据必须先有已跑好的正版 Aspen 模型)
+
 ## 参与贡献
 
-欢迎 issue 与 pull request。动手前建议先看 [`CONTRIBUTING.md`](CONTRIBUTING.md),以及:
+欢迎 issue 与 pull request。动手前建议先看 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md),以及:
 
-1. [`app/README.md`](app/README.md) —— 代码分层与「改判定 / 单位 / 焓平衡必须先跑自测」的约定
+1. [`app/README.md`](app/README.md) —— 代码分层与判定 / 单位 / 焓平衡的位置
 2. [`tools/README.md`](tools/README.md) —— `python -m tools.selftest` 是不需要 Aspen 的回归自测
 3. 请不要提交模型文件、标准 PDF 原文或本地工况库(已在 `.gitignore` 中)
-4. 发现安全问题请走 [`SECURITY.md`](SECURITY.md) 的私密渠道,不要开公开 issue
+4. 发现安全问题请走 [`.github/SECURITY.md`](.github/SECURITY.md) 的私密渠道,不要开公开 issue
 
 ## 联系方式
-- QQ：2655972249
-- WeChat：User_DonkeyHeng
-- 各位如果有问题也可以添加上述联系方式联系我
+
+- QQ:2655972249
+- WeChat:User_DonkeyHeng
 
 ## 许可证
 
@@ -236,5 +250,4 @@ Casebook/
 
 ## 致谢
 
-- **DeepSeek Harness** —— 本项目的代码、文档与整理工作均在 DSH 中完成
 - Aspen Plus 及其相关名称是 Aspen Technology, Inc. 的商标;本项目与该公司无关联,也不包含其任何软件

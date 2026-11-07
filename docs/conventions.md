@@ -72,6 +72,8 @@
 - 与相邻目录的关系
 - 不要重复根 README 的功能介绍,只写本目录的事
 
+例外:`.github/` 是 GitHub 元目录,放贡献指南与安全策略,不需要 README。
+
 ### 2.3 文档
 
 - 新文档放在 `docs/`,文件名 kebab-case(`api.md`、`conventions.md`)。
