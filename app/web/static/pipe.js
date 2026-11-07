@@ -68,6 +68,7 @@ const PIPE_COLUMNS = [
   { key: "stress_mpa", label: "许用应力 MPa", num: true, digits: 1, group: "calc" },
   { key: "t_calc_mm", label: "计算厚度 mm", num: true, digits: 2, group: "calc" },
   { key: "t_required_mm", label: "加裕量后 mm", num: true, digits: 2, group: "calc" },
+  { key: "min_wall_mm", label: "最小壁厚下限 mm", num: true, digits: 1, group: "calc" },
 ];
 
 const PIPE_DEBOUNCE_MS = 350;

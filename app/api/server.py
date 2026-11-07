@@ -663,17 +663,20 @@ class Handler(BaseHTTPRequestHandler):
                 ws,
                 ["流股", "相态", "介质代号", "流速 m/s", "计算内径 mm", "外径 mm",
                  "设计压力 MPa", "表压 MPa", "设计温度 ℃", "许用应力 MPa", "计算壁厚 mm",
-                 "腐蚀裕量 mm", "所需壁厚 mm", "选定壁厚 mm", "负偏差 mm", "等级号"],
+                 "腐蚀裕量 mm", "所需壁厚 mm", "最小壁厚 mm", "选定壁厚 mm", "负偏差 mm",
+                 "壁厚是否按下限", "等级号"],
                 [(
                     r["stream"], r["phase"], r["medium_code"], r["velocity_ms"],
                     r["inner_d_mm"], r["od_mm"], r["design_pressure_mpa"],
                     r["gauge_pressure_mpa"], r["design_temp_c"], r["stress_mpa"],
-                    r["t_calc_mm"], r["c2_mm"], r["t_required_mm"], r["wall_mm"],
+                    r["t_calc_mm"], r["c2_mm"], r["t_required_mm"],
+                    r.get("min_wall_mm"), r["wall_mm"],
                     (pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
                      if r["wall_mm"] else None),
+                    "是" if r.get("wall_floored") else "",
                     r["grade_code"],
                 ) for r in pres["rows"]],
-                [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 12, 12],
+                [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 14, 12, 14, 12],
             )
         except pipe_calc.TablesNotReady as exc:   # 标准表没录:写明原因,不造数
             ws = wb.create_sheet("管道")

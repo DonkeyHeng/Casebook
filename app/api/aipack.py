@@ -677,14 +677,17 @@ def _pipe_csv(rows, checks) -> bytes:
         hit.setdefault(f["stream"], []).append(f["code"])
     header = ["流股", "相态", "介质代号", "体积流量_m3h", "公称直径", "外径_mm", "壁厚_mm",
               "管材", "等级号", "设计压力_MPa", "设计温度_C", "许用应力_MPa",
-              "计算壁厚_mm", "所需壁厚_mm", "实际流速_ms", "校验码", "备注"]
+              "计算壁厚_mm", "所需壁厚_mm", "最小壁厚_mm", "壁厚按下限",
+              "实际流速_ms", "校验码", "备注"]
     body = []
     for r in rows:
         body.append([
             r["stream"], r["phase"], r["medium_code"], _num(r["vol_flow_m3h"]),
             r["dn"], _num(r["od_mm"]), _num(r["wall_mm"]), r["material"], r["grade_code"],
             _num(r["design_pressure_mpa"]), _num(r["design_temp_c"]), _num(r["stress_mpa"]),
-            _num(r["t_calc_mm"]), _num(r["t_required_mm"]), _num(r["velocity_ms"]),
+            _num(r["t_calc_mm"]), _num(r["t_required_mm"]), _num(r.get("min_wall_mm")),
+            "是" if r.get("wall_floored") else "",
+            _num(r["velocity_ms"]),
             " ".join(hit.get(r["stream"], [])), "; ".join(r["warnings"]),
         ])
     return _csv_bytes(header, body)

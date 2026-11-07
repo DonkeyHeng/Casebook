@@ -14,7 +14,7 @@
 6. `design_temperature()`  设计温度(保温取介质温度;65–80 ℃ 无保温折 0.95)
 7. `allowable_stress()`    许用应力(牌号 + 温度查表,缺温度内插,T<40 取 40 ℃)
 8. `calc_wall_thickness()` t_c = P·D_o / [2(S·Φw + P·Y)]
-9. `round_up_wall()`       加附加量后圆整到标准壁厚
+9. `round_up_wall()`       加附加量后圆整到标准壁厚(含最小壁厚下限)
 10. `grade_code()`         管道等级号 + 绝热代号
 
 单位约定(内部一律这套,界面再换显示)
@@ -248,27 +248,40 @@ def calc_wall_thickness(p_mpa: float, od_mm: float, stress_mpa: float,
 
 
 def round_up_wall(t_required_mm: float, walls: Sequence[float] | None,
-                  od_mm: float | None = None, grade: str | None = None) -> dict[str, Any]:
+                  od_mm: float | None = None, grade: str | None = None,
+                  min_wall: float | None = None) -> dict[str, Any]:
     """向上圆整到标准壁厚。
 
     `od_mm` + `grade` 给了的话,会**把壁厚负偏差一起算进去**:
     选中的 S 必须满足 `S − C1(S) ≥ 所需壁厚`(C1 依赖 S,所以要逐档试),
     否则就会出现"圆整完扣掉负偏差还不够"的情况(实测 #20 有 20 多条)。
+
+    `min_wall` 是**工艺最小壁厚下限**(见 `pipe_data.MIN_WALL_BY_DN`):
+    承压需要的厚度可能只有 0.07 mm,但 DN15 实际得从 2.0 mm 起,否则焊不出来。
+    下限只抬高、不降低 —— 承压需要更厚时仍按承压;`floored` 说明这一档是不是下限定的。
     """
     if not walls:
-        return {"wall_mm": None, "note": "缺标准壁厚序列(T2 未录入)"}
+        return {"wall_mm": None, "note": "缺标准壁厚序列(T2 未录入)",
+                "min_wall_mm": min_wall, "floored": False}
     usable = sorted(walls)
+    floor = float(t_required_mm)
+    floored = False
+    if min_wall is not None and float(min_wall) > floor:
+        floor = float(min_wall)
+        floored = True
     for s in usable:
-        if s < t_required_mm - 1e-9:
+        if s < floor - 1e-9:
             continue
         if od_mm and grade:
             c1 = pipe_data.negative_deviation(od_mm, s, grade)
             if s - c1 < t_required_mm - 1e-9:
                 continue
-        return {"wall_mm": float(s), "note": ""}
+        return {"wall_mm": float(s), "note": "",
+                "min_wall_mm": min_wall, "floored": floored}
     return {"wall_mm": None,
-            "note": f"所需 {t_required_mm:.2f} mm 超过该外径最大标准壁厚 "
-                    f"{max(usable):g} mm(含负偏差),需并联或专项设计"}
+            "note": f"所需 {floor:.2f} mm 超过该外径最大标准壁厚 "
+                    f"{max(usable):g} mm(含壁厚下限),需并联或专项设计",
+            "min_wall_mm": min_wall, "floored": floored}
 
 
 # --------------------------------------------------------------------------
@@ -497,6 +510,19 @@ def build(streams: Iterable[Mapping[str, Any]],
     wall_grade = str(opts.get("wall_tol_grade", pipe_data.DEFAULT_WALL_TOL_GRADE))
     # 腐蚀裕量:显式给了就用;否则按材质给默认值(碳钢 1.0、不锈钢 0)
     global_c2 = opts.get("corrosion_mm")
+    # 工艺最小壁厚下限:{DN 上限: 壁厚};传 False 表示这一层不启用
+    min_wall_map = opts.get("min_wall", pipe_data.MIN_WALL_BY_DN)
+    # 反查表跟着"实际用的" DN→外径 走,不用全局表 —— 注入自定义表时下限也认得出来
+    od_to_dn = {float(od): int(dn) for dn, od in dn_to_od.items()}
+
+    def _min_wall(dn: int | None) -> float | None:
+        """DN → 最小壁厚下限。options 里能覆盖(键可能是字符串,统一转 int)。"""
+        if not min_wall_map or dn is None:
+            return None
+        for upper in sorted(min_wall_map, key=lambda x: int(x)):
+            if dn <= int(upper):
+                return float(min_wall_map[upper])
+        return None
 
     rows: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
@@ -542,12 +568,13 @@ def build(streams: Iterable[Mapping[str, Any]],
         sigma = allowable_stress(material, td["design_c"], stress_table)
 
         def _wall_for(od: float, sigma=sigma, pd=pd) -> float | None:
-            """某外径下,考虑许用应力与负偏差后最终选定的标准壁厚。"""
+            """某外径下,考虑许用应力、负偏差与最小壁厚下限后最终选定的标准壁厚。"""
             w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
             if not w["applicable"]:
                 return None
             t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
-            got = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade)
+            mw = _min_wall(od_to_dn.get(float(od)))
+            got = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade, mw)
             return got["wall_mm"]
 
         sel = select_dn(d_i, dn_to_od, od_to_walls_used, _wall_for)
@@ -571,7 +598,8 @@ def build(streams: Iterable[Mapping[str, Any]],
         t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
         if pd["vacuum"]:
             warnings.append("真空流股:按最小标准壁厚,外压另行校核(不做外压计算)")
-        wall = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade)
+        min_wall_mm = _min_wall(dn)
+        wall = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade, min_wall_mm)
         if wall["wall_mm"] is None:
             warnings.append(wall["note"])
         else:
@@ -617,7 +645,9 @@ def build(streams: Iterable[Mapping[str, Any]],
             "t_calc_mm": w["t_calc_mm"],
             "c2_mm": corrosion_c2,
             "t_required_mm": t_req,
+            "min_wall_mm": min_wall_mm,
             "wall_mm": wall["wall_mm"],
+            "wall_floored": bool(wall.get("floored")),
             "grade_code": gc["code"],
             "insulation": gc.get("insulation", ""),
             "warnings": warnings,

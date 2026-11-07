@@ -437,6 +437,41 @@ def test_pipe() -> None:
     check_eq("pipe: 无壁厚序列(T2 未录)→ None",
              pipe_calc.round_up_wall(1.0, None)["wall_mm"], None)
 
+    # ⑧b 最小壁厚下限(DN10–100 不设限那档之外):下限只抬高、不降低
+    from app.design import pipe_data as pd_mod
+    check_close("pipe: 下限 DN25 → 2.0", pd_mod.minimum_wall(25), 2.0)
+    check_close("pipe: 下限 DN32 → 3.0", pd_mod.minimum_wall(32), 3.0)
+    check_close("pipe: 下限 DN65 → 3.0", pd_mod.minimum_wall(65), 3.0)
+    check_close("pipe: 下限 DN80 → 3.0", pd_mod.minimum_wall(80), 3.0)
+    check_close("pipe: 下限 DN100 → 3.0", pd_mod.minimum_wall(100), 3.0)
+    check_eq("pipe: DN125 起不设下限", pd_mod.minimum_wall(125), None)
+    check_close("pipe: 需 0.3 mm + 下限 2.0 → 取 2.0",
+                pipe_calc.round_up_wall(0.3, (0.5, 0.7, 1.0, 2.0, 3.0),
+                                        min_wall=2.0)["wall_mm"], 2.0)
+    check_close("pipe: 需 2.4 mm + 下限 2.0 → 取 2.5(下限不降级)",
+                pipe_calc.round_up_wall(2.4, (0.5, 2.0, 2.5, 3.0),
+                                        min_wall=2.0)["wall_mm"], 2.5)
+    check("pipe: 下限起作用时标 floored",
+          pipe_calc.round_up_wall(0.3, (0.5, 2.0), min_wall=2.0)["floored"] is True)
+    check("pipe: 承压更厚时不标 floored",
+          pipe_calc.round_up_wall(2.4, (2.0, 2.5), min_wall=2.0)["floored"] is False)
+
+    # 端到端:小口径薄壁序列必须被下限托住;options 能关掉这一层
+    thin_tables = {
+        "dn_to_od": {15: 18.0, 25: 32.0},
+        "od_to_walls": {18.0: (0.5, 1.0, 2.0)},
+        "stress": {"S30408": {20: 137.0, 100: 130.0}},
+    }
+    small = [{"name": "S1", "vol_flow_m3h": 0.61, "temperature_c": 25.0,
+              "pressure_bar": 1.0, "vap_frac": 0.0}]
+    floored_row = pipe_calc.build(small, tables=thin_tables)["rows"][0]
+    check_close("pipe: DN15 薄壁序列被下限托到 2.0 mm", floored_row["wall_mm"], 2.0)
+    check("pipe: 该行标记 wall_floored", floored_row["wall_floored"] is True)
+    check_close("pipe: 该行带出 min_wall_mm=2.0", floored_row["min_wall_mm"], 2.0)
+    plain_row = pipe_calc.build(small, options={"min_wall": False},
+                                tables=thin_tables)["rows"][0]
+    check_close("pipe: options min_wall=False 时回到 0.5 mm", plain_row["wall_mm"], 0.5)
+
     # ⑨ 等级号:PN 代号 + 顺序号 + 材质代号 + 绝热后缀
     check_eq("pipe: 1.6 MPa → 压力代号 M", pipe_calc.pn_code_for(1.6), "M")
     check_eq("pipe: 1.7 MPa → 升到 N", pipe_calc.pn_code_for(1.7), "N")
