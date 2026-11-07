@@ -249,7 +249,7 @@ Windows 包(exe,示例库已经打进程序里):
 
 ## 10. 实测记录
 
-- 2026-11-07:把 Release 的 `aspen-insight-1.0.1.zip`(603,400 字节,68 个文件,解压出 `aspen-insight/`
+- 2026-11-07:把 Release 的 `aspen-insight-1.0.1.zip`(625,100 字节,68 个文件,解压出 `aspen-insight/`
   文件夹)解压到干净目录,按 §3 装好依赖后 `python -m app.api` 启动成功;首次启动自动创建
   `data/cases.db`,首页返回 200,`/api/cases` 返回 `[]`(空库),`/api/pipe-standards` 正常返回
   三张表的状态 —— 与 §4.3、§7 的描述一致。
