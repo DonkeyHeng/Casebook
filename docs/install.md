@@ -42,8 +42,8 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\aspen-insight`
    - 解压后应该是一个 `aspen-insight` 文件夹,里面能看到 `start.cmd`、`requirements.txt`、`app`
 
-> 压缩包里**没有** Aspen 模型、**没有**标准 PDF、**没有**本地工况库 —— 都是版权/隐私原因,
-> 需要你自己准备或直接不用(见 §5、§6)。
+> 压缩包里**没有** Aspen 模型、**没有**标准 PDF 原文、**没有**你自己的本地工况库(`data/cases.db`);
+> 它附带一份示例工况库 `samples/case-23-error.db`,用来离线看界面(见 §6)。
 
 ### 2.2 git clone(要跟着更新的人)
 
@@ -82,7 +82,7 @@ python -m pip install -r requirements.txt
 
 只有两个包:`pywin32`(读写 Aspen 的 COM 接口)和 `openpyxl`(导出 Excel)。
 
-国内网络慢的话加上清华镜像,效果更快:
+国内网络慢的话加上清华镜像,下载更快:
 
 ```bash
 python -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
@@ -127,7 +127,7 @@ python -m app.api --db data/cases.db      # 指定工况库位置(默认就是�
 
 - 首页提示"还没有工况" —— **正常**,仓库不带本地工况库(那是私人数据)
 - 第一次启动会自动生成 `data/cases.db`(空库)
-- 左栏「管道」页会显示"标准表未录入" —— **正常**,原因见 §6,不影响"读取工况"
+- 左栏「管道」页会显示"标准表未录入" —— **正常**,原因见 §7,不影响"读取工况"
 
 ## 5. 接上自己的 Aspen 模型
 
