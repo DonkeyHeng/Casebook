@@ -54,7 +54,7 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.2 源码压缩包(有 Python 的同学)
 
 1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
-2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.0.2.zip`(约 610 KB)
+2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.0.3.zip`(约 620 KB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
    - 解压后是一个 `Casebook` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
      `安装说明.txt`、`app`
@@ -251,13 +251,13 @@ Windows 包(exe,示例库已经打进程序里):双击 `Casebook.exe` 打开界�
 
 ## 10. 实测记录
 
-- 2026-11-07:把 Release 的 `Casebook-1.0.2.zip` 解压到干净目录,按 §3 装好依赖后
+- 2026-11-07:把 Release 的 `Casebook-1.0.3.zip` 解压到干净目录,按 §3 装好依赖后
   `python -m app.api` 启动成功;首次启动自动创建 `data/cases.db`,首页返回 200,
   `/api/cases` 返回 `[]`(空库),`/api/pipe-standards` 正常返回三张表的状态 ——
   与 §4.3、§7 的描述一致。
 - 精确体积与文件数、SHA-256 见 Release 说明。**这几个数每次重打都会变**,所以不写死在这里 ——
   写死过一次,下一轮就过时了(文档写 603,400,实际已经 625,100)。
-- 想核对下载是否完整:命令行执行 `certutil -hashfile Casebook-1.0.2.zip SHA256`,
+- 想核对下载是否完整:命令行执行 `certutil -hashfile Casebook-1.0.3.zip SHA256`,
   和 Release 说明里那行 SHA-256 对比即可。
 - 读数与导出在同一天用 Aspen Plus V15 + Python 3.15 验证过;其它 Aspen 版本、其它 Python 版本
   **未验证**,遇到问题请提 issue 并附 `python --version` 与报错原文。
