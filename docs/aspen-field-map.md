@@ -192,7 +192,7 @@ node.AttributeValue(6)      # -> 'Heater'
 | 模块级状态 | `\Data\Blocks\<设备>\Output\BLKSTAT` + `BLKMSG` | **真正定位问题在哪** |
 | 撕裂流误差 | `\Data\Results Summary\Conv-Sum\TEAR-SUMMARY\Output\` | 判断闭环是否数值收敛 |
 
-### 6.1 全局状态码(实测对照,2026-11-01 新增两个样本模型样本)
+### 6.1 全局状态码(实测对照,2026-11-01)
 
 | 字段 | 收敛且无报错 | 全是告警 | 有模块报错 | 含义 |
 | --- | --- | --- | --- | --- |
@@ -207,13 +207,9 @@ node.AttributeValue(6)      # -> 'Heater'
 
 > ⚠️ **2026-11-01 修正:不能按"非 0 就是出错"判。**
 >
-> 读入一个样本模型(98 流股 / 67 设备)时,`CVSTAT=0`、`UOSSTAT=0`、
-> **67 个模块的 `BLKSTAT` 全是 0**,但 `PER_ERROR` 依然是 1。
-> 而早先那个真出错的模型(T0202/T0205 是 `BLKSTAT=1`)`PER_ERROR` 也是 1 ——
-> **同一取值,两种完全不同的实际情况**。
->
-> 另一个样本模型(105 流股 / 74 设备)7 个模块全是 `BLKSTAT=2`(相稳定性告警)、
-> 没有一个 `BLKSTAT=1`,但 `UOSSTAT=1`、`PER_ERROR=1` —— 也不该判"错误"。
+> 实测样本一:`CVSTAT=0`、`UOSSTAT=0`、**全部模块 `BLKSTAT` 都是 0**,但 `PER_ERROR` 依然是 1。
+> 实测样本二:全部模块 `BLKSTAT=2`(告警)、没有一个 `BLKSTAT=1`,但 `UOSSTAT=1`、`PER_ERROR=1`。
+> 而真出错的模型(某塔 `BLKSTAT=1`)`PER_ERROR` 也是 1 —— **同一取值,三种完全不同的实际情况**。
 >
 > 结论:**判定只能靠 `CVSTAT` + 模块级 `BLKSTAT`**;
 > `UOSSTAT` / `PER_ERROR` / `RSTAT` 只记录、不参与判定。
@@ -279,7 +275,7 @@ model-full 有 6 条撕裂流,误差分别为 `1.1e-14 / 0.0 / 1.6e-08 / 2.8e-06
 
 > ⚠️ **2026-11-01 补充:反过来也不成立 —— `ERR > ERR_TOL` 不能判"没收敛"。**
 >
-
+> 实测某 128 流股样本:
 > `TEAR-SUMMARY` 里 **T3 的 `INFO-VAR` 误差 1.656 > 容差 0.0393(42 倍)**,
 > 但 Aspen 控制面板只写
 > `The following Unit Operation blocks were completed with warnings: M0302 E0204 R0301`,
@@ -441,7 +437,7 @@ unit = u() if callable(u) else u
 
 ## 12. 焓 / 设备连接 / 公用工程(2026-11-01 实测,第 1 步落地依据)
 
-
+样本:一份 98 流股 / 67 设备的模型(V12 存、V15 打开)。
 探测报告:`data/probe_topology.txt`(由 `tools/probe_topology.bat` 生成,脚本 `tools/probe_topology.py`)。
 
 ### 12.1 流股焓:`HMX` 是目录,真正的值在 `MIXED`

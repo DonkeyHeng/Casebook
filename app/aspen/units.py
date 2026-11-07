@@ -67,7 +67,7 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
     "volume_flow": {
         "m3/hr": (1.0, 0.0),
         "m3/h": (1.0, 0.0),
-        "cum/hr": (1.0, 0.0),      # Aspen 里"立方米/小时"的写法(读样本模型时实测到)
+        "cum/hr": (1.0, 0.0),      # Aspen 里"立方米/小时"的另一种写法(实测到)
         "cum/h": (1.0, 0.0),
         "m3/s": (3600.0, 0.0),
         "l/min": (0.06, 0.0),

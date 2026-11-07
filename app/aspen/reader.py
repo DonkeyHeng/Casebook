@@ -217,7 +217,7 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
     # PER_ERROR 仍然是 1;而真有模块报错的模型 PER_ERROR 也是 1 —— 完全没有区分度。
 
     # 撕裂流:只作提示,**不判 error**。
-
+    # 实测(2026-11-01,某 128 流股样本):
     # T3 的 INFO-VAR 误差 1.656 > 容差 0.0393,而 Aspen 控制面板只报
     # "The following Unit Operation blocks were completed with warnings: M0302 E0204 R0301",
     # CVSTAT=0 —— **Aspen 自己不认为这条回路没收敛**。
