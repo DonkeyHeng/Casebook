@@ -18,7 +18,10 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import re
+import shutil
+import time
 from pathlib import Path
 
 # --------------------------------------------------------------------------
@@ -325,9 +328,9 @@ SETUP_GUIDE: dict = {
         "分页怎么拼,见 docs/pipe-standards-index.md。",
         "整理时可以整段复制 docs/pipe-standards-extract-prompt.md 里的提示词给一个能看图的 AI,"
         "连同标准页面一起交给它,让它照格式抄成 CSV。",
-        "把 3 个 CSV 放进 data/preview/std/docx/(目录不存在就新建),然后重启服务"
-        "(Python 只在启动时读一次)。",
-        "回到「管道」页刷新,上面的状态会变成「已录」,管道表自动算出来。",
+        "把 3 个 CSV 导进来:点「管道」页顶部的「标准表」按钮,选文件 → 导入,"
+        "马上就能用;也可以手工放进 data/preview/std/docx/ 后重启服务。",
+        "回到「管道」页,上面的状态会变成「已录」,管道表自动算出来。",
     ],
     "files": [
         {"name": "t1-17395-table1.csv", "from": "GB/T 17395-2024 表 1",
@@ -361,16 +364,20 @@ def _parse_size(raw: str | None) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def _load_od_to_walls() -> tuple[dict[float, tuple[float, ...]], dict[float, tuple[float, ...]]]:
-    """表 1(碳钢/普通钢管)与表 4(不锈钢管)→ {外径: 标准壁厚序列}。"""
+def _load_od_to_walls(dir_: Path | None = None) -> tuple[dict[float, tuple[float, ...]], dict[float, tuple[float, ...]]]:
+    """表 1(碳钢/普通钢管)与表 4(不锈钢管)→ {外径: 标准壁厚序列}。
+
+    `dir_` 只在导入时用到(先往临时目录里试加载);平时读 `data/preview/std/docx`。
+    """
+    base = Path(dir_) if dir_ else _CURATED_DIR
     carbon: dict[float, list[float]] = {}
-    for row in _read_csv(_CURATED_DIR / "t1-17395-table1.csv"):
+    for row in _read_csv(base / "t1-17395-table1.csv"):
         d = _parse_size(row.get("D_mm"))
         s = _parse_size(row.get("S_mm"))
         if d and s:
             carbon.setdefault(d, []).append(s)
     sst: dict[float, list[float]] = {}
-    for row in _read_csv(_CURATED_DIR / "t4-17395-table4.csv"):
+    for row in _read_csv(base / "t4-17395-table4.csv"):
         d = _parse_size(row.get("D_mm"))
         s = _parse_size(row.get("S_mm"))
         if d and s:
@@ -379,11 +386,8 @@ def _load_od_to_walls() -> tuple[dict[float, tuple[float, ...]], dict[float, tup
             {d: tuple(sorted(set(v))) for d, v in sst.items()})
 
 
-def _load_stress() -> dict[str, dict[float, float]]:
-    """表 B.1 → {本项目牌号: {温度: 许用应力 MPa}}。"""
-    global STRESS_ROWS
-    rows = _read_csv(_CURATED_DIR / "t3-20801-tableB1.csv")
-    STRESS_ROWS = rows
+def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
+    """表 B.1 的行 → {本项目牌号: {温度: 许用应力 MPa}}(不碰模块状态)。"""
     temps = {}
     for key in rows[0].keys() if rows else []:
         m = re.fullmatch(r"许用应力_(\d+)", key or "")
@@ -417,10 +421,219 @@ def _load_stress() -> dict[str, dict[float, float]]:
     return out
 
 
+def _load_stress(dir_: Path | None = None) -> dict[str, dict[float, float]]:
+    """表 B.1 → {本项目牌号: {温度: 许用应力 MPa}}。"""
+    global STRESS_ROWS
+    base = Path(dir_) if dir_ else _CURATED_DIR
+    rows = _read_csv(base / "t3-20801-tableB1.csv")
+    STRESS_ROWS = rows
+    return _stress_from_rows(rows)
+
+
 OD_TO_WALLS: dict[float, tuple[float, ...]]
 OD_TO_WALLS_SST: dict[float, tuple[float, ...]]
 OD_TO_WALLS, OD_TO_WALLS_SST = _load_od_to_walls()
 ALLOWABLE_STRESS: dict[str, dict[float, float]] = _load_stress()
+
+
+# --------------------------------------------------------------------------
+# 4.2 从页面导入标准表(免得手工放 CSV 再重启服务)
+# --------------------------------------------------------------------------
+#
+# 三张表的数据同样受著作权保护,只能由使用者自己整理;这里只做四件事:
+# 收文件 → 校验 → 写进 data/preview/std/docx/ → 立即重新加载。
+#
+# 校验分两层,目的是"宁可拒绝,不留半份坏数据":
+#   ① 单个文件:文件名在白名单里、UTF-8 能读、表头有必需列、行数够;
+#   ② 合起来能不能用:把新文件与已有的拼进一个临时目录,先照真实逻辑加载一遍,
+#      外径 / 壁厚 / 许用应力一个都读不出来就整单拒绝,一个字节都不写进去。
+#
+# 导入后不重启服务 —— 直接替换本模块的三份表,下一次算管道就用新数据。
+
+_ROOT = Path(__file__).resolve().parents[2]
+
+#: 三个 CSV 的规格。页面按它渲染上传位,后端按它校验;与 `SETUP_GUIDE["files"]` 对应。
+STD_FILES: tuple[dict, ...] = (
+    {
+        "name": "t1-17395-table1.csv",
+        "label": "表 1 · 普通钢管",
+        "from": "GB/T 17395-2024 表 1",
+        "columns": ["D_mm", "S_mm"],
+        "need": 10,        # 最少数据行;"够不够用"另有临时目录试加载兜着
+    },
+    {
+        "name": "t4-17395-table4.csv",
+        "label": "表 4 · 不锈钢管",
+        "from": "GB/T 17395-2024 表 4",
+        "columns": ["D_mm", "S_mm"],
+        "need": 10,
+    },
+    {
+        "name": "t3-20801-tableB1.csv",
+        "label": "表 B.1 · 材料许用应力",
+        "from": "GB/T 20801.1-2025 表 B.1",
+        "columns": ["标准", "牌号"],
+        "need": 1,
+    },
+)
+
+#: 单个文件上限。表 1 那张三万多行也就 100 KB 上下,8 MB 足够。
+MAX_STD_FILE_BYTES = 8 * 1024 * 1024
+
+
+def std_file_spec(name: str) -> dict | None:
+    """文件名 → 规格;不在白名单里返回 None。"""
+    for spec in STD_FILES:
+        if spec["name"] == name:
+            return spec
+    return None
+
+
+def _dir_label(base: Path) -> str:
+    try:
+        return base.relative_to(_ROOT).as_posix()
+    except ValueError:
+        return str(base)
+
+
+def standards_status(dir_: Path | None = None) -> dict:
+    """三个 CSV 现在有没有、多少行、什么时候放进来的(只看文件,不看加载结果)。"""
+    base = Path(dir_) if dir_ else _CURATED_DIR
+    files = []
+    for spec in STD_FILES:
+        path = base / spec["name"]
+        item = {"name": spec["name"], "label": spec["label"], "from": spec["from"],
+                "columns": list(spec["columns"]), "exists": False,
+                "rows": 0, "bytes": 0, "mtime": None}
+        if path.is_file():
+            st = path.stat()
+            item.update({"exists": True, "rows": len(_read_csv(path)),
+                         "bytes": st.st_size,
+                         "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))})
+        files.append(item)
+    return {"dir": _dir_label(base), "files": files}
+
+
+def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
+    """校验单个 CSV 的文本,返回 (错误列表, 统计)。"""
+    if not isinstance(text, str) or not text.strip():
+        return ["文件是空的"], {}
+    if "\ufffd" in text:
+        return ["里面有乱码:多半不是 UTF-8 编码。用 Excel「另存为 → CSV UTF-8」再试"], {}
+    if len(text.encode("utf-8")) > MAX_STD_FILE_BYTES:
+        return [f"文件超过 {MAX_STD_FILE_BYTES // (1024 * 1024)} MB,不像标准表"], {}
+    try:
+        rows = list(csv.DictReader(io.StringIO(text.lstrip("\ufeff"))))
+    except csv.Error as exc:
+        return [f"CSV 解析失败:{exc}"], {}
+    if not rows:
+        return ["只有表头、没有数据行"], {}
+    names = [str(k or "").strip() for k in rows[0].keys()]
+    missing = [c for c in spec["columns"] if c not in names]
+    if missing:
+        return [f"缺列 {', '.join(missing)};现在的表头是:{', '.join(names[:8])}"], {}
+    if len(rows) < spec["need"]:
+        return [f"只有 {len(rows)} 行数据(至少 {spec['need']} 行),像是没抄全"], {}
+    if spec["name"].startswith("t3-"):
+        grades = sorted({str(r.get("牌号") or "").strip() for r in rows} - {""})
+        return [], {"rows": len(rows), "grades": grades[:12]}
+    pairs = 0
+    ods: set[float] = set()
+    for row in rows:
+        d = _parse_size(row.get("D_mm"))
+        s = _parse_size(row.get("S_mm"))
+        if d and s:
+            pairs += 1
+            ods.add(d)
+    if pairs < spec["need"]:
+        return [f"能读出「外径 + 壁厚」的只有 {pairs} 行(至少 {spec['need']} 行),"
+                "检查 D_mm / S_mm 是不是数值"], {}
+    return [], {"rows": len(rows), "sizes": pairs, "od_count": len(ods)}
+
+
+def reload_standards(dir_: Path | None = None) -> dict:
+    """重新读三个 CSV 并替换模块里的表 —— 导入后立即生效,不用重启服务。"""
+    global OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS
+    base = Path(dir_) if dir_ else _CURATED_DIR
+    old = (OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS)
+    try:
+        od, sst = _load_od_to_walls(base)
+        stress = _load_stress(base)
+    except Exception:
+        OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS = old   # 读坏了保留旧的,别把页面打空
+        raise
+    OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS = od, sst, stress
+    return {"od_to_walls": len(od), "od_to_walls_sst": len(sst),
+            "stress_grades": sorted(stress)}
+
+
+def import_standards(payload, *, target_dir: Path | str | None = None,
+                     reload: bool = True) -> tuple[bool, list[str], dict]:
+    """把页面选中的 CSV 写进标准表目录,并(默认)立即重新加载。
+
+    `payload` 形如 `{"files": {"t1-17395-table1.csv": "<CSV 文本>", ...}}`,
+    返回 `(是否写入, 错误列表, 当前文件状态)`。只要有一个文件不合格就整单不写。
+    `target_dir` / `reload` 是给自测用的:导入到临时目录、不碰运行中的表。
+    """
+    base = Path(target_dir) if target_dir else _CURATED_DIR
+    data = payload if isinstance(payload, dict) else {}
+    files = data.get("files")
+    if not isinstance(files, dict) or not files:
+        return False, ["没有收到文件:先选要导入的 CSV 再点导入"], standards_status(base)
+
+    errors: list[str] = []
+    accepted: dict[str, str] = {}
+    for name, text in files.items():
+        spec = std_file_spec(str(name))
+        if spec is None:
+            errors.append(f"不认识的文件名 {name!r};只收 "
+                          + "、".join(s["name"] for s in STD_FILES))
+            continue
+        errs, _info = _validate_std_text(spec, text)
+        if errs:
+            errors.extend(f"{name}:{e}" for e in errs)
+            continue
+        accepted[spec["name"]] = text
+    if errors:
+        return False, errors, standards_status(base)
+
+    # 先拼一份"导入后长什么样"的临时目录,照真实逻辑试加载一遍
+    # (用自己 mkdir 的目录而不是 tempfile.mkdtemp:后者建出来的目录在沙箱/受限
+    #  ACL 下不可写,踩过)
+    base.mkdir(parents=True, exist_ok=True)
+    staging = base.parent / f".std-import-{os.getpid()}-{time.time_ns()}"
+    try:
+        staging.mkdir()
+        for spec in STD_FILES:
+            name = spec["name"]
+            if name in accepted:
+                (staging / name).write_text(accepted[name].lstrip("\ufeff"),
+                                            encoding="utf-8-sig")
+            elif (base / name).is_file():
+                shutil.copy2(base / name, staging / name)
+        od, sst = _load_od_to_walls(staging)
+        stress = _stress_from_rows(_read_csv(staging / "t3-20801-tableB1.csv"))
+        if "t1-17395-table1.csv" in accepted and not od:
+            errors.append("表 1 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
+        if "t4-17395-table4.csv" in accepted and not sst:
+            errors.append("表 4 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
+        if "t3-20801-tableB1.csv" in accepted and not stress:
+            errors.append("表 B.1 里没有本工具用到的牌号:「标准」+「牌号」两列要能对上 "
+                          "GB/T 8163、GB/T 6479、GB/T 14976 里的 20# / Q345A / Q345B / "
+                          "S30408 / S31603")
+        if errors:
+            return False, errors, standards_status(base)
+        for name in accepted:
+            (staging / name).replace(base / name)
+    except OSError as exc:
+        return False, [f"写入失败:{exc}"], standards_status(base)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    if reload:
+        reload_standards(base)
+    return True, [], standards_status(base)
+
 
 #: 本期 DN 上限(超过就标黄提示"超出 DN600,需专项确认")
 MAX_DN = 600

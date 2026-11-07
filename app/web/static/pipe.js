@@ -290,6 +290,37 @@ function bindPipeEvents() {
       if (e.target === docModal) closePipeDoc();
     });
   }
+
+  // ---- 标准表导入(三张国标表格的 CSV) ----
+  const stdOpen = document.getElementById("pipeStdOpen");
+  if (stdOpen) stdOpen.addEventListener("click", openPipeStd);
+  const stdClose = document.getElementById("pipeStdClose");
+  if (stdClose) stdClose.addEventListener("click", closePipeStd);
+  const stdCancel = document.getElementById("pipeStdCancel");
+  if (stdCancel) stdCancel.addEventListener("click", closePipeStd);
+  const stdImport = document.getElementById("pipeStdImport");
+  if (stdImport) stdImport.addEventListener("click", doPipeStdImport);
+  const stdModal = document.getElementById("pipeStdModal");
+  if (stdModal) {
+    stdModal.addEventListener("click", (e) => {
+      if (e.target === stdModal) closePipeStd();
+    });
+  }
+  const stdFiles = document.getElementById("pipeStdFiles");
+  if (stdFiles) {
+    ["dragenter", "dragover"].forEach((type) => stdFiles.addEventListener(type, (e) => {
+      e.preventDefault();
+      stdFiles.classList.add("dragging");
+    }));
+    ["dragleave", "drop"].forEach((type) => stdFiles.addEventListener(type, (e) => {
+      e.preventDefault();
+      stdFiles.classList.remove("dragging");
+    }));
+    stdFiles.addEventListener("drop", (e) => {
+      const list = (e.dataTransfer && e.dataTransfer.files) || [];
+      if (list.length) onPipeStdDrop(list);
+    });
+  }
 }
 
 /* ------------------------------------------------------------ 管道计算说明 */
@@ -316,6 +347,7 @@ function pipeDocEsc(e) {
 const PIPE_CLASS_GRADES = ["20#", "Q345A", "Q345B", "S30408", "S31603"];
 
 let pipeClassAutoOpened = false;   // #pipes/class 深链只自动开一次
+let pipeStdAutoOpened = false;     // #pipes/standards 深链只自动开一次
 
 function openPipeClass() {
   const modal = document.getElementById("pipeClassModal");
@@ -412,6 +444,205 @@ async function clearPipeClass() {
   closePipeClass();
   pipeState.tables = null;
   if (state.current) loadPipeTableStatus().then(() => runPipeCalc({ force: true }));
+}
+
+/* ------------------------------------------------------------ 标准表导入弹窗
+   三张表的数值受著作权保护,不能随项目分发;这一屏只做「选 CSV → 校验 → 导入」,
+   导入后服务端立即重新加载,不用重启服务。 */
+
+let pipeStdInfo = null;      // {dir, files:[{name,label,from,columns,exists,rows,mtime}], status}
+const pipeStdPicked = {};    // 文件名 → {text, fileName, rows, warn, error}
+
+function openPipeStd() {
+  const modal = document.getElementById("pipeStdModal");
+  if (!modal) return;
+  modal.classList.remove("hidden");
+  showPipeStdError("");
+  showPipeStdOk("");
+  Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
+  document.addEventListener("keydown", pipeStdEsc);
+  loadPipeStdInfo();
+}
+
+function closePipeStd() {
+  const modal = document.getElementById("pipeStdModal");
+  if (modal) modal.classList.add("hidden");
+  document.removeEventListener("keydown", pipeStdEsc);
+}
+
+function pipeStdEsc(e) {
+  if (e.key === "Escape") closePipeStd();
+}
+
+function showPipeStdError(text) {
+  const el = document.getElementById("pipeStdError");
+  if (!el) return;
+  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
+  el.classList.remove("hidden");
+  el.textContent = text;
+}
+
+function showPipeStdOk(text) {
+  const el = document.getElementById("pipeStdOk");
+  if (!el) return;
+  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
+  el.classList.remove("hidden");
+  el.textContent = text;
+}
+
+async function loadPipeStdInfo() {
+  try {
+    pipeStdInfo = await api("/api/pipe-standards");
+  } catch (err) {
+    showPipeStdError(`读不到标准表状态:${err.message}(后台服务是不是没起来?)`);
+    return;
+  }
+  const dirEl = document.getElementById("pipeStdDir");
+  if (dirEl && pipeStdInfo.dir) dirEl.textContent = pipeStdInfo.dir;
+  const statusEl = document.getElementById("pipeStdStatus");
+  if (statusEl) {
+    const files = pipeStdInfo.files || [];
+    const has = files.filter((f) => f.exists).length;
+    statusEl.textContent = has === files.length
+      ? `本机 ${files.length} 张表都已录入 —— 导入只会覆盖成新版本`
+      : `本机已录 ${has} / ${files.length} 张 —— 缺的那些选上 CSV 导入就能用`;
+    statusEl.className = has === files.length ? "pipe-std-status ok" : "pipe-std-status";
+  }
+  renderPipeStdFiles();
+}
+
+function pipeStdFileInfo(name) {
+  return ((pipeStdInfo && pipeStdInfo.files) || []).find((f) => f.name === name) || null;
+}
+
+/* 前端先粗筛一遍(空文件 / 编码 / 明显缺列),真正的判定在服务端。
+   这里只做「瞬时反馈」,服务端拒绝的提示更细,以服务端为准。 */
+function pipeStdCheckText(name, text) {
+  if (!text || !text.trim()) return { error: "文件是空的" };
+  if (text.includes("\ufffd")) {
+    return { error: "里面有乱码:多半不是 UTF-8。用 Excel「另存为 → CSV UTF-8」再试一次" };
+  }
+  if (text.length > 8 * 1024 * 1024) return { error: "文件太大(超过 8 MB),不像标准表" };
+  const lines = text.replace(/^\ufeff/, "").split(/\r?\n/).filter((l) => l.trim());
+  const spec = pipeStdFileInfo(name);
+  const need = (spec && spec.columns) || [];
+  const header = (lines[0] || "").split(",").map((s) => s.replace(/^"|"$/g, "").trim());
+  const missing = need.filter((c) => !header.includes(c));
+  const rows = Math.max(0, lines.length - 1);
+  const warn = missing.length
+    ? `表头里没看到 ${missing.join("、")} 列(现在是 ${header.slice(0, 6).join("、")});以服务端校验为准`
+    : "";
+  return { rows, warn };
+}
+
+function renderPipeStdFiles() {
+  const box = document.getElementById("pipeStdFiles");
+  const files = (pipeStdInfo && pipeStdInfo.files) || [];
+  if (!box) return;
+  box.innerHTML = files.map((f) => {
+    const picked = pipeStdPicked[f.name];
+    const badge = f.exists ? '<span class="badge ok">已录</span>'
+      : '<span class="badge err">未录</span>';
+    let state;
+    if (picked && picked.error) {
+      state = `<span class="pipe-std-bad">${esc(picked.error)}</span>`;
+    } else if (picked) {
+      const warn = picked.warn ? ` <span class="pipe-std-warn">${esc(picked.warn)}</span>` : "";
+      state = `<span class="pipe-std-good">已选中 ${esc(picked.fileName)} · ${picked.rows} 行</span>${warn}`;
+    } else if (f.exists) {
+      state = `本机已有 ${f.rows} 行${f.mtime ? ` · ${esc(f.mtime)}` : ""}`;
+    } else {
+      state = "本机还没有这个文件";
+    }
+    return `<div class="pipe-std-row${picked && !picked.error ? " picked" : ""}" data-name="${esc(f.name)}">
+      <div class="pipe-std-head"><b>${esc(f.label)}</b> ${badge}
+        <span class="muted">${esc(f.from)}</span></div>
+      <div class="pipe-std-cols muted">需要列:${(f.columns || []).map((c) => `<code>${esc(c)}</code>`).join("、")}
+        <code class="pipe-std-file">${esc(f.name)}</code></div>
+      <div class="pipe-std-state">${state}</div>
+      <label class="btn pipe-std-pick">选文件<input type="file" accept=".csv,text/csv" data-std="${esc(f.name)}" hidden></label>
+    </div>`;
+  }).join("");
+  box.querySelectorAll('input[type="file"]').forEach((inp) => {
+    inp.addEventListener("change", (e) => onPipeStdFile(inp.dataset.std, e.target.files[0]));
+  });
+  const btn = document.getElementById("pipeStdImport");
+  if (btn) {
+    btn.disabled = !Object.keys(pipeStdPicked).some((k) => !pipeStdPicked[k].error);
+    btn.textContent = "导入并立即生效";
+  }
+}
+
+async function onPipeStdFile(name, file) {
+  if (!file) return;
+  showPipeStdError("");
+  showPipeStdOk("");
+  try {
+    const text = await file.text();
+    pipeStdPicked[name] = { text, fileName: file.name, ...pipeStdCheckText(name, text) };
+  } catch (err) {
+    pipeStdPicked[name] = { error: `读不出这个文件:${err.message}` };
+  }
+  renderPipeStdFiles();
+}
+
+/* 拖进来的文件按名字对号入座;名字对不上就明说,不猜 */
+async function onPipeStdDrop(list) {
+  const names = ((pipeStdInfo && pipeStdInfo.files) || []).map((f) => f.name);
+  const unknown = [];
+  for (const file of [...list]) {
+    if (!names.includes(file.name)) { unknown.push(file.name); continue; }
+    await onPipeStdFile(file.name, file);
+  }
+  if (unknown.length) {
+    showPipeStdError(`这些文件名对不上:${unknown.join("、")}`
+      + `;请改成 ${names.join(" / ")}。改不了就用每张表右侧的「选文件」。`);
+  }
+}
+
+async function doPipeStdImport() {
+  const files = {};
+  Object.keys(pipeStdPicked).forEach((name) => {
+    if (!pipeStdPicked[name].error) files[name] = pipeStdPicked[name].text;
+  });
+  if (!Object.keys(files).length) {
+    showPipeStdError("先选至少一个 CSV 再导入");
+    return;
+  }
+  const btn = document.getElementById("pipeStdImport");
+  if (btn) { btn.disabled = true; btn.textContent = "导入中…"; }
+  showPipeStdError("");
+  showPipeStdOk("");
+  try {
+    const res = await fetch("/api/pipe-standards", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ files }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (body.files) {
+      pipeStdInfo = { ...(pipeStdInfo || {}), dir: body.dir, files: body.files,
+                       status: body.status };
+    }
+    if (!res.ok || !body.ok) {
+      showPipeStdError((body.errors || []).join("\n") || `导入失败:HTTP ${res.status}`);
+      return;
+    }
+    Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
+    showPipeStdOk(`写入了 ${Object.keys(files).length} 个文件,标准表已重新加载 —— 关掉这个窗口就能看到管道表。`);
+    // 状态变了:清掉缓存、重算管道表,下一次算就用新表
+    pipeState.tables = null;
+    pipeState.data = null;
+    pipeState.status = "idle";
+    await loadPipeTableStatus();
+    if (state.current) runPipeCalc({ force: true });
+    else renderPipes();
+  } catch (err) {
+    showPipeStdError(`导入失败:${err.message}(后台服务是不是没起来?)`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "导入并立即生效"; }
+    renderPipeStdFiles();
+  }
 }
 
 function onPipeParamInput(evt) {
@@ -783,9 +1014,9 @@ function renderPipeTablesHint() {
   el.className = "pipe-notice warn";
   el.innerHTML = "<span><b>标准壁厚序列(T2)未录入</b>:壁厚列会全是「—」,备注里每行也会写一句。"
     + "DN、等级号、设计压力不受影响。"
-    + "补录办法:把 GB/T 17395-2024 的表 1、表 4 整理成 "
-    + "<code>t1-17395-table1.csv</code> / <code>t4-17395-table4.csv</code>,"
-    + "放进 <code>data/preview/std/docx/</code>,重启服务后重算"
+    + "补录办法:点顶部的「标准表」按钮导入 GB/T 17395-2024 表 1、表 4 的 CSV"
+    + "(文件名 <code>t1-17395-table1.csv</code> / <code>t4-17395-table4.csv</code>),"
+    + "导入后立即生效;也可以手工放进 <code>data/preview/std/docx/</code> 再重启服务"
     + "(页码见 <code>docs/pipe-standards-index.md</code>)。</span>";
 }
 
@@ -824,6 +1055,10 @@ function pipeBlockedHtml(message, tables, setup) {
       ${line("许用应力(T3)", t3, t3.loaded ? ` ${t3.count} 个温度点,牌号 ${(t3.grades || []).join("、")}` : "")}
     </ul>
     <p class="muted">表没录全之前,这一页不会显示任何「估出来」的管径 —— 宁可空着。</p>
+    <p class="pipe-setup-cta">
+      <button type="button" class="btn primary" data-open-std>导入标准表 CSV</button>
+      <span class="muted">已经有 CSV 就点这里直接导入:不用手工放文件,也不用重启服务。</span>
+    </p>
     ${guide}
   </div>`;
 }
@@ -846,6 +1081,11 @@ function renderPipes() {
   if (!pipeClassAutoOpened && location.hash.endsWith("/class")) {
     pipeClassAutoOpened = true;
     openPipeClass();
+  }
+  // #pipes/standards 直接打开标准表导入(表没录时不用先找按钮)
+  if (!pipeStdAutoOpened && location.hash.endsWith("/standards")) {
+    pipeStdAutoOpened = true;
+    openPipeStd();
   }
 
   const hideExtras = () => {
@@ -881,6 +1121,9 @@ function renderPipes() {
     drawPipeTable();
     hideExtras();
     empty.innerHTML = pipeBlockedHtml(pipeState.error, pipeState.tables, pipeState.setup);
+    empty.querySelectorAll("[data-open-std]").forEach((btn) => {
+      btn.addEventListener("click", openPipeStd);
+    });
     empty.classList.remove("hidden");
     document.getElementById("pipeCount").textContent = "";
     return;

@@ -222,6 +222,22 @@ class Handler(BaseHTTPRequestHandler):
                            "status": pipe_data.piping_class_status()}
                 self._json(payload, 200 if ok else 400)
                 return
+            if path == "/api/pipe-standards":
+                # 导入标准表:校验 → 写 data/preview/std/docx/ → 立即重新加载(不用重启)
+                from app.design import pipe_data
+
+                ok, errors, files = pipe_data.import_standards(self._read_json_body())
+                payload = {"ok": ok, "errors": errors,
+                           "dir": files["dir"], "files": files["files"],
+                           "status": _pipe_table_status()}
+                if ok:
+                    payload["loaded"] = {
+                        "od_to_walls": len(pipe_data.OD_TO_WALLS),
+                        "od_to_walls_sst": len(pipe_data.OD_TO_WALLS_SST),
+                        "stress_grades": sorted(pipe_data.ALLOWABLE_STRESS),
+                    }
+                self._json(payload, 200 if ok else 400)
+                return
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
@@ -305,6 +321,14 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "pipe-tables"]:
             # 管路选型要用的标准表录到什么程度(前端空状态用)
             self._json(_pipe_table_status())
+            return
+        if parts == ["api", "pipe-standards"]:
+            # 标准表导入弹窗:三个 CSV 各自有没有、多少行、什么时候放进来的
+            from app.design import pipe_data
+
+            files = pipe_data.standards_status()
+            self._json({"dir": files["dir"], "files": files["files"],
+                        "status": _pipe_table_status()})
             return
         if parts == ["api", "piping-classes"]:
             # 管道等级表的当前内容(页面上的「等级表」弹窗读它)

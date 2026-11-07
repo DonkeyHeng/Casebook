@@ -598,6 +598,97 @@ def test_pipe_setup() -> None:
           pipe_data.setup_guide() is not g and pipe_data.setup_guide() is not pipe_data.SETUP_GUIDE)
 
 
+def test_std_import() -> None:
+    """标准表导入:文件名白名单、编码/必需列/行数,以及"先试加载一遍再落盘"。
+
+    自测一律往临时目录里导,不碰 data/preview/std/docx/ 下正在用的表。
+    """
+    import shutil
+    from pathlib import Path
+
+    from app.design import pipe_data
+
+    # 临时目录放在 data/preview/ 下(已被 .gitignore 覆盖):系统 Temp 目录在沙箱里
+    # 清理时会 chmod 失败,自测得自己 rmtree
+    tmp_root = Path(__file__).resolve().parents[1] / "data" / "preview" / "_selftest-std"
+    shutil.rmtree(tmp_root, ignore_errors=True)
+    tmp_root.mkdir(parents=True, exist_ok=True)
+
+    names = [s["name"] for s in pipe_data.STD_FILES]
+    check_eq("std: 三个 CSV 文件名", names, ["t1-17395-table1.csv", "t4-17395-table4.csv",
+                                            "t3-20801-tableB1.csv"])
+    check("std: 每张表都写了来源与必需列",
+          all(s.get("from") and s.get("columns") for s in pipe_data.STD_FILES))
+    check("std: 白名单外的文件名不收",
+          pipe_data.std_file_spec("t1-17395-table1.csv") is not None
+          and pipe_data.std_file_spec("whatever.csv") is None)
+
+    spec = pipe_data.std_file_spec("t1-17395-table1.csv")
+    errs, _ = pipe_data._validate_std_text(spec, "   ")
+    check_eq("std: 空文件被拒", errs, ["文件是空的"])
+    good = "D_mm,S_mm\n" + "\n".join(f"{d},2.5" for d in range(6, 30))
+    errs, _ = pipe_data._validate_std_text(spec, good.replace("D_mm", "D"))
+    check("std: 缺列被拒", any("缺列" in e for e in errs), f"{errs}")
+    errs, _ = pipe_data._validate_std_text(spec, "D_mm,S_mm\n10,2.5\n")
+    check("std: 行数太少被拒", any("至少" in e for e in errs), f"{errs}")
+    errs, _ = pipe_data._validate_std_text(spec, good.replace("2.5", "两毫米"))
+    check("std: 读不出的壁厚被拒", any("外径" in e for e in errs), f"{errs}")
+    errs, info = pipe_data._validate_std_text(spec, good)
+    check_eq("std: 合规的尺寸表通过", errs, [])
+    check_eq("std: 统计到 24 个外径", info.get("od_count"), 24)
+    errs, _ = pipe_data._validate_std_text(spec, good + "\ufffd")
+    check("std: 乱码(非 UTF-8)被拒", any("UTF-8" in e for e in errs), f"{errs}")
+
+    base = tmp_root / "a" / "docx"
+    ok, errs, status = pipe_data.import_standards(
+        {"files": {"t1-17395-table1.csv": good}}, target_dir=base, reload=False)
+    check_eq("std: 单张表能导入", (ok, errs), (True, []))
+    check("std: 文件写到了目标目录", (base / "t1-17395-table1.csv").is_file())
+    rows = [f["rows"] for f in status["files"] if f["name"] == "t1-17395-table1.csv"]
+    check_eq("std: 导入后状态里是 24 行", rows, [24])
+
+    # 一个文件不合格 → 一张都不写(别留半份)
+    ok, errs, _ = pipe_data.import_standards(
+        {"files": {"t1-17395-table1.csv": good,
+                   "t4-17395-table4.csv": "foo,bar\n1,2\n"}},
+        target_dir=base, reload=False)
+    check_eq("std: 有一个不合格就整单拒绝", ok, False)
+    check("std: 错误里点名是哪个文件",
+          any("t4-17395-table4.csv" in e for e in errs), f"{errs}")
+    check("std: 被拒时没写进任何文件", not (base / "t4-17395-table4.csv").exists())
+
+    ok, errs, _ = pipe_data.import_standards({"files": {}}, target_dir=base, reload=False)
+    check_eq("std: 没选文件时明确报错", ok, False)
+
+    # 表 B.1 还要能对上本项目用到的牌号,否则整个选型还是跑不起来
+    real = Path(__file__).resolve().parents[1] / "data" / "preview" / "std" / "docx"
+    stress_path = real / "t3-20801-tableB1.csv"
+    base = tmp_root / "b" / "docx"
+    if stress_path.is_file():
+        ok, errs, _ = pipe_data.import_standards(
+            {"files": {"t3-20801-tableB1.csv": stress_path.read_text(encoding="utf-8-sig")}},
+            target_dir=base, reload=False)
+        check_eq("std: 真表 B.1 导入通过", (ok, errs), (True, []))
+    else:
+        print("  (本机没有表 B.1,跳过真表导入的检查)")
+    ok, errs, _ = pipe_data.import_standards(
+        {"files": {"t3-20801-tableB1.csv": "标准,牌号,许用应力_20\nGB/T 9999,XYZ,100\n"}},
+        target_dir=base, reload=False)
+    check_eq("std: 牌号对不上的表 B.1 被拒", ok, False)
+    check("std: 拒绝理由写清要哪些牌号",
+          any("牌号" in e for e in errs), f"{errs}")
+
+    # reload_standards:按目录重读;目录里没表就是空(页面显示未录),不是异常
+    old_count = len(pipe_data.OD_TO_WALLS)
+    try:
+        pipe_data.reload_standards(tmp_root / "no-such-std-dir")
+        check_eq("std: 目录里没表时重载成空", len(pipe_data.OD_TO_WALLS), 0)
+    finally:
+        pipe_data.reload_standards()
+    check_eq("std: 重载后原来的表还在", len(pipe_data.OD_TO_WALLS), old_count)
+    shutil.rmtree(tmp_root, ignore_errors=True)
+
+
 def test_piping_class() -> None:
     """管道等级表:按「流股名前缀 + 介质代号」匹配,工具只套用不判断腐蚀性。"""
     from app.design import pipe_data
@@ -666,6 +757,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("管路选型 design.pipe", test_pipe),
                      ("选型校验 validate() V1–V9", test_pipe_checks),
                      ("标准表补录说明 setup_guide()", test_pipe_setup),
+                     ("标准表导入 import_standards()", test_std_import),
                      ("管道等级表 piping-class", test_piping_class)):
         print(f"\n[{name}]")
         fn()

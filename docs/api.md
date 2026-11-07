@@ -13,6 +13,8 @@
 | GET | `/api/cases/{id}/impact` | 报错设备的波及范围(哪些流股的数据不可用 / 仅告警) |
 | GET | `/api/cases/{id}/pipes` | **管路选型**(实时算、不写库);参数见下;标准表未录入时返回 409 |
 | GET | `/api/pipe-tables` | 管路选型依赖的三张标准表录到什么程度(不需要工况) |
+| GET | `/api/pipe-standards` | 三张标准表对应的 CSV 各自有没有、多少行、什么时候放进来的(导入弹窗用) |
+| POST | `/api/pipe-standards` | **导入标准表**:校验 → 写 `data/preview/std/docx/` → 立即重新加载,不用重启 |
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股 / 设备 / 连接 / 塔剖面 / 组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |
@@ -40,6 +42,28 @@ GET /api/cases/21/pipes?liquid=1.5&gas=15&two=8&pump_inlet=0.8&factor=1.1&floor=
 
 **409** = 标准表没录全(`DN→外径` 或许用应力为空),响应里有 `error` 与 `tables`。
 这时改参数不会让结果变好 —— 缺的是标准数据。
+
+## 标准表导入 `/api/pipe-standards`
+
+三张表的数值受著作权保护、不随项目分发,所以由使用者自己整理成 CSV 后从页面导入。
+文件名固定:`t1-17395-table1.csv`、`t4-17395-table4.csv`(`D_mm`、`S_mm`)、
+`t3-20801-tableB1.csv`(`标准`、`牌号`、`许用应力_<温度>…`)。
+
+```
+POST /api/pipe-standards
+{"files": {"t1-17395-table1.csv": "<CSV 文本>", "t4-17395-table4.csv": "<CSV 文本>"}}
+```
+
+| 字段 | 内容 |
+| --- | --- |
+| `ok` | 是否写入;**任一文件不合格就整单不写**(不会留半份坏数据) |
+| `errors` | 逐条原因:文件名不在白名单、乱码 / 非 UTF-8、缺列、行数不够、表 B.1 牌号对不上 |
+| `files` | 三个 CSV 当前状态(是否已录 / 行数 / 修改时间) |
+| `status` | 同 `/api/pipe-tables` |
+| `loaded` | 仅成功时给出:加载到的外径数(普通管 / 不锈钢)、许用应力覆盖的牌号 |
+
+写入前会先把新文件与已有的拼进一个临时目录**试加载一遍**,外径或许用应力读不出来就拒绝;
+成功后立即替换内存里的表,下一次 `/api/cases/{id}/pipes` 就用新数据(不用重启服务)。
 
 ## 使用注意
 

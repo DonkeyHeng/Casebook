@@ -99,6 +99,7 @@
           <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
           <button id="pipeExportXlsx" class="btn" title="导出整个工况的 Excel(含「管道」「管道计算书」两张表)">导出 Excel</button>
           <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
+          <button id="pipeStdOpen" class="btn" title="导入 GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的 CSV(数据受著作权保护,需要你自己整理)">标准表</button>
           <button id="pipeClassOpen" class="btn" title="配置管道等级表(可选:不配就全部按默认材质)">等级表</button>
           <button id="pipeDocOpen" class="btn" title="管道计算说明:十步流程、公式、数据来源与已知局限(想核对算法时看)">计算说明</button>
         </div>
@@ -199,6 +200,35 @@
             <button id="pipeClassCancel" class="btn" type="button">取消</button>
           </div>
           <div id="pipeClassError" class="pipe-notice err hidden"></div>
+        </div>
+      </div>
+
+      <!-- 标准表导入:三张国标表格的 CSV。数据受著作权保护,不进仓库,只能由使用者自己导入 -->
+      <div id="pipeStdModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pipeStdTitle">
+        <div class="pipe-modal-box pipe-std-box">
+          <header class="panel-head">
+            <h3 id="pipeStdTitle">导入标准表</h3>
+            <button id="pipeStdClose" class="close" title="关闭,不导入">✕</button>
+          </header>
+          <p class="pipe-class-hint">
+            管路选型要查 <b>GB/T 17395-2024 的表 1、表 4</b> 和 <b>GB/T 20801.1-2025 的表 B.1</b>。
+            这些数值受著作权保护,本工具不附带,得你自己取得标准后整理成 CSV 再导进来 ——
+            导入的文件<b>只写在本机</b> <code id="pipeStdDir">data/preview/std/docx</code> 下,不上传、不外发。
+          </p>
+          <div id="pipeStdStatus" class="pipe-std-status muted">正在读取当前状态…</div>
+          <div id="pipeStdFiles" class="pipe-std-files"></div>
+          <p class="muted pipe-std-note">
+            每张表在哪一页、分页怎么拼,见 <code>docs/pipe-standards-index.md</code>;
+            要交给能看图的 AI 帮着抄数,用 <code>docs/pipe-standards-extract-prompt.md</code> 里的提示词。
+            文件名不用改,选中后按名字自动对到对应位置,导入完立即生效、不用重启服务。
+          </p>
+          <div id="pipeStdError" class="pipe-notice err hidden"></div>
+          <div id="pipeStdOk" class="pipe-notice ok hidden"></div>
+          <div class="pipe-class-actions">
+            <span class="spacer"></span>
+            <button id="pipeStdImport" class="btn primary" type="button" disabled>导入并立即生效</button>
+            <button id="pipeStdCancel" class="btn" type="button">关闭</button>
+          </div>
         </div>
       </div>
 
@@ -338,8 +368,9 @@
           </ul>
           <p class="muted">
             标准表的数值属于标准原文,不随公开仓库分发(只在本机 <code>data/</code> 下);换一台机器要按
-            <code>docs/pipe-standards-index.md</code> 的页码重新录入。录不到时页面会显示"标准表未录入"并列出缺哪张,
-            不会拿 0 算出一张假表。
+            <code>docs/pipe-standards-index.md</code> 的页码重新录入。
+            整理成 CSV 后点本页右上角的「标准表」按钮导入即可,不用重启服务。
+            录不到时页面会显示"标准表未录入"并列出缺哪张,不会拿 0 算出一张假表。
           </p>
 
           <p class="pipe-doc-foot muted">

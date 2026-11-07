@@ -1075,6 +1075,40 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 /* 等级表:表头说明挪到悬停,表头只留列名;带 title 的表头给个"可悬停"的手势 */
 #pipeClassTable thead th[title] { cursor: help; }
 
+/* ---------- 标准表导入弹窗 ---------- */
+.pipe-std-box { width: min(860px, 100%); }
+.pipe-std-status { font-size: 12.5px; line-height: 1.7; }
+.pipe-std-status.ok { color: var(--ok); }
+.pipe-std-files { display: flex; flex-direction: column; gap: 8px; border-radius: 8px; }
+.pipe-std-files.dragging { outline: 2px dashed var(--accent); outline-offset: 3px; }
+.pipe-std-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 10px; align-items: center;
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px;
+  font-size: 12.5px; line-height: 1.7;
+}
+.pipe-std-row.picked { border-color: var(--accent); background: #f5f8ff; }
+.pipe-std-row > * { min-width: 0; overflow-wrap: anywhere; }
+.pipe-std-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
+.pipe-std-cols { grid-column: 1; color: var(--muted); }
+.pipe-std-cols code, .pipe-std-note code, .pipe-class-hint code {
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px; font-size: 12px;
+}
+.pipe-std-cols .pipe-std-file { margin-left: 6px; }
+.pipe-std-state { grid-column: 1; grid-row: span 1; }
+.pipe-std-good { color: var(--ok); }
+.pipe-std-bad { color: var(--err); }
+.pipe-std-warn { color: var(--warn); }
+.pipe-std-pick { grid-column: 2; grid-row: 1 / span 3; align-self: center; white-space: nowrap; }
+.pipe-std-note { margin: 0; font-size: 12px; line-height: 1.75; }
+.pipe-std-note code { overflow-wrap: anywhere; }
+.pipe-notice.ok { background: #f0fdf4; border-color: #bbf7d0; color: var(--ok); }
+/* 服务端一次可能回好几种错误,一条一行 */
+#pipeStdError, #pipeStdOk { white-space: pre-line; }
+.pipe-setup-cta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pipe-setup-cta .muted { font-size: 12.5px; }
+
 /* ---------------------------------------------------------------- 管道计算说明弹窗
    纯文字说明,窄一点更好读;只纵向滚动,不允许出现横向滚动条 */
 .pipe-doc {
