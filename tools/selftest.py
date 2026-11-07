@@ -500,6 +500,9 @@ def test_pipe_checks() -> None:
                 pipe_calc.actual_velocity(36.0, 100.0), 1.273, tol=0.01)
 
     check_eq("checks: 流速过大 → V2", codes({"vol_flow_m3h": 200.0}), ["V2"])
+    # V2 的 finding 要能落到「流速」那一列,否则前端只能整行标黄
+    f2 = pipe_calc.validate([dict(base, vol_flow_m3h=200.0)])["findings"][0]
+    check_eq("checks: V2 的 field 定位到 velocity", f2["field"], "velocity")
     check_eq("checks: 所需壁厚超所选 → V3", codes({"t_required_mm": 5.0}), ["V3"])
     check_eq("checks: 等级号压力不足 → V4",
              codes({"grade_code": "H1E"}), ["V4"])

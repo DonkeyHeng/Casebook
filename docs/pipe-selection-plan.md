@@ -301,8 +301,8 @@ GB/T 17395 系列 1 作为可切换项(默认关)。
 | 2 | 录 `[σ]` 表:20#/Q345B/S30408/S31603 × 20–400 ℃(渲染表 B.1 页,逐格核对) | 4 个牌号 × 温度列齐全,注明"已人工核对" |
 | 3 | 写 `app/design/pipe.py` 纯函数:`build(streams, blocks, connections, options) -> {rows, summary, missing}` | 用 #20/#21 跑出 178/218 量级的表;`tools/selftest.py` 加 8–10 条用例(相态阈值、DN 取整、DN600 退回、真空、泵入口、等级号、壁厚圆整) |
 | 4 | 读取层加"组分名":`reader.read_case` 里每条流股读 `X` 子节点名(1 次调用),存 `stream_components_names` 或 `cases.components_json` | 读取耗时 +5–8 s;库里有组分名;出"本项目组分清单"给人确认映射 |
-| 5 | API:`GET /api/cases/{id}/pipes?liquid=1.5&gas=18&two=12&factor=1.0&unit=kpa` | 参数改了结果变;409/404 有中文原因 |
-| 6 | 前端「管道」页:表 1 主表 + 参数面板 + 单元格标黄 + 导出按钮 | 用 #21 目视核对 10 行;与外部资料 diff 列可切 |
+| 5 ✅ | API:`GET /api/cases/{id}/pipes?liquid=1.5&gas=15&two=8&pump_inlet=0.8&factor=1.1&floor=1.0&max_dn=600&material=S30408`(数字以 §5 第 3 步定稿口径为准) | 参数改了结果变;409/404 有中文原因 |
+| 6 ✅ | 前端「管道」页:主表 + 参数面板 + 单元格标黄 + 计算书列 + 空态(导出按钮留到第 7 步) | 已用假数据渲染核对 5 行(含 V2/V5/V6/V9 标黄位置);真数据待表录入 |
 | 7 | 导出:Excel 两张表(主表/计算书)、AI 包加 `pipe_schedule.csv` | 打开 Excel 对格式;zip 里多一份 csv |
 | 8 | 文档:README 功能表 / 目录树、内部交接文档 | 新会话按交接文档接手 |
 
@@ -315,7 +315,7 @@ GB/T 17395 系列 1 作为可切换项(默认关)。
 | 1 | 🟡 部分 | `app/design/pipe_data.py` 已建:表 8/表 9 壁厚偏差、Y 值、PN 代号、材质代号已落地;**DN→OD 与标准壁厚序列待录入**(T1/T2) |
 | 2 | ⬜ 待录入 | 表 B.1 四牌号已定位到页(20# 142–143、Q345A 143、Q345B 144、S30408/S31603 160),数据等外部录入 |
 | 3 | 🟡 算术完成 | `app/design/pipe.py` 十步流程 + `build()` + 校验 `validate()`(V1–V9)已写完;`tools/selftest.py` 纯函数用例 **108 条**、含库一致性 **143 条全过**;表数据未入,`build()` 会抛 `TablesNotReady` 而不是编数 |
-| 4–8 | ⬜ | 未开始(4 需 Aspen 在跑;5–7 需先把表数据录进来) |
+| 4–8 | 🟡 部分 | 4 需 Aspen 在跑(未做);**5 已完成** `/api/cases/{id}/pipes` + `/api/pipe-tables`;**6 已完成**「管道」页(`pipe.js`,含参数面板/标黄/计算书列/空态);7 导出、8 文档待做 |
 
 > 已落地的两处实现补充(写进 §14.3 / §6 之前先看代码):
 > ① **常压死区** ±0.01 MPa —— 1.0 bar 绝压(表压 −0.0013 MPa)属常压,不能判真空,否则设计压力从 1.0 MPa 掉到 0.1 MPa;

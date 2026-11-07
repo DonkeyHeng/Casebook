@@ -25,6 +25,7 @@
       <a class="tab nav-item" data-tab="blocks" href="#blocks">设备</a>
       <a class="tab nav-item" data-tab="compare" href="#compare">对比</a>
       <a class="tab nav-item" data-tab="flow" href="#flow">流程</a>
+      <a class="tab nav-item" data-tab="pipes" href="#pipes">管道</a>
     </nav>
 
     <div class="side-foot">
@@ -89,6 +90,66 @@
       </section>
     </section>
 
+    <!-- 管道页:按参数实时算的管表(不写库,口径在 app/design/pipe.py) -->
+    <section id="pagePipes" class="page hidden">
+      <header class="page-head">
+        <h2>管道</h2>
+        <div class="page-actions">
+          <button id="pipeRecalc" class="btn" title="参数改了会自动重算,这里用于手动再算一次">重算</button>
+          <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
+        </div>
+      </header>
+
+      <div id="pipeNotice" class="pipe-notice hidden" role="status" aria-live="polite"></div>
+
+      <form id="pipeParams" class="pipe-params" autocomplete="off">
+        <fieldset class="pipe-group">
+          <legend>流速 m/s</legend>
+          <label title="推荐 1.0–2.5">液<input id="ppLiquid" type="number" step="0.1" inputmode="decimal"></label>
+          <label title="推荐 10–25">气<input id="ppGas" type="number" step="0.5" inputmode="decimal"></label>
+          <label title="推荐 5–10">两相<input id="ppTwo" type="number" step="0.5" inputmode="decimal"></label>
+          <label title="泵入口单独一档,推荐 0.5–1.0">泵入口<input id="ppPumpInlet" type="number" step="0.1" inputmode="decimal"></label>
+        </fieldset>
+        <fieldset class="pipe-group">
+          <legend>压力口径</legend>
+          <label title="设计压力 =(绝压 − 0.1013 MPa)× 系数">系数<input id="ppFactor" type="number" step="0.05" min="1"></label>
+          <label title="设计压力下限 MPa">下限<input id="ppFloor" type="number" step="0.1" min="0"></label>
+          <label>单位<select id="ppUnit">
+            <option value="kpa">kPa</option>
+            <option value="mpa">MPa</option>
+            <option value="bar">bar</option>
+          </select></label>
+        </fieldset>
+        <fieldset class="pipe-group">
+          <legend>边界</legend>
+          <label>DN 上限<select id="ppMaxDn"></select></label>
+          <label>材质<select id="ppMaterial"></select></label>
+        </fieldset>
+        <label class="pipe-toggle"><input id="ppShowCalc" type="checkbox"> 计算书列</label>
+        <label class="pipe-toggle"><input id="ppOnlyBad" type="checkbox"> 只看有问题的</label>
+        <input id="ppFilter" type="search" placeholder="按流股名筛选…">
+        <span id="pipeCount" class="muted"></span>
+      </form>
+
+      <div id="pipeTablesHint" class="pipe-notice warn hidden"></div>
+
+      <div id="pipeTableWrap" class="table-wrap pipe-wrap" tabindex="0" aria-label="管道一览表">
+        <table id="pipeTable"><thead></thead><tbody></tbody></table>
+      </div>
+
+      <div id="pipeEmpty" class="empty hidden"></div>
+
+      <section id="pipeMissing" class="card wide hidden">
+        <h3 id="pipeMissingTitle">未选型的流股</h3>
+        <div id="pipeMissingBody"></div>
+      </section>
+
+      <section id="pipeFindings" class="card wide hidden">
+        <h3 id="pipeFindingsTitle">校验发现</h3>
+        <div id="pipeFindingsBody"></div>
+      </section>
+    </section>
+
     <!-- 数据页:流股 / 设备 / 对比 共用 -->
     <section id="pageData" class="page hidden">
       <header class="page-head">
@@ -142,6 +203,9 @@
 
   <div id="chartTip" class="chart-tip hidden"></div>
 
+  <!-- pipe.js 必须排在 app.js 前面:app.js 末尾会立刻调 init() → bindEvents(),
+       那时管道页的 initPipePanel / renderPipes 必须已经存在 -->
+  <script src="/static/pipe.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

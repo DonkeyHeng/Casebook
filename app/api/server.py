@@ -130,6 +130,24 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
     return {k: row[k] for k in row.keys()}
 
 
+def _pipe_table_status() -> dict:
+    """管路选型依赖的三张标准表录到什么程度(不连 Aspen、不查库)。"""
+    from app.design import pipe_data
+
+    stress_grades = sorted(pipe_data.ALLOWABLE_STRESS)
+    return {
+        "dn_to_od": {"loaded": bool(pipe_data.DN_TO_OD), "count": len(pipe_data.DN_TO_OD),
+                     "verified": sorted(pipe_data.DN_OD_VERIFIED)},
+        "od_to_walls": {"loaded": bool(pipe_data.OD_TO_WALLS),
+                        "count": len(pipe_data.OD_TO_WALLS)},
+        "stress": {"loaded": bool(pipe_data.ALLOWABLE_STRESS),
+                   "grades": stress_grades,
+                   "count": sum(len(v) for v in pipe_data.ALLOWABLE_STRESS.values())},
+        "ready": bool(pipe_data.DN_TO_OD and pipe_data.ALLOWABLE_STRESS
+                      and pipe_data.OD_TO_WALLS),
+    }
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = DEFAULT_DB
 
@@ -250,6 +268,10 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["api", "compare"]:
             self._compare(query)
             return
+        if parts == ["api", "pipe-tables"]:
+            # 管路选型要用的标准表录到什么程度(前端空状态用)
+            self._json(_pipe_table_status())
+            return
         if parts[:2] != ["api", "cases"]:
             self._error("未知接口", 404)
             return
@@ -313,6 +335,9 @@ class Handler(BaseHTTPRequestHandler):
                     [dict(r) for r in db.read_blocks(conn, case_id)],
                 ))
                 return
+            if parts[3] == "pipes":
+                self._pipes(conn, case_id, query)
+                return
             if parts[3] == "columns":
                 if len(parts) == 4:
                     self._json([_row_to_dict(r) for r in db.list_columns(conn, case_id)])
@@ -332,6 +357,50 @@ class Handler(BaseHTTPRequestHandler):
             conn.close()
 
     # ------------------------------------------------------------ 流股组成按需读
+
+    def _pipes(self, conn, case_id: int, query: dict) -> None:
+        """GET /api/cases/{id}/pipes —— 管路选型(实时算,不写库)。
+
+        参数(都可省):`liquid` / `gas` / `two`(m/s)、`factor`(设计压力系数)、
+        `floor`(设计压力下限 MPa)、`max_dn`、`material`(默认牌号)。
+        标准表没录全时返回 409 并说明缺哪张,而不是吐一张空表。
+        """
+        from app.design import pipe as pipe_calc
+
+        def _f(key: str, default: float) -> float:
+            try:
+                return float(query[key])
+            except (KeyError, TypeError, ValueError):
+                return default
+
+        options = {
+            "velocity": {
+                "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"]),
+                "gas": _f("gas", pipe_calc.DEFAULT_VELOCITY["gas"]),
+                "two": _f("two", pipe_calc.DEFAULT_VELOCITY["two"]),
+                "pump_inlet": _f("pump_inlet", pipe_calc.DEFAULT_VELOCITY["pump_inlet"]),
+            },
+            "pressure_factor": _f("factor", 1.1),
+            "pressure_floor_mpa": _f("floor", 1.0),
+            "max_dn": int(_f("max_dn", 600)),
+            "material": query.get("material", "S30408"),
+        }
+
+        streams = [dict(r) for r in db.read_streams(conn, case_id)]
+        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
+        conns = [dict(r) for r in db.read_connections(conn, case_id)]
+
+        try:
+            result = pipe_calc.build(streams, blocks, conns, options=options)
+        except pipe_calc.TablesNotReady as exc:
+            payload = {"error": str(exc), "tables": _pipe_table_status()}
+            self._json(payload, 409)
+            return
+
+        result["validation"] = pipe_calc.validate(result["rows"], options)
+        result["options"] = options
+        result["tables"] = _pipe_table_status()
+        self._json(result)
 
     def _stream_composition(self, conn, case_id: int, stream: str) -> None:
         """GET /api/cases/{id}/streams/{流股}/composition

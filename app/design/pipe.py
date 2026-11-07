@@ -292,7 +292,12 @@ def validate(rows: Iterable[Mapping[str, Any]],
     """对选型结果跑 §6 的 V1–V9,只陈述事实,不给"该怎么改模型"的建议。
 
     返回 `{"findings": [...], "summary": {"error": n, "warn": n}}`,
-    每条 finding 是 `{stream, code, level, message}`。
+    每条 finding 是 `{stream, code, level, message, field}`。
+
+    `field` 是**这条发现该标在哪一列**(前端据此做单元格标黄,而不是整行染黄):
+    取值与 `build()` 的行字段同名(`dn` / `velocity` / `wall_mm` / `grade_code` /
+    `design_pressure_mpa` / `design_temp_c`)。V2 的"实际流速"在主表里也有一列
+    (前端按内径反算),所以标 `velocity` 不会落空。
     """
     opts = options or {}
     low_c = float(opts.get("material_low_c", -20.0))
@@ -300,8 +305,9 @@ def validate(rows: Iterable[Mapping[str, Any]],
     hot_c = float(opts.get("hot_insulation_c", 80.0))
     findings: list[dict[str, Any]] = []
 
-    def add(stream: str, code: str, level: str, message: str) -> None:
-        findings.append({"stream": stream, "code": code, "level": level, "message": message})
+    def add(stream: str, code: str, level: str, message: str, field: str) -> None:
+        findings.append({"stream": stream, "code": code, "level": level,
+                         "message": message, "field": field})
 
     for r in rows:
         name = r.get("stream")
@@ -317,7 +323,7 @@ def validate(rows: Iterable[Mapping[str, Any]],
             tail = str(pipe_no).split("-")[-1]
             if tail.isdigit() and dn is not None and int(tail) != int(dn):
                 add(name, "V1", "error",
-                    f"管道编号里的口径 {tail} 与选出的 DN{dn} 不一致")
+                    f"管道编号里的口径 {tail} 与选出的 DN{dn} 不一致", "dn")
 
         # V5 气液共存但按单相流速选型(先判,好在 V2 里避免同一个问题报两次)
         v5_hit = False
@@ -326,7 +332,8 @@ def validate(rows: Iterable[Mapping[str, Any]],
             if not (lo2 - 1e-9 <= v_used <= hi2 + 1e-9):
                 v5_hit = True
                 add(name, "V5", "warn",
-                    f"两相流按 {v_used:g} m/s(单相口径)选型,超出两相 {lo2:g}–{hi2:g} m/s")
+                    f"两相流按 {v_used:g} m/s(单相口径)选型,超出两相 {lo2:g}–{hi2:g} m/s",
+                    "velocity")
 
         # V2 实际流速超出推荐区间(两相已由 V5 覆盖,不重复报)
         id_mm = (od - 2.0 * wall) if (od and wall) else None
@@ -339,45 +346,49 @@ def validate(rows: Iterable[Mapping[str, Any]],
         if v_act is not None and not v5_hit and not (lo - 1e-9 <= v_act <= hi + 1e-9):
             add(name, "V2", "warn",
                 f"实际流速 {v_act:.2f} m/s 超出 {phase} 推荐区间 {lo:g}–{hi:g} m/s"
-                + ("(泵入口)" if r.get("pump_inlet") else ""))
+                + ("(泵入口)" if r.get("pump_inlet") else ""), "velocity")
 
         # V3 计算壁厚 + 附加量 > 所选标准壁厚
         need = r.get("t_required_mm")
         if need is not None and wall is not None and need > wall + 1e-9:
             add(name, "V3", "error",
-                f"所需壁厚 {need:.2f} mm 超过所选标准壁厚 {wall:g} mm")
+                f"所需壁厚 {need:.2f} mm 超过所选标准壁厚 {wall:g} mm", "wall_mm")
 
         # V4 等级号的压力代号 < 设计压力
         code = r.get("grade_code") or ""
         if code and r.get("design_pressure_mpa") is not None:
             pn = pipe_data.PN_CODES.get(code[:1])
             if pn is None:
-                add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里")
+                add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里",
+                    "grade_code")
             elif pn < float(r["design_pressure_mpa"]) - 1e-9:
                 add(name, "V4", "error",
                     f"等级号 {code} 的公称压力 {pn:g} MPa 低于设计压力 "
-                    f"{float(r['design_pressure_mpa']):.2f} MPa")
+                    f"{float(r['design_pressure_mpa']):.2f} MPa", "grade_code")
 
         # V5 已在前面先判(与 V2 互斥,避免同一个问题报两次)
 
         # V6 真空流股
         if r.get("vacuum"):
-            add(name, "V6", "warn", "真空流股:按外压 0.1 MPa 另行校核")
+            add(name, "V6", "warn", "真空流股:按外压 0.1 MPa 另行校核",
+                "design_pressure_mpa")
 
         # V7 超出材料使用温度
         dt = r.get("design_temp_c")
         if dt is not None and (dt < low_c or dt > high_c):
             add(name, "V7", "warn",
-                f"设计温度 {dt:g} ℃ 超出材料常规使用区间 {low_c:g}–{high_c:g} ℃")
+                f"设计温度 {dt:g} ℃ 超出材料常规使用区间 {low_c:g}–{high_c:g} ℃",
+                "design_temp_c")
 
         # V8 泵出口流股用了泵入口流速
         if r.get("pump_outlet") and r.get("pump_inlet"):
-            add(name, "V8", "error", "泵出口流股被按泵入口流速选型")
+            add(name, "V8", "error", "泵出口流股被按泵入口流速选型", "velocity")
 
         # V9 高温但没加保温代号
         if dt is not None and dt >= hot_c and not r.get("insulation"):
             add(name, "V9", "warn",
-                f"设计温度 {dt:g} ℃ ≥ {hot_c:g} ℃,等级号却未加保温代号 -H")
+                f"设计温度 {dt:g} ℃ ≥ {hot_c:g} ℃,等级号却未加保温代号 -H",
+                "grade_code")
 
     return {
         "findings": findings,

@@ -1723,6 +1723,8 @@ async function loadCase(id) {
   if (state.page === "flow") {
     state.flow.caseId = null;        // 逼着下次进流程页按新工况重新拉图
     renderFlow();
+  } else if (state.page === "pipes") {
+    renderPipes();                   // 管道页按新工况重算(pipe.js)
   } else if (state.page === "home") {
     renderHome();
   } else if (state.tab !== "compare") {
@@ -1733,7 +1735,7 @@ async function loadCase(id) {
 
 /* ------------------------------------------------------------ 路由与首页 */
 
-const PAGES = ["home", "streams", "blocks", "compare", "flow"];
+const PAGES = ["home", "streams", "blocks", "compare", "flow", "pipes"];
 const PAGE_TITLE = { streams: "流股", blocks: "设备", compare: "对比", flow: "流程" };
 
 /* 地址栏是唯一真相:#/streams、#/blocks/塔名(直接打开某座塔的剖面) */
@@ -1750,9 +1752,11 @@ function setPage(page, { push = true } = {}) {
 
   const isHome = page === "home";
   const isFlow = page === "flow";
+  const isPipes = page === "pipes";       // 管道页自带一套参数面板与渲染(见 pipe.js)
   document.getElementById("pageHome").classList.toggle("hidden", !isHome);
   document.getElementById("pageFlow").classList.toggle("hidden", !isFlow);
-  document.getElementById("pageData").classList.toggle("hidden", isHome || isFlow);
+  document.getElementById("pagePipes").classList.toggle("hidden", !isPipes);
+  document.getElementById("pageData").classList.toggle("hidden", isHome || isFlow || isPipes);
   if (push && location.hash !== `#${page}`) location.hash = page;
 
   if (isHome) {
@@ -1762,6 +1766,10 @@ function setPage(page, { push = true } = {}) {
   }
   if (isFlow) {
     renderFlow();
+    return;
+  }
+  if (isPipes) {
+    renderPipes();     // pipe.js:进页才拉数据,参数改了才重算
     return;
   }
   document.getElementById("pageTitle").textContent = PAGE_TITLE[page] || "";
@@ -1948,6 +1956,8 @@ async function quitApp() {
 
 /* 所有按钮都只绑定一次 —— 即使库里一条工况都没有,也得能点「读取当前工况」 */
 function bindEvents() {
+  initPipePanel();      // 管道页的参数面板与事件(pipe.js)
+
   document.getElementById("caseSelect").addEventListener("change", (e) => {
     loadCase(Number(e.target.value));
   });
