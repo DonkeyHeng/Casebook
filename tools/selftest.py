@@ -981,6 +981,71 @@ def test_units() -> None:
     check("单位缺口:带上原始单位", gaps["units"] == ["furlong"], f"实际 {gaps['units']}")
 
 
+# ---------------------------------------------------------------- 边界夹具
+
+def test_fixtures() -> None:
+    """五类边界夹具:没有塔 / 没有泵 / 未知类型 / 泵缺流股 / NPSHₐ 为负。
+
+    这些分支用真实工况一次都撞不上(现有 4 份模型都有塔有泵、全单相),
+    所以只能造 —— 用假 dict 喂纯函数,或者在副本库上删一条连接。
+    """
+    from pathlib import Path
+
+    from app.api import aipack
+    from app.design import block_family as fam
+    from app.design import pump as pump_rules
+    from app.store import db
+    from tools import repair_cases as repair
+
+    # ① 没有塔:默认家族要落到第一个非空,而不是「塔」显示 0 行
+    check_eq("夹具① 无塔:全泵模型落「泵」", fam.pick_default([{"type": "Pump"}]), "pump")
+    check_eq("夹具① 无塔:换热+泵落「换热」",
+             fam.pick_default([{"type": "Heater"}, {"type": "Pump"}]), "heat")
+
+    # ② 没有泵:导出不该生成 pumps.csv
+    check_eq("夹具② 无泵:has_pumps(空)", aipack.has_pumps([]), False)
+    check_eq("夹具② 无泵:只有换热器", aipack.has_pumps([{"type": "Heater"}]), False)
+    check("夹具② 无泵:有泵才生成", aipack.has_pumps([{"type": "Pump"}]))
+    check_eq("夹具② 无泵:空表只有表头",
+             len(aipack._pumps_csv([]).decode("utf-8-sig").strip().splitlines()), 1)
+
+    # ③ 未知类型:落「其他」,不能把设备丢掉
+    check_eq("夹具③ 未知类型落「其他」", fam.family_of("Welding"), "other")
+    check_eq("夹具③ 未知类型进计数", fam.counts([{"type": "Welding"}]), {"other": 1})
+
+    # ④ 泵缺进出口流股:压力取不到、回填不能炸(副本库上真跑一次)
+    scratch = Path("data/preview/_selftest-fixture.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = db.open_db(str(scratch))
+        cid = db.save_case(conn, {
+            "model": {"path": "x.apw", "name": "x.apw", "read_at": "2026-11-08 00:00:00"},
+            "convergence": {}, "streams": [], "columns": [], "connections": [],
+            "blocks": [{"name": "P1", "type": "Pump", "power_kw": 10.0,
+                        "status": 0, "message": "", "raw": {}, "balance": {}}],
+            "stats": {"stream_count": 0, "block_count": 1, "column_count": 0,
+                      "connection_count": 0, "elapsed_sec": 0},
+            "unit_gaps": {},
+        })
+        case = dict(db.get_case(conn, cid))
+        case["errtxt"] = case.get("errtxt") or ""
+        result = repair.repair_case(conn, case, apply=False)
+        row = dict(db.read_blocks(conn, cid)[0])
+        check("夹具④ 缺流股:回填不抛异常", isinstance(result.get("changed"), list))
+        check_eq("夹具④ 缺流股:p_in 仍为空", row["p_in_bar"], None)
+        check_eq("夹具④ 缺流股:p_out 仍为空", row["p_out_bar"], None)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    # ⑤ p_进口 < p_v:NPSHₐ 必须是负值(说明会汽蚀),不能吞成 None 或 0
+    npsh = pump_rules.npsh_available_m(0.5, 1.5, 950.0)
+    check("夹具⑤ NPSHₐ 为负", npsh is not None and npsh < 0, f"实际 {npsh}")
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -1005,7 +1070,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("设备表泵列 blocks", test_block_columns),
                      ("泵 p_v 存储", test_pump_pv_store),
                      ("泵 p_v 沿用", test_pump_pv_inherit),
-                     ("单位表 units", test_units)):
+                     ("单位表 units", test_units),
+                     ("边界夹具 fixtures", test_fixtures)):
         print(f"\n[{name}]")
         fn()
 
