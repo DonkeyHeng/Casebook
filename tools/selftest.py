@@ -947,6 +947,40 @@ def test_pump_pv_inherit() -> None:
             pass
 
 
+# ---------------------------------------------------------------- 单位表
+
+def test_units() -> None:
+    """units:四种实测出现过的泵字段写法都要认(泵的扬程/密度全靠它)。"""
+    from app.aspen import units as u
+
+    cases = [
+        ("length", 41.54, "meter", 41.54),            # METCBAR
+        ("length", 12.7728155, "m-kgf/kg", 12.7728155),  # MET
+        ("length", 1000.0, "ft-lbf/lbm", 304.8),      # ENG(按定义推的,未实测)
+        ("molar_density", 47.86, "kmol/cum", 47.86),  # METCBAR
+        ("molar_density", 0.027296226, "mol/cc", 27.296226),  # MET
+        ("volume_flow", 465.043291, "l/min", 27.90259746),
+        ("volume_flow", 9.68000453, "cum/hr", 9.68000453),
+        ("pressure", 3.95, "bar", 3.95),
+    ]
+    for quantity, value, unit, want in cases:
+        got = u.convert(quantity, value, unit)
+        check(f"单位:{quantity} {unit}",
+              got is not None and abs(got - want) < 1e-6,
+              f"期望 {want},实际 {got}")
+
+    check_eq("单位:不认识的单位返回 None", u.convert("length", 1.0, "furlong"), None)
+    check_eq("单位:值缺失返回 None", u.convert("length", None, "meter"), None)
+
+    # 泵字段单位认不出来时,unit_gaps 必须报出来(否则泵页会静默变空)
+    fake = [{"name": "P1", "type": "Pump", "head_m": None, "flow_m3h": None,
+             "dp_bar": None, "rho_kgm3": None,
+             "raw": {"HEAD_CAL": {"value": 1.0, "unit": "furlong"}}}]
+    gaps = reader.unit_gaps([], fake)
+    check("单位缺口:报出泵字段", gaps["count"] == 1, f"实际 {gaps}")
+    check("单位缺口:带上原始单位", gaps["units"] == ["furlong"], f"实际 {gaps['units']}")
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -970,7 +1004,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("泵口径 design.pump", test_pump),
                      ("设备表泵列 blocks", test_block_columns),
                      ("泵 p_v 存储", test_pump_pv_store),
-                     ("泵 p_v 沿用", test_pump_pv_inherit)):
+                     ("泵 p_v 沿用", test_pump_pv_inherit),
+                     ("单位表 units", test_units)):
         print(f"\n[{name}]")
         fn()
 

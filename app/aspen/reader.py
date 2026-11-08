@@ -54,6 +54,15 @@ BLOCK_DUTY_FIELDS = ("QCALC", "QNET", "HX_DUTY")      # cal/sec
 BLOCK_POWER_FIELDS = ("BRAKE_POWER", "ELEC_POWER")     # kW
 BLOCK_AREA_FIELDS = ("HX_AREAC",)                      # sqm
 
+# 泵块上的标量结果(输出键, Aspen 字段, 量纲)。单位认不出来时 head_m / rho_kgm3
+# 会是 None —— 所以 unit_gaps 要拿这张表一起查,别让它静默变空。
+PUMP_BLOCK_FIELDS = (
+    ("head_m", "HEAD_CAL", "length"),
+    ("flow_m3h", "VFLOW", "volume_flow"),
+    ("dp_bar", "IN_PRES", "pressure"),
+    ("rho_kgm3", "RHO_LIQ", "molar_density"),
+)
+
 RUN_STATUS_FIELDS = (
     "RSTAT",
     "CVSTAT",
@@ -665,6 +674,17 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
                     gaps.append({"scope": "block", "name": b["name"],
                                  "field": field, "unit": item.get("unit") or ""})
                     break
+
+        # 泵的标量字段同样要统计:单位集换了写法(meter → m-kgf/kg、kmol/cum → mol/cc)
+        # 时,这里会把认不出的单位报出来,而不是让泵页静默变成一片「—」。
+        if str(b.get("type") or "").strip().lower() == "pump":
+            for key, field, _quantity in PUMP_BLOCK_FIELDS:
+                if b.get(key) is not None:
+                    continue
+                item = raw.get(field)
+                if item and item.get("value") is not None:
+                    gaps.append({"scope": "block", "name": b["name"],
+                                 "field": field, "unit": item.get("unit") or ""})
 
     return {
         "count": len(gaps),

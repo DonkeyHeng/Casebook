@@ -13,9 +13,11 @@
     python -m tools.repair_cases --apply    # 真的写库
 
 只改这些:判定(`severity` / `converged` / `reasons_json`)、单位缺口
-(`unit_gaps` / `unit_gaps_json`)、能换算的数值回填,以及**焓平衡自检**
-(`blocks` 的 `dh_kw` / `ref_kw` / `ref_kind` / `balance_state` / `balance_note`)。
-**不碰**流股名、设备名、剖面、组成。
+(`unit_gaps` / `unit_gaps_json`)、能换算的数值回填、**焓平衡自检**
+(`blocks` 的 `dh_kw` / `ref_kw` / `ref_kind` / `balance_state` / `balance_note`),
+以及**泵参数**(`head_m` / `flow_m3h` / `pump_eff` / `p_in_bar` / `p_out_bar` /
+`dp_bar` / `rho_kgm3` / `pump_vap_frac` / `motor_kw`)。
+**不碰**流股名、设备名、剖面、组成,也不动用户手填的 `pv_bar`。
 
 焓平衡只在有 `connections` 的工况上重算(2026-11-01 之前读的工况没有拓扑数据)。
 """
@@ -25,6 +27,7 @@ import argparse
 import json
 
 from app.aspen import balance, reader, units
+from app.design import pump as pump_rules
 from app.store import db
 
 # 流股列 ← raw_json 里的字段 + 量纲
@@ -82,6 +85,51 @@ def repair_case(conn, case, apply: bool) -> dict:
                         filled_blocks += 1
                     break
 
+    # ---- 1.5) 泵参数:按最新单位表从 raw_json 重算
+    # 2026-11-08:MET 单位集的 m-kgf/kg / mol/cc 就是这么补出来的 ——
+    # 补完单位表,老工况一条命令就能恢复,不用回 Aspen 重读。
+    connections = [dict(r) for r in db.read_connections(conn, cid)]
+    by_stream = {s["name"]: s for s in streams}
+    inflow, outflow = {}, {}
+    for row in connections:
+        bucket = inflow if row.get("direction") == "in" else outflow
+        bucket.setdefault(row.get("block"), []).append(row.get("stream"))
+
+    pumps_filled = 0
+    for b in blocks:
+        if str(b.get("type") or "").strip().lower() != "pump":
+            continue
+        raw = b["raw"]
+
+        def conv(field: str, quantity: str):
+            item = raw.get(field)
+            if not item or item.get("value") is None:
+                return None
+            return units.convert(quantity, item["value"], item.get("unit") or "")
+
+        mw = (raw.get("MW_LIQ") or {}).get("value")
+        values = {
+            "head_m": conv("HEAD_CAL", "length"),
+            "flow_m3h": conv("VFLOW", "volume_flow"),
+            "dp_bar": conv("IN_PRES", "pressure"),
+            "rho_kgm3": pump_rules.mass_density_kgm3(
+                conv("RHO_LIQ", "molar_density"), mw),
+        }
+        eff = (raw.get("CEFF") or {}).get("value")
+        values["pump_eff"] = eff
+        # 进口/出口压力取自流股;没有拓扑的工况只重算泵块自己的字段
+        if connections:
+            inlet = next((by_stream[s] for s in inflow.get(b["name"], []) if s in by_stream), None)
+            outlet = next((by_stream[s] for s in outflow.get(b["name"], []) if s in by_stream), None)
+            values["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
+            values["p_out_bar"] = outlet.get("pressure_bar") if outlet else None
+            values["pump_vap_frac"] = inlet.get("vap_frac") if inlet else None
+        values["motor_kw"] = pump_rules.pick_motor(b.get("power_kw"))[0]
+        for key, new in values.items():
+            if b.get(key) != new:
+                b[key] = new
+                pumps_filled += 1
+
     # ---- 2) 重算判定
     codes = _json(case["status_json"], {})
     tears = _json(case["tear_json"], [])
@@ -95,7 +143,6 @@ def repair_case(conn, case, apply: bool) -> dict:
     gaps = reader.unit_gaps(streams, blocks)
 
     # ---- 4) 重算焓平衡(只对存了连接的工况;老工况没有拓扑,跳过不动)
-    connections = [dict(r) for r in db.read_connections(conn, cid)]
     balance_changed = 0
     if connections:
         results = balance.compute(streams, blocks, connections)
@@ -115,6 +162,8 @@ def repair_case(conn, case, apply: bool) -> dict:
         changed.append(f"单位缺口 {case['unit_gaps'] or 0} → {gaps['count']}")
     if filled_streams or filled_blocks:
         changed.append(f"回填 {filled_streams} 个流股字段 / {filled_blocks} 个设备字段")
+    if pumps_filled:
+        changed.append(f"泵参数 {pumps_filled} 个字段重算")
     if balance_changed:
         changed.append(f"焓平衡 {balance_changed} 台设备结论有变")
 
@@ -128,7 +177,9 @@ def repair_case(conn, case, apply: bool) -> dict:
         )
         conn.executemany(
             "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?,"
-            " dh_kw=?, ref_kw=?, ref_kind=?, balance_state=?, balance_note=?"
+            " dh_kw=?, ref_kw=?, ref_kind=?, balance_state=?, balance_note=?,"
+            " head_m=?, flow_m3h=?, pump_eff=?, p_in_bar=?, p_out_bar=?, dp_bar=?,"
+            " rho_kgm3=?, pump_vap_frac=?, motor_kw=?"
             " WHERE case_id=? AND name=?",
             [(b["duty_kw"], b["power_kw"], b["area_m2"],
               (b.get("balance") or {}).get("dh_kw"),
@@ -136,6 +187,9 @@ def repair_case(conn, case, apply: bool) -> dict:
               (b.get("balance") or {}).get("ref_kind"),
               (b.get("balance") or {}).get("balance_state"),
               (b.get("balance") or {}).get("balance_note"),
+              b.get("head_m"), b.get("flow_m3h"), b.get("pump_eff"),
+              b.get("p_in_bar"), b.get("p_out_bar"), b.get("dp_bar"),
+              b.get("rho_kgm3"), b.get("pump_vap_frac"), b.get("motor_kw"),
               cid, b["name"]) for b in blocks],
         )
         conn.execute(
