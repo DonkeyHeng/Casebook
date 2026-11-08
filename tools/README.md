@@ -7,6 +7,7 @@
 | `probe_topology.bat` | **双击入口**:只读探测拓扑 / 焓值 / 公用工程,产出 `data/probe_topology.txt` | ✅ 模型已打开且跑过 | 写 `data/probe_topology.txt` |
 | `probe_topology.py` | 上面 bat 的本体,支持 `--model` / `--out` | ✅ | 同上 |
 | `probe_aspen.py` | COM 诊断:注册表、附着、字段全名(`--attach --deep`) | ✅ | 写 `--out` 指定目录 |
+| `probe_pump.py` | 泵字段探测:泵块 Output 全节点、进出口流股的蒸气压/密度、Input 里的曲线 | ✅ | 只打印(`--save` 写 `probe_out/`) |
 | `bench.py` | 性能基准:COM 调用成本与规模曲线 | ✅ | 只打印 |
 | `column_diag.py` | 塔逐板剖面 + 异常标记(只标记,不给修复建议) | ✅ | 只打印 |
 | `fill_composition.py` | 给已存工况**批量补**流股组成(网页只能一条条点) | ✅ 且必须是同一运行 | 写库 |
@@ -22,6 +23,7 @@
 
 - 「读取当前工况」报「看不到 Aspen」→ `probe_aspen.py`,先看注册表与附着
 - 怀疑字段名 / 连接关系读错 → `probe_topology.bat`(双击)
+- 要确认「扬程 / 汽蚀余量 / 蒸气压 能不能直接从 Aspen 读」→ `probe_pump.py --attach --save`
 - 改了判定 / 单位 / 焓平衡口径 → 先跑 `selftest.py`;过了再 `repair_cases.py --apply`
 - 读完工况、想给整份工况补组成(导出样本 / 离线分析)→ `fill_composition.py --case N`,要趁 Aspen 还开着
 - 读得太慢 → `bench.py`
