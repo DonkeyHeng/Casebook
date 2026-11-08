@@ -905,7 +905,7 @@ function openPump(block) {
     kv("进口压力 bar", fmt(row.p_in_bar, 3), "进口流股"),
     kv("出口压力 bar", fmt(row.p_out_bar, 3), "出口流股"),
     kv("压升 bar", fmt(row.dp_bar, 3), "Aspen", "IN_PRES"),
-    kv("密度 kg/m³", fmt(row.rho_kgm3, 1), "计算", "RHO_LIQ × MW_LIQ"),
+    kv("密度 kg/m³", fmt(row.rho_kgm3, 1), "计算", "进口流股 m/V;两相或缺流量时用 RHO_LIQ×MW_LIQ"),
     kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
     kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), "手填"),
     kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),

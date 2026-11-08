@@ -108,22 +108,32 @@ def repair_case(conn, case, apply: bool) -> dict:
             return units.convert(quantity, item["value"], item.get("unit") or "")
 
         mw = (raw.get("MW_LIQ") or {}).get("value")
+        # 进口/出口压力取自流股;没有拓扑的工况只重算泵块自己的字段
+        inlet = outlet = None
+        if connections:
+            inlet = next((by_stream[s] for s in inflow.get(b["name"], []) if s in by_stream), None)
+            outlet = next((by_stream[s] for s in outflow.get(b["name"], []) if s in by_stream), None)
+
         values = {
             "head_m": conv("HEAD_CAL", "length"),
             "flow_m3h": conv("VFLOW", "volume_flow"),
             "dp_bar": conv("IN_PRES", "pressure"),
-            "rho_kgm3": pump_rules.mass_density_kgm3(
-                conv("RHO_LIQ", "molar_density"), mw),
         }
-        eff = (raw.get("CEFF") or {}).get("value")
-        values["pump_eff"] = eff
-        # 进口/出口压力取自流股;没有拓扑的工况只重算泵块自己的字段
+        # 密度口径与 reader 一致:单相优先用进口流股的 m/V,拿不到才退回泵块 RHO_LIQ×MW
+        vap = inlet.get("vap_frac") if inlet else None
+        rho_from_flow = None
+        if inlet and (vap is None or float(vap) <= 0.001):
+            mass, vol = inlet.get("mass_flow_kgh"), inlet.get("vol_flow_m3h")
+            if mass and vol:
+                rho_from_flow = float(mass) / float(vol)
+        values["rho_kgm3"] = (rho_from_flow if rho_from_flow is not None
+                              else pump_rules.mass_density_kgm3(
+                                  conv("RHO_LIQ", "molar_density"), mw))
+        values["pump_eff"] = (raw.get("CEFF") or {}).get("value")
         if connections:
-            inlet = next((by_stream[s] for s in inflow.get(b["name"], []) if s in by_stream), None)
-            outlet = next((by_stream[s] for s in outflow.get(b["name"], []) if s in by_stream), None)
             values["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
             values["p_out_bar"] = outlet.get("pressure_bar") if outlet else None
-            values["pump_vap_frac"] = inlet.get("vap_frac") if inlet else None
+            values["pump_vap_frac"] = vap
         values["motor_kw"] = pump_rules.pick_motor(b.get("power_kw"))[0]
         for key, new in values.items():
             if b.get(key) != new:

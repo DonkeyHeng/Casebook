@@ -752,8 +752,19 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
         block["dp_bar"] = dp
         block["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
         block["p_out_bar"] = outlet.get("pressure_bar") if outlet else None
-        block["rho_kgm3"] = pump_rules.mass_density_kgm3(rho_molar, mw)
+        # 密度口径(2026-11-08 定):**优先用进口流股的质量流量÷体积流量** ——
+        # 单相时它就是实测密度,与流量守恒自洽。实测有一台泵的 RHO_LIQ×MW 与它差 24%,
+        # 说明泵块那个值不是按进口条件给的。两相时 m/V 是混合密度,不能用,退回泵块值。
         block["pump_vap_frac"] = inlet.get("vap_frac") if inlet else None
+        rho_from_flow = None
+        vap = block["pump_vap_frac"]
+        if inlet and (vap is None or float(vap) <= 0.001):
+            mass = inlet.get("mass_flow_kgh")
+            vol = inlet.get("vol_flow_m3h")
+            if mass and vol:
+                rho_from_flow = float(mass) / float(vol)
+        block["rho_kgm3"] = (rho_from_flow if rho_from_flow is not None
+                             else pump_rules.mass_density_kgm3(rho_molar, mw))
         block["motor_kw"], _note = pump_rules.pick_motor(block.get("power_kw"))
 
 
