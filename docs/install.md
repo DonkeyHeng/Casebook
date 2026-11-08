@@ -54,7 +54,7 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.2 源码压缩包(有 Python 的同学)
 
 1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
-2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.2.1.zip`(约 0.65 MB)
+2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.1.zip`(约 0.65 MB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
    - 解压后是一个 `Casebook` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
      `安装说明.txt`、`app`
