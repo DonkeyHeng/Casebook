@@ -673,6 +673,70 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
     }
 
 
+# ---------------------------------------------------------------- 泵参数
+
+def read_pump_fields(session, streams, blocks, connections) -> None:
+    """给 Pump 块补 扬程/流量/效率/进口压力/密度/建议电机 —— **就地写进 blocks**。
+
+    实测(2026-11-08,V12.1,见 docs/aspen-field-map.md §13):
+      `HEAD_CAL`(meter) / `VFLOW`(cum/hr) / `CEFF` / `IN_PRES`(bar) /
+      `RHO_LIQ`(kmol/cum) + `MW_LIQ`(kg/kmol)
+
+    读不到的一律留 None,不拿计算值顶替 —— 页面显示「—」比编一个数好。
+    只对 Pump 块多花这几次 COM 调用,不扩大全表读取成本。
+    """
+    from app.design import pump as pump_rules
+
+    inflow: dict[str, list[str]] = {}
+    outflow: dict[str, list[str]] = {}
+    for row in connections or []:
+        bucket = inflow if row.get("direction") == "in" else outflow
+        bucket.setdefault(row.get("block"), []).append(row.get("stream"))
+
+    by_name = {s["name"]: s for s in streams}
+    for block in blocks or []:
+        if str(block.get("type") or "").strip().lower() != "pump":
+            continue
+        base = rf"\Data\Blocks\{block['name']}\Output"
+        raw = block.setdefault("raw", {})
+
+        def grab(field: str, quantity: str):
+            """返回 (换算值, 原始值, 单位);原始值单独留一份进 raw,便于追溯。"""
+            value, unit = fetch(session, f"{base}\\{field}")
+            if value is None:
+                return None, None, unit
+            raw[field] = {"value": value, "unit": unit}
+            if quantity in ("fraction", "number"):
+                try:
+                    return float(value), value, unit
+                except (TypeError, ValueError):
+                    return None, value, unit
+            return units.convert(quantity, value, unit), value, unit
+
+        head, _h_raw, _h_unit = grab("HEAD_CAL", "length")
+        flow, _f_raw, _f_unit = grab("VFLOW", "volume_flow")
+        # ⚠️ 这个节点叫 `IN_PRES`,但实测是**压升 ΔP**(bar),不是进口压力:
+        #    dp ÷ (ρ·g) 与 `HEAD_CAL` 逐台吻合到 0.00 m(2026-11-08,21 台全对)。
+        # 真正的进口压力在进口流股上,见下面的 p_in_bar。
+        dp, _dp_raw, _dp_unit = grab("IN_PRES", "pressure")
+        eff, _e_raw, _e_unit = grab("CEFF", "number")
+        rho_molar, _rho_raw, _rho_unit = grab("RHO_LIQ", "molar_density")
+        mw, _mw_raw, _mw_unit = grab("MW_LIQ", "number")
+
+        inlet = next((by_name[s] for s in inflow.get(block["name"], []) if s in by_name), None)
+        outlet = next((by_name[s] for s in outflow.get(block["name"], []) if s in by_name), None)
+
+        block["head_m"] = head
+        block["flow_m3h"] = flow
+        block["pump_eff"] = eff
+        block["dp_bar"] = dp
+        block["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
+        block["p_out_bar"] = outlet.get("pressure_bar") if outlet else None
+        block["rho_kgm3"] = pump_rules.mass_density_kgm3(rho_molar, mw)
+        block["pump_vap_frac"] = inlet.get("vap_frac") if inlet else None
+        block["motor_kw"], _note = pump_rules.pick_motor(block.get("power_kw"))
+
+
 # ---------------------------------------------------------------- 总入口
 
 def read_case(session, include_composition: bool = False,
@@ -701,6 +765,8 @@ def read_case(session, include_composition: bool = False,
     mark_empty(convergence, value_coverage(streams), convergence.get("run", {}).get("RUNID"))
     phase("读取连接关系")
     connections = read_connections(session, streams, blocks)
+    phase("读取泵参数")
+    read_pump_fields(session, streams, blocks, connections)
     phase("焓平衡自检")
     results = balance_rules.compute(streams, blocks, connections)
     for block in blocks:

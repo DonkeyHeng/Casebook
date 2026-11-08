@@ -780,6 +780,173 @@ def test_install_sample() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------- 设备家族
+
+def test_block_family() -> None:
+    """block_family:把几十种 Aspen 类型收敛成 7 个页签,未知类型不能丢。"""
+    from app.design import block_family as fam
+
+    check_eq("家族:RadFrac → 塔", fam.family_of("RadFrac"), "column")
+    check_eq("家族:Pump → 泵(独立一族)", fam.family_of("Pump"), "pump")
+    check_eq("家族:Turbine → 流体输送", fam.family_of("Turbine"), "move")
+    check_eq("家族:未知类型 → 其他", fam.family_of("Welding"), "other")
+    check_eq("家族:空类型 → 其他", fam.family_of(None), "other")
+    check_eq("家族:大小写不敏感", fam.family_of("radfrac"), "column")
+
+    blocks = [{"type": "Pump"}, {"type": "Pump"}, {"type": "RadFrac"}]
+    check_eq("默认家族:有塔落塔", fam.pick_default(blocks), "column")
+    check_eq("默认家族:无塔落第一个非空",
+             fam.pick_default([{"type": "Pump"}, {"type": "Heater"}]), "heat")
+    check_eq("默认家族:空清单回落塔", fam.pick_default([]), "column")
+    check_eq("家族计数", fam.counts(blocks), {"pump": 2, "column": 1})
+    check_eq("家族表顺序",
+             [f["key"] for f in fam.describe()],
+             ["column", "heat", "flash", "react", "pump", "move", "mix", "other"])
+
+
+# ---------------------------------------------------------------- 泵
+
+def test_pump() -> None:
+    """design.pump:密度换算、扬程、NPSHₐ、电机档位。口径见 docs/aspen-field-map.md §13。"""
+    from app.design import pump
+
+    check_eq("泵:摩尔密度 × 分子量 → 质量密度",
+             round(pump.mass_density_kgm3(47.86, 19.79), 1), 947.1)
+    check_eq("泵:缺分子量时密度为 None", pump.mass_density_kgm3(47.86, None), None)
+    check_eq("泵:缺摩尔密度时密度为 None", pump.mass_density_kgm3(None, 19.79), None)
+
+    head = pump.head_from_dp(1.785, 2.10, 947.0)
+    check("泵:压差反算扬程 ≈ 3.39 m", head is not None and abs(head - 3.39) < 0.02,
+          f"实际 {head}")
+    check("泵:反向工况扬程为负", pump.head_from_dp(2.0, 1.0, 900.0) < 0)
+    check_eq("泵:缺密度时扬程为 None", pump.head_from_dp(1.0, 2.0, None), None)
+
+    npsh = pump.npsh_available_m(0.5, 0.2, 950.0)
+    check("泵:NPSHₐ ≈ 3.22 m", npsh is not None and abs(npsh - 3.22) < 0.02, f"实际 {npsh}")
+    check_eq("泵:缺 p_v 时 NPSHₐ 为 None", pump.npsh_available_m(0.5, None, 950.0), None)
+
+    kw, note = pump.pick_motor(131.466)
+    check_eq("泵:131.47 kW 轴功率 → 160 kW 档", kw, 160.0)
+    check("泵:推导说明里带档位数字", "160" in note, note)
+    check_eq("泵:零功率不选电机", pump.pick_motor(0.0)[0], None)
+    check_eq("泵:负功率(回收功)不选电机", pump.pick_motor(-3.4)[0], None)
+    check_eq("泵:缺轴功率", pump.pick_motor(None)[0], None)
+    check("泵:超出档位表给出说明",
+          pump.pick_motor(1000.0)[0] is None and "超出" in pump.pick_motor(1000.0)[1])
+
+
+def test_block_columns() -> None:
+    """blocks 表:新库建表必须带第二期泵列(老库补列在同一条 _BLOCK_ADDED_COLUMNS 上)。"""
+    from pathlib import Path
+
+    from app.store import db
+
+    need = {"head_m", "flow_m3h", "pump_eff", "p_in_bar", "p_out_bar",
+            "rho_kgm3", "pump_vap_frac", "motor_kw"}
+    # 不用 TemporaryDirectory:这台机器上沙箱化后的系统临时目录 chmod 会被拒,
+    # 清理阶段会抛 PermissionError。库文件放项目内的 preview 目录(gitignore 覆盖)。
+    scratch = Path("data/preview/_selftest-block-columns.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = db.open_db(str(scratch))
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(blocks)")}
+        conn.close()
+    finally:
+        # Windows 上库文件句柄偶尔还没释放,删不掉不影响结论(目录已 gitignore)
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
+    check("设备表:新库带泵列", need <= cols, f"缺 {sorted(need - cols)}")
+    added = {name for name, _ddl in db._BLOCK_ADDED_COLUMNS}
+    check("设备表:老库补列清单覆盖泵列", need <= added, f"缺 {sorted(need - added)}")
+
+
+def test_pump_pv_store() -> None:
+    """pv_bar:逐台存、读得回、清得掉。口径是"只认用户手填",程序不估算。"""
+    from pathlib import Path
+
+    from app.store import db
+
+    scratch = Path("data/preview/_selftest-pv.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = db.open_db(str(scratch))
+        case = {
+            "model": {"path": "x.apw", "name": "x.apw", "read_at": "2026-11-08 00:00:00"},
+            "convergence": {}, "streams": [], "columns": [], "connections": [],
+            "blocks": [{"name": "P1", "type": "Pump", "power_kw": 131.466,
+                        "head_m": 41.5, "flow_m3h": 8.5, "pump_eff": 0.4,
+                        "p_in_bar": 1.8, "p_out_bar": 2.1, "rho_kgm3": 947.0,
+                        "pump_vap_frac": 0.0, "motor_kw": 160.0,
+                        "status": 0, "message": "", "raw": {}, "balance": {}}],
+            "stats": {"stream_count": 0, "block_count": 1, "column_count": 0,
+                      "connection_count": 0, "elapsed_sec": 0},
+            "unit_gaps": {},
+        }
+        cid = db.save_case(conn, case)
+        check_eq("pv:初始为空", dict(db.read_blocks(conn, cid)[0])["pv_bar"], None)
+        check("pv:写入返回 True", db.set_pump_pv(conn, cid, "P1", 3.2) is True)
+        check_eq("pv:读回 3.2", dict(db.read_blocks(conn, cid)[0])["pv_bar"], 3.2)
+        check_eq("pv:设备名写错返回 False", db.set_pump_pv(conn, cid, "NOPE", 1.0), False)
+        db.set_pump_pv(conn, cid, "P1", None)
+        check_eq("pv:可以清空", dict(db.read_blocks(conn, cid)[0])["pv_bar"], None)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def test_pump_pv_inherit() -> None:
+    """pv_bar 沿用:只填同模型更早工况的空格子,不覆盖手填值,不跨模型搬。"""
+    from pathlib import Path
+
+    from app.store import db
+
+    scratch = Path("data/preview/_selftest-pv-inherit.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = db.open_db(str(scratch))
+
+        def make(model, names):
+            case = {
+                "model": {"path": model, "name": model, "read_at": "2026-11-08 00:00:00"},
+                "convergence": {}, "streams": [], "columns": [], "connections": [],
+                "blocks": [{"name": n, "type": "Pump", "status": 0, "message": "",
+                            "raw": {}, "balance": {}} for n in names],
+                "stats": {"stream_count": 0, "block_count": len(names), "column_count": 0,
+                          "connection_count": 0, "elapsed_sec": 0},
+                "unit_gaps": {},
+            }
+            return db.save_case(conn, case)
+
+        old = make("m.apw", ["P1", "P2"])
+        db.set_pump_pv(conn, old, "P1", 3.2)
+        db.set_pump_pv(conn, old, "P2", 1.0)
+
+        new = make("m.apw", ["P1", "P2", "P3"])
+        db.set_pump_pv(conn, new, "P2", 9.9)          # 手填过,不能被覆盖
+        got = db.inherit_pump_pv(conn, new)
+        check_eq("p_v 沿用:来源工况", got["source_case_id"], old)
+        check_eq("p_v 沿用:拷贝 1 台(P1)", got["copied"], 1)
+        check_eq("p_v 沿用:跳过 1 台(目标已手填)", got["skipped"], 1)
+        rows = {r["name"]: r["pv_bar"] for r in db.read_blocks(conn, new)}
+        check_eq("p_v 沿用:P1 拿到 3.2", rows["P1"], 3.2)
+        check_eq("p_v 沿用:P2 保持手填 9.9", rows["P2"], 9.9)
+        check_eq("p_v 沿用:P3 仍为空", rows["P3"], None)
+
+        other = make("other.apw", ["P1"])
+        check_eq("p_v 沿用:不同模型不搬", db.inherit_pump_pv(conn, other)["source_case_id"], None)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -798,7 +965,12 @@ def main(argv: list[str] | None = None) -> int:
                      ("标准表补录说明 setup_guide()", test_pipe_setup),
                      ("标准表导入 import_standards()", test_std_import),
                      ("管道等级表 piping-class", test_piping_class),
-                     ("内置示例库 install_sample()", test_install_sample)):
+                     ("内置示例库 install_sample()", test_install_sample),
+                     ("设备家族 block_family", test_block_family),
+                     ("泵口径 design.pump", test_pump),
+                     ("设备表泵列 blocks", test_block_columns),
+                     ("泵 p_v 存储", test_pump_pv_store),
+                     ("泵 p_v 沿用", test_pump_pv_inherit)):
         print(f"\n[{name}]")
         fn()
 

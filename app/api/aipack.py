@@ -59,7 +59,7 @@ UNITS = {
     "vap_frac": "无量纲 0–1",
 }
 
-PACK_VERSION = 1
+PACK_VERSION = 2   # 2:新增 pumps.csv(泵参数);读包的脚本按 pack_version 判文件是否存在
 
 
 # ---------------------------------------------------------------- 小工具
@@ -290,6 +290,53 @@ def _composition_csv(rows) -> bytes:
     )
 
 
+def _pump_blocks(blocks) -> list:
+    """只挑 Pump 块。类型名大小写不保证,统一转小写比。"""
+    return [b for b in blocks if str(b["type"] or "").strip().lower() == "pump"]
+
+
+def has_pumps(blocks) -> bool:
+    return bool(_pump_blocks(blocks))
+
+
+PUMP_HEADERS = ["设备", "状态", "流量m³/h", "扬程m", "效率%", "轴功率kW", "建议电机kW",
+                "进口压力bar", "出口压力bar", "压升bar", "密度kg/m³", "进口汽化率",
+                "p_v bar", "NPSHa m", "提示原文"]
+
+
+def _pumps_csv(pumps) -> bytes:
+    """泵参数(只有 Pump 块)。
+
+    两个值必须标清楚是**算的**,不能让读包的 AI 当成 Aspen 实测:
+      * 建议电机kW = 轴功率 ÷ 0.95 × 1.10 后取标准档位;
+      * NPSHa m  = (进口压力 − p_v)×10⁵ ÷ (ρ·g),**只在有 p_v 时才有值**。
+    空 = 没算,不是"不会汽蚀"。
+    """
+    from app.design import pump as pump_rules
+
+    rows = []
+    for b in pumps:
+        npsh = pump_rules.npsh_available_m(b["p_in_bar"], b["pv_bar"], b["rho_kgm3"])
+        rows.append([
+            b["name"],
+            STATUS_TEXT.get(b["status"], ""),
+            _num(b["flow_m3h"]),
+            _num(b["head_m"]),
+            _num(None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1)),
+            _num(b["power_kw"]),
+            _num(b["motor_kw"]),
+            _num(b["p_in_bar"]),
+            _num(b["p_out_bar"]),
+            _num(b["dp_bar"]),
+            _num(b["rho_kgm3"]),
+            _num(b["pump_vap_frac"]),
+            _num(b["pv_bar"]),
+            _num(npsh),
+            b["message"] or "",
+        ])
+    return _csv_bytes(PUMP_HEADERS, rows)
+
+
 def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
                composition, connections, has_pipe: bool = False) -> bytes:
     files = {
@@ -301,6 +348,8 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
     }
     if columns:
         files["column_profiles.csv"] = "塔逐板剖面"
+    if has_pumps(blocks):
+        files["pumps.csv"] = "泵参数(流量/扬程/效率/电机/p_v/NPSHa;标注哪几个是算的)"
     if connections:
         files["connections.csv"] = "设备 ↔ 流股连接关系(拓扑)"
     if composition["rows"]:
@@ -521,6 +570,26 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("> 流股焓用的是 `HMX_FLOW`(已经是 m·h,单位 MW)。Aspen 焓有任意参考态,")
     w("> 绝对值不能跨设备相加;`ΔH = Σ出 − Σ入` 才是可比的量。")
     w("")
+    if has_pumps(blocks):
+        w("### 4.2.2 `pumps.csv` —— 泵参数")
+        w("")
+        w("只有 `Pump` 块有这张表。**哪几列是算的,表里写清楚了**:")
+        w("")
+        w("| 列 | 含义 |")
+        w("| --- | --- |")
+        w("| 设备 / 状态 | 模块名与自身状态(`0`=正常、`1`=错误、`2`=告警) |")
+        w("| 流量m³/h | 泵块 `VFLOW`,Aspen 原值 |")
+        w("| 扬程m | 泵块 `HEAD_CAL`,Aspen 原值;**反向工况为负** |")
+        w("| 效率% | 泵块 `CEFF` × 100 |")
+        w("| 轴功率kW | `BRAKE_POWER`,Aspen 原值(反向工况为负) |")
+        w("| 建议电机kW | **算的**:轴功率 ÷ 0.95 × 1.10 后向上取标准档位;功率 ≤ 0 时留空 |")
+        w("| 进口压力bar / 出口压力bar | 取自泵的**进口 / 出口流股**,不是泵块的 `IN_PRES` |")
+        w("| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |")
+        w("| 密度kg/m³ | `RHO_LIQ`(摩尔密度)× `MW_LIQ` |")
+        w("| 进口汽化率 | 进口流股的汽化率;> 0 视为两相,不给 NPSHa |")
+        w("| p_v bar | 饱和蒸气压,**用户逐台手填**,程序不估算 |")
+        w("| NPSHa m | **算的**:`(进口压力 − p_v)×10⁵ ÷ (ρ·g)`。**空 = 没算,不等于「不会汽蚀」** |")
+        w("")
     w("### 4.3 `column_profiles.csv` —— 塔逐板剖面")
     w("")
     w("每行是一块理论板:`级` 从 1 开始,**级 1 是塔顶**。")
@@ -735,6 +804,9 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     ]
     if connections:
         files.append(("connections.csv", _connections_csv(connections)))
+    pumps = _pump_blocks(blocks)
+    if pumps:
+        files.append(("pumps.csv", _pumps_csv(pumps)))
     if columns:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
     if comp_rows:

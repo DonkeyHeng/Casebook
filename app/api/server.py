@@ -256,11 +256,73 @@ class Handler(BaseHTTPRequestHandler):
                     payload["case_id"] = cases[0]["id"] if cases else None
                 self._json(payload, 200 if ok else 500)
                 return
+            # /api/cases/{id}/pumps/{设备}/pv —— 逐台保存饱和蒸气压(精度优先,不做估算)
+            if path.startswith("/api/cases/"):
+                seg = [p for p in path.split("/") if p]
+                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "pv":
+                    self._set_pump_pv(seg[2], seg[4])
+                    return
+                # /api/cases/{id}/pumps/inherit-pv —— 从同模型的更早工况沿用 p_v
+                if len(seg) == 5 and seg[3] == "pumps" and seg[4] == "inherit-pv":
+                    self._inherit_pump_pv(seg[2])
+                    return
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
+
+    def _set_pump_pv(self, raw_id: str, block: str) -> None:
+        """保存一台泵的饱和蒸气压(bar);body 里 pv_bar 为 null 表示清空。
+
+        这个值是 NPSHₐ 唯一的输入来源:程序不估、不猜,宁可空着。
+        """
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        body = self._read_json_body()
+        raw = body.get("pv_bar")
+        pv = None
+        if raw not in (None, ""):
+            try:
+                pv = float(raw)
+            except (TypeError, ValueError):
+                self._error("pv_bar 必须是数字")
+                return
+            if not 0.0 <= pv <= 500.0:
+                self._error("pv_bar 超出合理范围(0~500 bar)")
+                return
+        conn = db.open_db(self.db_path)
+        try:
+            if not db.set_pump_pv(conn, case_id, block, pv):
+                self._error(f"没有设备 {block}(工况 {case_id})", 404)
+                return
+        finally:
+            conn.close()
+        self._json({"ok": True, "case_id": case_id, "block": block, "pv_bar": pv})
+
+    def _inherit_pump_pv(self, raw_id: str) -> None:
+        """把同一模型更早工况填过的 p_v 按位号沿用过来(只填空行,不覆盖手填值)。"""
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            result = db.inherit_pump_pv(conn, case_id)
+        finally:
+            conn.close()
+        if result is None:
+            self._error(f"没有 id={case_id} 的工况", 404)
+            return
+        if result["source_case_id"] is None:
+            self._error("没有可沿用的工况:需要同一模型、且更早的工况里填过 p_v", 404)
+            return
+        payload = {"ok": True, "case_id": case_id, **result}
+        self._json(payload)
 
     def do_DELETE(self) -> None:  # noqa: N802
         """DELETE /api/cases/{id} —— 删掉一个工况及其明细(页面上的「删除工况」)。"""
@@ -361,6 +423,19 @@ class Handler(BaseHTTPRequestHandler):
                 "file": "data/config/piping-classes.json",
             })
             return
+        if parts == ["api", "block-families"]:
+            # 设备页的类型页签:类型 → 家族。唯一来源是 app/design/block_family.py
+            from app.design import block_family
+
+            self._json(block_family.describe())
+            return
+        if parts == ["api", "pump-spec"]:
+            # 泵口径常量(重力加速度/电机效率/裕量/档位表/公式说明)。
+            # 前端拿它算 NPSHₐ 和悬浮说明,免得公式在 JS 里再抄一遍抄错。
+            from app.design import pump
+
+            self._json(pump.spec())
+            return
         if parts[:2] != ["api", "cases"]:
             self._error("未知接口", 404)
             return
@@ -405,7 +480,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._json([_row_to_dict(r) for r in db.read_streams(conn, case_id)])
                 return
             if parts[3] == "blocks":
-                self._json([_row_to_dict(r) for r in db.read_blocks(conn, case_id)])
+                from app.design import block_family
+
+                rows = []
+                for row in db.read_blocks(conn, case_id):
+                    item = _row_to_dict(row)
+                    # 家族在 API 层现算,不入库:老工况不用迁移也能分页签
+                    item["family"] = block_family.family_of(item.get("type"))
+                    rows.append(item)
+                self._json(rows)
                 return
             if parts[3] == "connections":
                 self._json([_row_to_dict(r) for r in db.read_connections(conn, case_id)])
@@ -640,6 +723,29 @@ class Handler(BaseHTTPRequestHandler):
             [14, 12, 8, 14, 12, 14, 10, 12, 12, 14, 14, 10, 46, 60],
         )
 
+        # --- 泵参数(只有 Pump 块有值;老工况这些列是空的,不是 0)---
+        pumps = [b for b in blocks if str(b["type"] or "").strip().lower() == "pump"]
+        if pumps:
+            from app.design import pump as pump_rules
+
+            def pump_npsh(row):
+                # 口径与页面一致:p_v 只认用户填的值,程序不估算
+                return pump_rules.npsh_available_m(row["p_in_bar"], row["pv_bar"], row["rho_kgm3"])
+
+            ws = wb.create_sheet("泵")
+            fill_sheet(
+                ws,
+                ["设备", "状态", "流量 m³/h", "扬程 m", "效率 %", "轴功率 kW",
+                 "建议电机 kW", "进口压力 bar", "出口压力 bar", "压升 bar", "密度 kg/m³",
+                 "进口汽化率", "p_v bar", "NPSHₐ m", "提示"],
+                [(b["name"], status_text.get(b["status"], ""), b["flow_m3h"], b["head_m"],
+                  None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1),
+                  b["power_kw"], b["motor_kw"], b["p_in_bar"], b["p_out_bar"], b["dp_bar"],
+                  b["rho_kgm3"], b["pump_vap_frac"], b["pv_bar"], pump_npsh(b),
+                  b["message"]) for b in pumps],
+                [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 12, 10, 12, 50],
+            )
+
         # --- 连接关系 ---
         ws = wb.create_sheet("连接")
         fill_sheet(
@@ -773,9 +879,10 @@ class Handler(BaseHTTPRequestHandler):
 
         fields = ["temperature_c", "pressure_bar", "mass_flow_kgh",
                   "mole_flow_kmolh", "vap_frac", "vol_flow_m3h"]
-        # 设备要比的字段:负荷/功率/级数/顶底温 + ΔH(焓平衡自检);状态与焓平衡按"变没变"处理
+        # 设备要比的字段:负荷/功率/级数/顶底温 + ΔH(焓平衡自检) + 泵的流量/扬程
+        # ⚠️ 前端 app.js 的 BLOCK_COMPARE_FIELDS 必须同步,否则接口加了界面不显示
         block_fields = ["duty_kw", "power_kw", "nstage", "top_temp_c", "bottom_temp_c",
-                        "dh_kw", "ref_kw"]
+                        "dh_kw", "ref_kw", "head_m", "flow_m3h"]
 
         conn = db.open_db(self.db_path)
         try:

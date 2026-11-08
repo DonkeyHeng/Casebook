@@ -357,7 +357,8 @@ tbody tr.row-warn:hover { background: #fff8e6; }
 .impact-chip { text-decoration: none; }
 .impact-chip:hover { filter: brightness(.95); }
 
-td.num, th.num { text-align: right; }
+/* 数值列居中:右对齐会让数字长短不一、贴在右边线上,整张表看起来是斜的 */
+td.num, th.num { text-align: center; }
 td.name { font-weight: 550; }
 
 .badge {
@@ -410,6 +411,63 @@ td.changed { color: var(--accent); font-weight: 600; }
 }
 .segmented button + button { border-left: 1px solid var(--line); }
 .segmented button.active { background: var(--accent); color: #fff; font-weight: 550; }
+
+/* 设备页的类型页签:7 个家族各带台数。窄窗口要能换行,所以不复用 999px 的胶囊圆角 */
+.segmented.family-bar { flex-wrap: wrap; border-radius: 10px; }
+.segmented.family-bar button { padding: 4px 12px; }
+.segmented.family-bar button b { font-weight: 600; opacity: 0.7; margin-left: 3px; }
+
+/* 泵参数条:余量 + 饱和蒸气压。只在「泵」家族出现,改它不改数据 */
+.pump-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  margin: 0 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font-size: 13px;
+}
+.pump-bar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.pump-bar select,
+.pump-bar input {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: #fff;
+}
+.pump-bar input[type="number"] { width: 76px; }
+
+/* 泵页的 p_v 输入格:居中对齐,不改变行高。
+   之前错位的原因是 td 的 padding(2/6)与其它格(7/12)不一致、
+   输入框又是按基线对齐,整行被拉得上下不齐。 */
+.pv-cell { padding: 4px 8px; text-align: center; vertical-align: middle; }
+.pv-input {
+  width: 76px;
+  box-sizing: border-box;
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0;
+  font: inherit;
+  line-height: 1.2;
+  text-align: center;
+  color: inherit;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 3px 6px;
+  background: #fff;
+}
+.pv-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.pv-input.pv-bad { border-color: #dc2626; background: #fef2f2; }
+
+/* 泵参数卡(右侧抽屉):把要抄进中联表单的几个数摆出来 */
+.pump-panel-hint { margin: 0 0 10px; font-size: 12.5px; line-height: 1.7; }
+#pumpTable td.name { white-space: nowrap; }
+#pumpTable td.msg { white-space: normal; font-size: 12.5px; }
 
 /* 对比表比较宽(设备那张有 18 列):设备名吸在左边,横向滚动时不会跟丢 */
 .cmp-name {

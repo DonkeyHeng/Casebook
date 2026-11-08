@@ -62,8 +62,6 @@
         <h2>流程</h2>
         <div class="page-actions">
           <button id="flowFit" class="btn" title="缩放到全部设备(双击画布同效)">适应窗口</button>
-          <button id="flowZoomIn" class="btn" title="放大">＋</button>
-          <button id="flowZoomOut" class="btn" title="缩小">－</button>
           <button id="flowLabels" class="btn" title="在连线上显示流股名">流股名</button>
           <button id="flowExportSvg" class="btn" title="把当前视图导成 SVG(矢量,可以无限放大)">导出 SVG</button>
           <button id="flowExportPng" class="btn" title="把当前视图导成 PNG(2 倍像素,贴报告用)">导出 PNG</button>
@@ -390,6 +388,8 @@
 
       <nav class="toolbar">
         <input id="filter" type="search" placeholder="按名称筛选…" autocomplete="off">
+        <!-- 设备页的类型页签:按钮由 app.js 按 /api/block-families 现填 -->
+        <span id="blockFamilies" class="segmented family-bar hidden" role="tablist" aria-label="设备类型"></span>
         <span id="compareScope" class="segmented hidden">
           <button type="button" data-scope="streams" class="active">流股</button>
           <button type="button" data-scope="blocks">设备</button>
@@ -403,6 +403,28 @@
           <span id="compareSummary" class="muted"></span>
         </span>
       </nav>
+
+      <!-- 泵参数条:只在「泵」家族显示。改这里只影响本页显示,不写库 -->
+      <div id="pumpBar" class="pump-bar hidden">
+        <label>余量
+          <select id="pumpMargin">
+            <option value="1">原样</option>
+            <option value="1.05">×1.05</option>
+            <option value="1.1">×1.10</option>
+            <option value="1.15">×1.15</option>
+            <option value="custom">自定义</option>
+          </select>
+        </label>
+        <label id="pumpMarginCustomWrap" class="hidden">自定义 ×
+          <input id="pumpMarginCustom" type="number" step="0.01" min="1" max="5" value="1.10">
+        </label>
+        <span class="muted">余量只影响显示 · p_v 逐台填</span>
+        <button id="pumpInherit" class="btn" type="button"
+                title="把同一模型、更早工况里填过的 p_v 按位号搬过来;只填空着的格子,不覆盖手填值">沿用上一工况 p_v</button>
+        <button id="pumpZhonglian" class="btn primary" type="button"
+                title="在浏览器里打开中联水泵选型页(不带任何参数,流量/扬程由你自己填)">打开中联选型</button>
+        <span id="pumpInheritMsg" class="muted"></span>
+      </div>
 
       <div class="table-wrap" id="tableWrap">
         <table id="table">
@@ -420,6 +442,17 @@
         <div id="columnCharts" class="charts"></div>
         <div class="table-wrap small">
           <table id="columnTable"><thead></thead><tbody></tbody></table>
+        </div>
+      </section>
+
+      <section id="pumpPanel" class="column-panel hidden">
+        <header class="panel-head">
+          <h3 id="pumpTitle">泵参数</h3>
+          <button id="closePump" class="close" title="关闭">✕</button>
+        </header>
+        <p class="muted pump-panel-hint">中联表单:分类 · 型号 · 流量 · 扬程 · 配套功率</p>
+        <div class="table-wrap small">
+          <table id="pumpTable"><thead></thead><tbody></tbody></table>
         </div>
       </section>
 

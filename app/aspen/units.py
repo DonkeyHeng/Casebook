@@ -21,6 +21,8 @@ TARGET = {
     "enthalpy": "kJ/kg",
     "enthalpy_molar": "kJ/kmol",
     "energy_flow": "kW",
+    "length": "m",
+    "molar_density": "kmol/m3",
 }
 
 # 每个量纲:{单位: (系数, 偏移)}   目标值 = 原值 * 系数 + 偏移
@@ -128,7 +130,6 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "btu/lbmol": (2.3260, 0.0),
         "btu/mol": (2326.0, 0.0),
     },
-    # 能量流(已经是 m·h)→ kW。实测:流股 Output\HMX_FLOW\MIXED 给的是 MW。
     # 这个量可以直接跨设备求和做 ΔH,不用再乘流量。
     "energy_flow": {
         "kw": (1.0, 0.0),
@@ -143,6 +144,27 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "cal/sec": (0.0041868, 0.0),
         "cal/s": (0.0041868, 0.0),
         "btu/hr": (0.0002930711, 0.0),
+    },
+    # 长度 → m。目前只有泵的 HEAD_CAL 用(实测单位串就是 `meter`)。
+    "length": {
+        "m": (1.0, 0.0),
+        "meter": (1.0, 0.0),
+        "metre": (1.0, 0.0),
+        "mm": (0.001, 0.0),
+        "cm": (0.01, 0.0),
+        "km": (1000.0, 0.0),
+        "in": (0.0254, 0.0),
+        "ft": (0.3048, 0.0),
+    },
+    # 摩尔密度 → kmol/m³。⚠️ 泵的 RHO_LIQ 实测给的是 kmol/cum,不是 kg/m³;
+    # 要质量密度还得乘 MW(kg/kmol),见 app/design/pump.py。
+    "molar_density": {
+        "kmol/m3": (1.0, 0.0),
+        "kmol/cum": (1.0, 0.0),
+        "kmol/l": (1000.0, 0.0),
+        "mol/l": (1.0, 0.0),
+        "mol/m3": (0.001, 0.0),
+        "lbmol/ft3": (16.018463, 0.0),
     },
 }
 

@@ -15,6 +15,10 @@ const state = {
     showLabels: false,
   },
   filter: "",
+  family: null,            // 设备页当前家族(column/heat/…),null = 还没挑
+  families: [],            // 家族表(/api/block-families)
+  pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
+  pump: { margin: 1 },  // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
   impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
@@ -28,7 +32,8 @@ const COMPARE_FIELDS = [
   { key: "vap_frac", label: "汽化率", digits: 3 },
 ];
 
-/* 设备对比只放 6 个字段:热负荷/功率/级数/顶底温 + ΔH(焓平衡自检的原始量) */
+/* 设备对比字段。⚠️ 必须与 server.py 的 block_fields 一致:
+   接口加了而这里不加,界面就看不到;接口不加而这里加,值永远是空。 */
 const BLOCK_COMPARE_FIELDS = [
   { key: "duty_kw", label: "热负荷 kW", digits: 2 },
   { key: "power_kw", label: "功率 kW", digits: 2 },
@@ -36,9 +41,62 @@ const BLOCK_COMPARE_FIELDS = [
   { key: "top_temp_c", label: "顶温 ℃", digits: 1 },
   { key: "bottom_temp_c", label: "底温 ℃", digits: 1 },
   { key: "dh_kw", label: "ΔH kW", digits: 2 },
+  { key: "head_m", label: "扬程 m", digits: 2 },
+  { key: "flow_m3h", label: "流量 m³/h", digits: 2 },
 ];
 
 const COLUMN_TYPE = /RadFrac|Absorber/;
+
+/* 设备页按家族出列:同一张表,列随家族变。
+   目的很直接:泵页不该出现"级数""热负荷",塔页也不该出现"功率"。
+   键必须与 app/design/block_family.py 的 FAMILIES 一致。 */
+const BLOCK_COLS = {
+  name:    { key: "name", label: "设备", cls: "name" },
+  type:    { key: "type", label: "类型" },
+  status:  { key: "status", label: "状态", status: true },
+  duty:    { key: "duty_kw", label: "热负荷 kW", num: true, digits: 2 },
+  power:   { key: "power_kw", label: "功率 kW", num: true, digits: 2 },
+  // 焓平衡自检:ΔH = Σ出 − Σ入(流股能量流),参照 = 热负荷 / 轴功率 / 0(绝热)
+  dh:      { key: "dh_kw", label: "ΔH kW", num: true, digits: 2 },
+  ref:     { key: "ref_kw", label: "参照 kW", num: true, digits: 2 },
+  balance: { key: "balance_state", label: "焓平衡", balance: true },
+  area:    { key: "area_m2", label: "面积 m²", num: true, digits: 2 },
+  nstage:  { key: "nstage", label: "级数", num: true, digits: 0 },
+  top:     { key: "top_temp_c", label: "顶温 ℃", num: true, digits: 1 },
+  bottom:  { key: "bottom_temp_c", label: "底温 ℃", num: true, digits: 1 },
+  note:    { key: "balance_note", label: "平衡说明", cls: "msg" },
+  message: { key: "message", label: "说明", cls: "msg" },
+  // 泵专用:tips 的内容来自 /api/pump-spec,不在这里写死
+  flow:    { key: "flow_m3h", label: "流量 m³/h", num: true, digits: 2, scaled: true, unit: "m³/h" },
+  head:    { key: "head_m", label: "扬程 m", num: true, digits: 2, scaled: true, unit: "m" },
+  eff:     { key: "pump_eff", label: "效率 %", num: true, digits: 1, percent: true },
+  motor:   { key: "motor_kw", label: "建议电机 kW", num: true, digits: 1, tip: "motor" },
+  npsh:    { key: "npsh", label: "NPSHₐ m", num: true, digits: 2, npsh: true, tip: "npsh" },
+  // p_v 逐台手填:精度优先,程序不估算(见 docs/aspen-field-map.md §13.2)
+  pv:      { key: "pv_bar", label: "p_v bar", num: true, pvInput: true },
+};
+
+/* 塔页保持原样(用户对塔页满意):只去掉"类型"和"功率"两个恒定/无关列 */
+const FAMILY_COLS = {
+  column: ["name", "status", "duty", "dh", "ref", "balance", "nstage", "top", "bottom", "area", "note", "message"],
+  heat:   ["name", "type", "status", "duty", "area", "top", "bottom", "dh", "ref", "balance", "note", "message"],
+  flash:  ["name", "type", "status", "duty", "top", "dh", "ref", "balance", "note", "message"],
+  react:  ["name", "type", "status", "duty", "top", "message"],
+  // 泵页:流量/扬程/效率/轴功率/建议电机/p_v/NPSHₐ;级数和热负荷在这里没有意义
+  pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "pv", "npsh", "message"],
+  move:   ["name", "type", "status", "power", "dh", "ref", "balance", "note", "message"],
+  mix:    ["name", "type", "status", "top", "message"],
+  other:  ["name", "type", "status", "message"],
+};
+
+/* /api/block-families 不通时的兜底:只有显示名。
+   分页签靠后端下发的 row.family,所以兜底不影响归类,只影响页签文字与顺序。 */
+const FAMILY_FALLBACK = [
+  { key: "column", label: "塔" }, { key: "heat", label: "换热" },
+  { key: "flash", label: "分离" }, { key: "react", label: "反应" },
+  { key: "pump", label: "泵" }, { key: "move", label: "流体输送" },
+  { key: "mix", label: "混合分流" }, { key: "other", label: "其他" },
+];
 
 /* ------------------------------------------------------------ 工具 */
 
@@ -184,9 +242,204 @@ function bannerVerdict(c) {
 
 /* ------------------------------------------------------------ 表格 */
 
+/* ------------------------------------------------------------ 设备家族 */
+
+function blockFamilyOf(row) {
+  return row.family || "other";
+}
+
+function familyCounts() {
+  const seen = new Map();
+  state.blocks.forEach((b) => {
+    const key = blockFamilyOf(b);
+    seen.set(key, (seen.get(key) || 0) + 1);
+  });
+  return seen;
+}
+
+/* 默认页签:有塔落塔,否则第一个非空。
+   换工况后 state.family 被清空,靠这里重新挑 —— 曾经因为只在 setTab 里重置,
+   换工况会停在旧家族显示 0 行。 */
+function ensureFamily() {
+  const seen = familyCounts();
+  if (state.family && seen.get(state.family)) return;
+  const first = state.families.find((f) => seen.get(f.key));
+  state.family = seen.get("column") ? "column" : (first ? first.key : "column");
+}
+
+function setFamily(key) {
+  state.family = key;
+  renderTable();
+  resetTableScroll();
+}
+
+function renderFamilyBar() {
+  const box = document.getElementById("blockFamilies");
+  if (!box) return;
+  const seen = familyCounts();
+  const items = state.families.filter((f) => seen.get(f.key));
+  box.innerHTML = items.map((f) =>
+    `<button type="button" role="tab" data-family="${esc(f.key)}"
+       aria-selected="${f.key === state.family}"
+       class="${f.key === state.family ? "active" : ""}">${esc(f.label)}<b>${seen.get(f.key)}</b></button>`
+  ).join("");
+  box.querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => setFamily(b.dataset.family)));
+}
+
+function blockColumns() {
+  const keys = FAMILY_COLS[state.family] || FAMILY_COLS.other;
+  return keys.map((k) => BLOCK_COLS[k]).filter(Boolean);
+}
+
+async function loadFamilies() {
+  try {
+    const list = await api("/api/block-families");
+    if (Array.isArray(list) && list.length) state.families = list;
+  } catch (err) {
+    // 老版本服务没有这个接口:页签照样能用(归类是后端随行下发的 family)
+    state.families = FAMILY_FALLBACK;
+  }
+  if (!state.families.length) state.families = FAMILY_FALLBACK;
+}
+
+/* ------------------------------------------------------------ 泵口径 */
+
+/* 重力加速度、电机效率、档位表、公式说明都从后端拿,免得 JS 里再抄一遍抄错。
+   取不到时 NPSHₐ 一律显示「—」, 不用猜的 g。 */
+async function loadPumpSpec() {
+  try {
+    state.pumpSpec = await api("/api/pump-spec");
+  } catch (err) {
+    state.pumpSpec = null;
+  }
+}
+
+/* NPSHₐ = (p_进口 − p_v) × 10⁵ ÷ (ρ·g)
+   p_v 只认这台泵自己填的值;缺、进口两相、缺密度 → 返回 null(显示「—」),绝不拿 0 顶替 */
+function pumpNpsh(row) {
+  const spec = state.pumpSpec;
+  const pv = row.pv_bar;
+  if (!spec || pv === null || pv === undefined || Number.isNaN(Number(pv))) return null;
+  const vap = row.pump_vap_frac;
+  if (vap !== null && vap !== undefined && vap > 0.001) return null;
+  if (row.p_in_bar === null || row.p_in_bar === undefined) return null;
+  if (!row.rho_kgm3) return null;
+  return ((row.p_in_bar - Number(pv)) * 1e5) / (row.rho_kgm3 * spec.g);
+}
+
+/* 为什么这格是「—」:直接写在悬浮提示里,别让人猜 */
+function npshWhy(row) {
+  if (!state.pumpSpec) return "泵口径常量没取到(后端可能是旧版本)";
+  const vap = row.pump_vap_frac;
+  if (vap !== null && vap !== undefined && vap > 0.001) return "进口是两相,不计算汽蚀余量";
+  if (row.pv_bar === null || row.pv_bar === undefined) {
+    return "缺 p_v:在这台泵的 p_v 格子里填饱和蒸气压后才算 NPSHₐ";
+  }
+  return "缺进口压力或密度";
+}
+
+/* p_v 逐台保存:输入停下来 0.5 s 再发,避免边打字边打接口 */
+const pvTimers = new Map();
+
+function schedulePvSave(block, text) {
+  clearTimeout(pvTimers.get(block));
+  pvTimers.set(block, setTimeout(() => savePv(block, text), 500));
+}
+
+async function savePv(block, text) {
+  const row = state.blocks.find((b) => b.name === block);
+  if (!row || !state.current) return;
+  const trimmed = String(text).trim();
+  const pv = trimmed === "" ? null : Number(trimmed);
+  if (pv !== null && Number.isNaN(pv)) return;
+  try {
+    const res = await fetch(
+      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(block)}/pv`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pv_bar: pv }),
+      },
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    row.pv_bar = pv;
+    updateNpshCell(block);
+  } catch (err) {
+    // 存不上就把格子标红,别让人以为已经存进去了
+    const tr = [...document.querySelectorAll("#table tbody tr")]
+      .find((el) => el.dataset.block === block);
+    const input = tr && tr.querySelector("input[data-pv]");
+    if (input) {
+      input.classList.add("pv-bad");
+      input.title = `保存失败:${err.message}`;
+    }
+  }
+}
+
+/* 只刷新这一行的 NPSHₐ 格子,不整表重绘(否则输入框会失焦) */
+function updateNpshCell(block) {
+  const row = state.blocks.find((b) => b.name === block);
+  if (!row) return;
+  for (const tr of document.querySelectorAll("#table tbody tr")) {
+    if (tr.dataset.block !== block) continue;
+    const td = tr.querySelector("td[data-npsh]");
+    if (!td) return;
+    const v = pumpNpsh(row);
+    td.textContent = fmt(v, 2);
+    td.title = v === null ? npshWhy(row) : (state.pumpSpec ? state.pumpSpec.npsh_rule : "");
+    return;
+  }
+}
+
+/* 沿用上一工况的 p_v:同一个模型位号相同、液体相同,重读工况后不用重填。
+   只认"同模型 + 更早工况",只在点了之后才执行,不自动搬。 */
+async function inheritPv() {
+  if (!state.current) return;
+  const msg = document.getElementById("pumpInheritMsg");
+  if (!confirm("把同一模型更早工况里填过的 p_v 按位号搬过来?\n\n只填空着的格子,已填的不会被覆盖。")) return;
+  try {
+    const res = await fetch(`/api/cases/${state.current.id}/pumps/inherit-pv`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    state.blocks = await api(`/api/cases/${state.current.id}/blocks`);
+    renderTable();
+    if (msg) {
+      msg.textContent = `已从 #${data.source_case_id}(${data.source_read_at})沿用 ${data.copied} 台,跳过 ${data.skipped} 台已填/不存在`;
+    }
+  } catch (err) {
+    if (msg) msg.textContent = `沿用失败:${err.message}`;
+  }
+}
+
+function renderPumpBar() {
+  const bar = document.getElementById("pumpBar");
+  if (!bar) return;
+  bar.classList.toggle("hidden", !(state.tab === "blocks" && state.family === "pump"));
+}
+
+/* 参数条只改"显示",不写库:余量乘到流量/扬程上 */
+function readPumpBar() {
+  const sel = document.getElementById("pumpMargin");
+  if (!sel) return;
+  const wrap = document.getElementById("pumpMarginCustomWrap");
+  if (sel.value === "custom") {
+    wrap.classList.remove("hidden");
+    const v = Number(document.getElementById("pumpMarginCustom").value);
+    state.pump.margin = v > 0 && v <= 5 ? v : 1;
+  } else {
+    wrap.classList.add("hidden");
+    state.pump.margin = Number(sel.value) || 1;
+  }
+  renderTable();
+}
+
 function rowsForTab() {
   let rows = state.tab === "streams" ? state.streams : state.blocks;
-  const q = state.filter.trim().toLowerCase();
+  // 设备页按家族筛;名称搜索只对流股页生效 —— 否则在流股页打过的关键词,
+  // 切到设备页会"看不见地"把行筛掉。
+  if (state.tab === "blocks") rows = rows.filter((r) => blockFamilyOf(r) === state.family);
+  const q = state.tab === "streams" ? state.filter.trim().toLowerCase() : "";
   if (q) rows = rows.filter((r) => String(r.name).toLowerCase().includes(q));
 
   if (state.tab === "blocks") {
@@ -247,34 +500,62 @@ function renderStreams() {
 }
 
 function renderBlocks() {
-  const cols = [
-    { key: "name", label: "设备", cls: "name" },
-    { key: "type", label: "类型" },
-    { key: "status", label: "状态", status: true },
-    { key: "duty_kw", label: "热负荷 kW", num: true, digits: 2 },
-    { key: "power_kw", label: "功率 kW", num: true, digits: 2 },
-    // 焓平衡自检:ΔH = Σ出 − Σ入(流股能量流),参照 = 热负荷 / 轴功率 / 0(绝热)
-    { key: "dh_kw", label: "ΔH kW", num: true, digits: 2 },
-    { key: "ref_kw", label: "参照 kW", num: true, digits: 2 },
-    { key: "balance_state", label: "焓平衡", balance: true },
-    { key: "area_m2", label: "面积 m²", num: true, digits: 2 },
-    { key: "nstage", label: "级数", num: true, digits: 0 },
-    { key: "top_temp_c", label: "顶温 ℃", num: true, digits: 1 },
-    { key: "bottom_temp_c", label: "底温 ℃", num: true, digits: 1 },
-    { key: "balance_note", label: "平衡说明", cls: "msg" },
-    { key: "message", label: "说明", cls: "msg" },
-  ];
+  ensureFamily();
+  renderFamilyBar();
+  renderPumpBar();
+  const cols = blockColumns();
   const rows = rowsForTab();
   const thead = document.querySelector("#table thead");
   const tbody = document.querySelector("#table tbody");
-  thead.innerHTML = `<tr>${cols.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr>`;
+  const spec = state.pumpSpec;
+  const margin = state.pump.margin || 1;
+  // 表头:带余量的列把 ×1.10 写进标题;建议电机/NPSHₐ 的算法挂 title,来源是 /api/pump-spec
+  thead.innerHTML = `<tr>${cols.map((c) => {
+    const label = c.scaled && margin !== 1 ? `${c.label} ×${margin}` : c.label;
+    const tip = c.tip === "motor" ? (spec ? spec.motor_rule : "")
+      : c.tip === "npsh" ? (spec ? spec.npsh_rule : "") : "";
+    return `<th class="${c.num ? "num" : ""}"${tip ? ` title="${esc(tip)}"` : ""}>${esc(label)}</th>`;
+  }).join("")}</tr>`;
   tbody.innerHTML = rows.map((row) => {
     const isColumn = COLUMN_TYPE.test(row.type || "");
-    return `<tr>${cols.map((c) => {
+    const isPump = String(row.type || "").toLowerCase() === "pump";
+    return `<tr data-block="${esc(row.name)}">${cols.map((c) => {
       if (c.status) return `<td>${blockBadge(row.status)}</td>`;
       if (c.balance) return `<td>${balanceBadge(row.balance_state)}</td>`;
+      if (c.key === "name" && isPump) {
+        return `<td class="name"><a href="#" class="pump-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;
+      }
       if (c.key === "name" && isColumn) {
         return `<td class="name"><a href="#" class="col-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;
+      }
+      if (c.percent) {
+        const v = row[c.key] === null || row[c.key] === undefined ? null : row[c.key] * 100;
+        return `<td class="num">${fmt(v, c.digits)}</td>`;
+      }
+      if (c.npsh) {
+        const v = pumpNpsh(row);
+        const why = v === null ? npshWhy(row) : (spec ? spec.npsh_rule : "");
+        return `<td class="num" data-npsh="1"${why ? ` title="${esc(why)}"` : ""}>${fmt(v, c.digits)}</td>`;
+      }
+      if (c.pvInput) {
+        const pv = row[c.key];
+        const val = pv === null || pv === undefined ? "" : pv;
+        return `<td class="pv-cell"><input class="pv-input" type="number" step="0.1" min="0"
+                   value="${val}" data-pv="${esc(row.name)}" placeholder="填"
+                   title="这台泵的饱和蒸气压(bar),必须与进口压力同基准;留空则 NPSHₐ 显示「—」"></td>`;
+      }
+      if (c.scaled) {
+        const raw = row[c.key];
+        const v = raw === null || raw === undefined ? null : raw * margin;
+        let tip = raw === null || raw === undefined ? ""
+          : `原值 ${fmt(raw, c.digits)} ${c.unit || ""}`;
+        // 扬程多给一条自检:压升反算的扬程应该和 HEAD_CAL 吻合,差得多就说明口径有问题
+        if (c.key === "head_m" && raw !== null && raw !== undefined
+            && row.dp_bar !== null && row.dp_bar !== undefined && row.rho_kgm3 && spec) {
+          const hCheck = (row.dp_bar * 1e5) / (row.rho_kgm3 * spec.g);
+          tip = `HEAD_CAL = ${fmt(raw, 2)} m;压升 ${fmt(row.dp_bar, 2)} bar 反算 = ${fmt(hCheck, 2)} m`;
+        }
+        return `<td class="num"${tip ? ` title="${esc(tip)}"` : ""}>${fmt(v, c.digits)}</td>`;
       }
       const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
       const title = c.key === "balance_note" && row.balance_note ? ` title="${esc(row.balance_note)}"` : "";
@@ -288,12 +569,23 @@ function renderBlocks() {
       openColumn(a.dataset.block);
     });
   });
-  // 台账摘要:用全部设备(不受筛选影响)统计焓平衡四态
+  tbody.querySelectorAll(".pump-link").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      openPump(a.dataset.block);
+    });
+  });
+  // 台账摘要:统计当前家族的焓平衡四态(表格只显示这一个家族,不能拿全量数字糊弄)
   const bs = { ok: 0, bad: 0, no_data: 0, skip: 0 };
-  state.blocks.forEach((b) => {
+  rows.forEach((b) => {
     if (b.balance_state && bs[b.balance_state] !== undefined) bs[b.balance_state] += 1;
   });
   let count = `${rows.length} 行`;
+  // 后端版本比静态文件旧(改了 Python 没重启)时,行里没有 family,会全落到「其他」。
+  // 与其让人对着一个只有「其他」的页面猜,不如把原因写在计数行上。
+  if (state.blocks.length && state.blocks.every((b) => !b.family)) {
+    count += " · 后端未更新,请重启服务";
+  }
   const parts = [];
   if (bs.ok) parts.push(`通过 ${bs.ok}`);
   if (bs.bad) parts.push(`超差 ${bs.bad}`);
@@ -575,9 +867,58 @@ function highlightRow(idx) {
   if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: "nearest" });
 }
 
+/* ------------------------------------------------------------ 泵参数卡 */
+
+/* 中联水泵选型页。**不带任何参数** —— 工艺参数不进厂商日志和浏览器历史,
+   流量/扬程由用户自己敲进去。 */
+const ZHONGLIAN_URL = "https://www.cipump.com/sbxx.html";
+
+/* 泵参数卡:把要抄进中联表单的那几个数摆出来。余量只影响显示,不改库 */
+function openPump(block) {
+  const row = state.blocks.find((b) => b.name === block);
+  if (!row) return;
+  ["columnPanel", "compPanel"].forEach((id) =>
+    document.getElementById(id).classList.add("hidden"));
+  const panel = document.getElementById("pumpPanel");
+  document.getElementById("pumpTitle").textContent = `泵参数 · ${block}`;
+  panel.classList.remove("hidden");
+  panel.scrollTop = 0;
+
+  const margin = state.pump.margin || 1;
+  const spec = state.pumpSpec;
+  const scaled = (v) => (v === null || v === undefined ? null : v * margin);
+  const npsh = pumpNpsh(row);
+  // 来源只写一个词,细节放悬浮提示里,别把抽屉塞满
+  const kv = (k, v, source, tip = "") =>
+    `<tr><td class="name">${esc(k)}</td><td class="num">${v}</td>`
+    + `<td class="msg"${tip ? ` title="${esc(tip)}"` : ""}>${esc(source)}</td></tr>`;
+  const marginTag = margin === 1 ? "" : ` ×${margin}`;
+
+  const rows = [
+    kv("流量 m³/h", fmt(scaled(row.flow_m3h), 2), `Aspen${marginTag}`,
+       row.flow_m3h == null ? "没读到" : `原值 ${fmt(row.flow_m3h, 2)}`),
+    kv("扬程 m", fmt(scaled(row.head_m), 2), `Aspen${marginTag}`,
+       row.head_m == null ? "没读到" : `原值 ${fmt(row.head_m, 2)}`),
+    kv("轴功率 kW", fmt(row.power_kw, 2), "Aspen", "BRAKE_POWER,反向工况为负"),
+    kv("建议电机 kW", fmt(row.motor_kw, 1), "计算", spec ? spec.motor_rule : ""),
+    kv("效率 %", fmt(row.pump_eff == null ? null : row.pump_eff * 100, 1), "Aspen", "CEFF"),
+    kv("进口压力 bar", fmt(row.p_in_bar, 3), "进口流股"),
+    kv("出口压力 bar", fmt(row.p_out_bar, 3), "出口流股"),
+    kv("压升 bar", fmt(row.dp_bar, 3), "Aspen", "IN_PRES"),
+    kv("密度 kg/m³", fmt(row.rho_kgm3, 1), "计算", "RHO_LIQ × MW_LIQ"),
+    kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
+    kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), "手填"),
+    kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),
+  ];
+  document.querySelector("#pumpTable thead").innerHTML =
+    '<tr><th>参数</th><th class="num">值</th><th>来源</th></tr>';
+  document.querySelector("#pumpTable tbody").innerHTML = rows.join("");
+}
+
 async function openColumn(block) {
   const panel = document.getElementById("columnPanel");
   document.getElementById("compPanel").classList.add("hidden");  // 两个抽屉不叠着
+  document.getElementById("pumpPanel").classList.add("hidden");
   document.getElementById("columnTitle").textContent = `塔剖面 · ${block}`;
   panel.classList.remove("hidden");
   panel.scrollTop = 0;   // 看另一座塔时别带着上一座的滚动位置
@@ -817,7 +1158,7 @@ function setTab(tab) {
   state.tab = tab;
   document.querySelectorAll(".tab").forEach((b) =>
     b.classList.toggle("active", b.dataset.tab === tab));
-  toggleCompareBar(tab === "compare");
+  syncToolbar(tab);
   document.getElementById("columnPanel").classList.add("hidden");
   document.getElementById("compPanel").classList.add("hidden");
   renderBanner();
@@ -835,12 +1176,16 @@ function setTab(tab) {
 
 /* 对比入口:平时是工具栏右上角一个小图标;进对比页后,同一行换成两个下拉框。
    整行高度不变,所以切页签时下面的内容不会上下跳。
-   左边原本放筛选框的位置,在对比页换成「流股 / 设备」开关。 */
-function toggleCompareBar(isCompare) {
+   左边原本放筛选框的位置,在对比页换成「流股 / 设备」开关,
+   在设备页换成「类型页签」—— 三态一起管,免得某个控件"看不见地"还在生效。 */
+function syncToolbar(tab) {
+  const isCompare = tab === "compare";
+  const isBlocks = tab === "blocks";
   document.getElementById("compareHint").classList.toggle("hidden", isCompare);
   document.getElementById("compareControls").classList.toggle("hidden", !isCompare);
-  document.getElementById("filter").classList.toggle("hidden", isCompare);
   document.getElementById("compareScope").classList.toggle("hidden", !isCompare);
+  document.getElementById("filter").classList.toggle("hidden", isCompare || isBlocks);
+  document.getElementById("blockFamilies").classList.toggle("hidden", !isBlocks);
   document.getElementById("count").classList.toggle("hidden", isCompare);
 }
 
@@ -1723,6 +2068,13 @@ async function loadCase(id) {
   state.streams = streams;
   state.blocks = blocks;
   state.impact = impact;
+  // 换工况:家族回到默认、关键词清空 —— 否则会停在旧家族/旧关键词上,新工况显示 0 行
+  state.family = null;
+  state.filter = "";
+  const filterBox = document.getElementById("filter");
+  if (filterBox) filterBox.value = "";
+  const inheritMsg = document.getElementById("pumpInheritMsg");
+  if (inheritMsg) inheritMsg.textContent = "";
   const select = document.getElementById("caseSelect");
   if (select.value !== String(id)) select.value = String(id);
   hideEmpty();
@@ -1997,6 +2349,26 @@ function bindEvents() {
     else renderTable();
   });
 
+  // 泵参数条:余量一改就重算表格(只改显示,不写库)
+  ["pumpMargin", "pumpMarginCustom"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", readPumpBar);
+  });
+
+  // p_v 是逐台输入框,表格会整块重绘,所以用事件委托挂一次就够
+  const blockTable = document.querySelector("#table tbody");
+  if (blockTable) {
+    blockTable.addEventListener("input", (e) => {
+      const box = e.target.closest("input[data-pv]");
+      if (!box) return;
+      box.classList.remove("pv-bad");
+      schedulePvSave(box.dataset.pv, box.value);
+    });
+  }
+
+  const inheritBtn = document.getElementById("pumpInherit");
+  if (inheritBtn) inheritBtn.addEventListener("click", inheritPv);
+
   document.getElementById("baseSelect").addEventListener("change", runCompare);
   document.getElementById("otherSelect").addEventListener("change", runCompare);
   document.querySelectorAll("#compareScope button").forEach((b) =>
@@ -2006,6 +2378,13 @@ function bindEvents() {
     document.getElementById("columnPanel").classList.add("hidden"));
   document.getElementById("closeComp").addEventListener("click", () =>
     document.getElementById("compPanel").classList.add("hidden"));
+  document.getElementById("closePump").addEventListener("click", () =>
+    document.getElementById("pumpPanel").classList.add("hidden"));
+
+  // 打开中联选型:只开页面,不拼参数(noopener/noreferrer,别让外站碰到本页)
+  document.getElementById("pumpZhonglian").addEventListener("click", () => {
+    window.open(ZHONGLIAN_URL, "_blank", "noopener,noreferrer");
+  });
 
   document.getElementById("readBtn").addEventListener("click", startRead);
 
@@ -2024,9 +2403,8 @@ function bindEvents() {
   document.getElementById("quitBtn").addEventListener("click", quitApp);
 
   // ---- 流程页:工具栏 + 缩放平移 + 聚焦 ----
+  // 缩放只有滚轮和「适应窗口」两个入口:+/- 按钮已去掉(有滚轮时纯占位)
   document.getElementById("flowFit").addEventListener("click", fitFlow);
-  document.getElementById("flowZoomIn").addEventListener("click", () => zoomFlow(1.25));
-  document.getElementById("flowZoomOut").addEventListener("click", () => zoomFlow(1 / 1.25));
   const labelsBtn = document.getElementById("flowLabels");
   labelsBtn.addEventListener("click", () => {
     state.flow.showLabels = !state.flow.showLabels;
@@ -2144,6 +2522,8 @@ async function init() {
   }
 
   const page = readHashPage();
+  await loadFamilies();
+  await loadPumpSpec();
 
   if (!state.cases.length) {
     setPage(page, { push: false });
@@ -2159,7 +2539,16 @@ async function init() {
   if (page === "compare") await runCompare();
 
   const hashParts = location.hash.replace("#", "").split("/");
-  if (page === "blocks" && hashParts[1]) openColumn(hashParts[1]);
+  // 设备页地址:#/blocks/<家族>/<设备> 直接定位;#/blocks/<设备> 是老写法,只认塔剖面
+  if (page === "blocks" && hashParts.length >= 3 && hashParts[2]) {
+    if (state.families.some((f) => f.key === hashParts[1])) {
+      state.family = hashParts[1];
+      renderTable();
+    }
+    openColumn(hashParts[2]);
+  } else if (page === "blocks" && hashParts[1]) {
+    openColumn(hashParts[1]);
+  }
 
   await resumeReadIfRunning();
 }

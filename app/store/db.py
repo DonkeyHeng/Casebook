@@ -94,6 +94,18 @@ CREATE TABLE IF NOT EXISTS blocks (
     bottom_temp_c REAL,
     status        INTEGER,
     message       TEXT,
+    -- 泵参数(第二期):来自泵块 Output,见 docs/aspen-field-map.md §13。
+    -- 只有 Pump 块才有值;其余设备这些列是 NULL,不是 0。
+    head_m        REAL,   -- HEAD_CAL,扬程 m(负数=反向工况)
+    flow_m3h      REAL,   -- VFLOW,体积流量 m³/h
+    pump_eff      REAL,   -- CEFF,泵效率 0~1
+    p_in_bar      REAL,   -- 进口流股压力 bar(NPSHₐ 用的就是它)
+    p_out_bar     REAL,   -- 出口流股压力 bar
+    dp_bar        REAL,   -- ⚠️ 来自 ASPEN 的 IN_PRES:实测是**压升 ΔP**,不是进口压力
+    rho_kgm3      REAL,   -- RHO_LIQ × MW_LIQ,质量密度 kg/m³
+    pump_vap_frac REAL,   -- 进口汽化率;>0 视为两相,NPSHₐ 不计算
+    motor_kw      REAL,   -- 建议电机功率(按默认裕量取的档位值)
+    pv_bar        REAL,   -- 饱和蒸气压 bar:**用户逐台手填**,程序不估算
     dh_kw         REAL,   -- 焓平衡:ΔH = Σ出 − Σ入(流股能量流)
     ref_kw        REAL,   -- 对照值:热负荷 / 轴功率 / 0(绝热)
     ref_kind      TEXT,   -- duty / power / zero / hx_cold
@@ -153,13 +165,25 @@ _STREAM_ADDED_COLUMNS = (
     ("enthalpy_flow_kw", "REAL"),
 )
 
-# blocks 表后加的列(焓平衡自检)
+# blocks 表后加的列(焓平衡自检 + 第二期泵参数)
 _BLOCK_ADDED_COLUMNS = (
     ("dh_kw", "REAL"),
     ("ref_kw", "REAL"),
     ("ref_kind", "TEXT"),
     ("balance_state", "TEXT"),
     ("balance_note", "TEXT"),
+    # 泵参数:老库补列后历史工况是 NULL,重新读一次才有值
+    ("head_m", "REAL"),
+    ("flow_m3h", "REAL"),
+    ("pump_eff", "REAL"),
+    ("p_in_bar", "REAL"),
+    ("p_out_bar", "REAL"),
+    ("dp_bar", "REAL"),
+    ("rho_kgm3", "REAL"),
+    ("pump_vap_frac", "REAL"),
+    ("motor_kw", "REAL"),
+    # 饱和蒸气压:用户逐台手填(精度优先,不做估算);重新读工况后回空
+    ("pv_bar", "REAL"),
 )
 
 
@@ -291,8 +315,10 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
         """
         INSERT INTO blocks (case_id, name, type, duty_kw, power_kw, area_m2, nstage,
                             top_temp_c, bottom_temp_c, status, message,
+                            head_m, flow_m3h, pump_eff, p_in_bar, p_out_bar, dp_bar,
+                            rho_kgm3, pump_vap_frac, motor_kw, pv_bar,
                             dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -307,6 +333,16 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 b.get("bottom_temp_c"),
                 b.get("status"),
                 b.get("message"),
+                b.get("head_m"),
+                b.get("flow_m3h"),
+                b.get("pump_eff"),
+                b.get("p_in_bar"),
+                b.get("p_out_bar"),
+                b.get("dp_bar"),
+                b.get("rho_kgm3"),
+                b.get("pump_vap_frac"),
+                b.get("motor_kw"),
+                b.get("pv_bar"),
                 (b.get("balance") or {}).get("dh_kw"),
                 (b.get("balance") or {}).get("ref_kw"),
                 (b.get("balance") or {}).get("ref_kind"),
@@ -340,7 +376,71 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     return case_id
 
 
+def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
+    """把**同一模型**更早工况里填过的 p_v 按位号搬到当前工况。
+
+    只填空着的行(用户已经手填的不覆盖),只认同一个模型文件名 ——
+    不同模型里同一个位号未必是同一种液体,不能瞎搬。
+    返回 {source_case_id, source_read_at, copied, skipped};没有可沿用的返回 source_case_id=None。
+    """
+    target = conn.execute("SELECT id, model_name FROM cases WHERE id=?", (case_id,)).fetchone()
+    if target is None:
+        return None
+    source = conn.execute(
+        """
+        SELECT c.id AS id, c.read_at AS read_at, COUNT(*) AS n
+          FROM cases c JOIN blocks b ON b.case_id = c.id
+         WHERE c.id != ?
+           AND b.pv_bar IS NOT NULL
+           AND COALESCE(c.model_name, '') = COALESCE(?, '')
+         GROUP BY c.id
+         ORDER BY c.id DESC
+         LIMIT 1
+        """,
+        (case_id, target["model_name"]),
+    ).fetchone()
+    if source is None:
+        return {"source_case_id": None, "source_read_at": None, "copied": 0, "skipped": 0}
+
+    rows = conn.execute(
+        "SELECT name, pv_bar FROM blocks WHERE case_id=? AND pv_bar IS NOT NULL",
+        (source["id"],),
+    ).fetchall()
+    copied = skipped = 0
+    for row in rows:
+        cur = conn.execute(
+            "UPDATE blocks SET pv_bar=? WHERE case_id=? AND name=? AND pv_bar IS NULL",
+            (row["pv_bar"], case_id, row["name"]),
+        )
+        if cur.rowcount:
+            copied += 1
+        else:
+            skipped += 1
+    conn.commit()
+    return {
+        "source_case_id": source["id"],
+        "source_read_at": source["read_at"],
+        "copied": copied,
+        "skipped": skipped,
+    }
+
+
 # ---------------------------------------------------------------- 查询
+
+def set_pump_pv(conn: sqlite3.Connection, case_id: int, block: str, pv_bar) -> bool:
+    """写入一台泵的饱和蒸气压(bar)。传 None 表示清空。
+
+    精度口径:p_v 由用户**逐台手填**,程序不做估算(见 docs/aspen-field-map.md §13.2);
+    NPSHₐ 直接拿它与 Aspen 的进口压力相减,所以两者必须同基准。
+    返回是否真的更新到了行(设备名写错时返回 False,不静默成功)。
+    """
+    cur = conn.execute(
+        "UPDATE blocks SET pv_bar=? WHERE case_id=? AND name=?",
+        (pv_bar, case_id, block),
+    )
+    conn.commit()
+    return cur.rowcount > 0
+
 
 def list_cases(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
