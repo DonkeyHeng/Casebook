@@ -1046,6 +1046,108 @@ def test_fixtures() -> None:
     check("夹具⑤ NPSHₐ 为负", npsh is not None and npsh < 0, f"实际 {npsh}")
 
 
+# ---------------------------------------------------------------- 出口一致性
+
+def test_export_consistency() -> None:
+    """同一台泵的同一组数,在 库(页面数据源)/ Excel / AI 包 三处必须一致。
+
+    三个出口各写各的(见 docs/pump-selection-plan.md §4):效率乘 100、NPSHₐ 由 Python
+    另算一遍 —— 任何一处改了都会漂。这里把三份都生成出来逐字段比。
+    对比页走 HTTP,测不了;只静态校验「接口字段 ⊇ 前端字段」。
+    """
+    import io
+    import re
+    import zipfile
+    from pathlib import Path as _Path
+
+    from app.api import aipack, server
+    from app.store import db
+
+    if not _Path("data/cases.db").is_file():
+        print("  跳过:没有 data/cases.db")
+        return
+    conn = db.open_db("data/cases.db")
+    try:
+        best = None
+        for row in conn.execute("SELECT id FROM cases"):
+            n = conn.execute(
+                "SELECT COUNT(*) FROM blocks WHERE case_id=? AND lower(coalesce(type,''))='pump'"
+                " AND head_m IS NOT NULL", (row["id"],)).fetchone()[0]
+            if n and (best is None or n > best[1]):
+                best = (row["id"], n)
+        if best is None:
+            print("  跳过:库里没有带扬程的泵")
+            return
+        cid, n_pumps = best
+        blocks = {b["name"]: dict(b) for b in db.read_blocks(conn, cid)
+                  if str(b["type"] or "").strip().lower() == "pump"}
+        xlsx = server.build_workbook(conn, cid)
+        pack, _fname = aipack.build_zip(conn, cid)
+    finally:
+        conn.close()
+
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(xlsx), read_only=True)
+    rows = list(wb["泵"].iter_rows(values_only=True))
+    header = list(rows[0])
+    excel = {r[0]: dict(zip(header, r)) for r in rows[1:]}
+
+    with zipfile.ZipFile(io.BytesIO(pack)) as zf:
+        text = zf.read("pumps.csv").decode("utf-8-sig")
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    csv_header = lines[0].split(",")
+    csv = {ln.split(",")[0]: dict(zip(csv_header, ln.split(","))) for ln in lines[1:]}
+
+    def num(value):
+        if value is None or value == "":
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    # (CSV 列名, Excel 列名, 库里的字段或 None)
+    pairs = [
+        ("流量m³/h", "流量 m³/h", "flow_m3h"),
+        ("扬程m", "扬程 m", "head_m"),
+        ("效率%", "效率 %", None),
+        ("轴功率kW", "轴功率 kW", "power_kw"),
+        ("建议电机kW", "建议电机 kW", "motor_kw"),
+        ("NPSHa m", "NPSHₐ m", None),
+        ("p_v bar", "p_v bar", "pv_bar"),
+    ]
+    bad = []
+    for name in blocks:
+        for csv_key, xls_key, db_key in pairs:
+            a = num(csv.get(name, {}).get(csv_key))
+            b = num(excel.get(name, {}).get(xls_key))
+            if a is None and b is None:
+                continue
+            if a is None or b is None or abs(a - b) > 1e-6:
+                bad.append(f"{name}.{csv_key}: 包 {a} / Excel {b}")
+                continue
+            if db_key:
+                d = num(blocks[name].get(db_key))
+                if d is not None and abs(a - d) > 1e-6:
+                    bad.append(f"{name}.{db_key}: 包 {a} / 库 {d}")
+    check(f"出口一致:AI 包 / Excel / 库 同值(工况 {cid},{n_pumps} 台泵)",
+          not bad, ";".join(bad[:3]))
+
+    # 对比页字段:接口与前端必须同一组(接口加了而界面不显示 = 白算)
+    src = _Path("app/api/server.py").read_text(encoding="utf-8")
+    hit = re.search(r"block_fields = \[(.*?)\]", src, re.S)
+    server_fields = set(re.findall(r'"([a-z_0-9]+)"', hit.group(1))) if hit else set()
+    js = _Path("app/web/static/app.js").read_text(encoding="utf-8")
+    hit_js = re.search(r"BLOCK_COMPARE_FIELDS = \[(.*?)\];", js, re.S)
+    js_fields = set(re.findall(r'key: "([a-z_0-9]+)"', hit_js.group(1))) if hit_js else set()
+    check("对比字段:两边都有扬程/流量",
+          {"head_m", "flow_m3h"} <= server_fields and {"head_m", "flow_m3h"} <= js_fields,
+          f"接口 {sorted(server_fields)} / 前端 {sorted(js_fields)}")
+    check("对比字段:前端字段都在接口里", js_fields <= server_fields,
+          f"前端多出 {sorted(js_fields - server_fields)}")
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -1071,7 +1173,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("泵 p_v 存储", test_pump_pv_store),
                      ("泵 p_v 沿用", test_pump_pv_inherit),
                      ("单位表 units", test_units),
-                     ("边界夹具 fixtures", test_fixtures)):
+                     ("边界夹具 fixtures", test_fixtures),
+                     ("出口一致性 exports", test_export_consistency)):
         print(f"\n[{name}]")
         fn()
 
