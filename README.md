@@ -124,8 +124,9 @@ cp samples/case-23-error.db data/cases.db
 python -m app.api
 ```
 
-样本是 121 流股 / 77 模块 / 2178 条组成记录的异常工况(T0202 塔干涸、T0205 组分不收敛),
-它正好能展示「失败工况长什么样、工具会怎么标」。细节见 [`samples/README.md`](samples/README.md)。
+样本是 121 流股 / 77 模块 / 2178 条组成记录 / 7 台泵的异常工况(T0202 塔干涸、T0205 组分不收敛),
+它正好能展示「失败工况长什么样、工具会怎么标」;设备页的**「泵」页签**在这份数据上是满的
+(扬程 / 流量 / 效率 / 压升 / 密度都有值),可以离线看泵参数卡。细节见 [`samples/README.md`](samples/README.md)。
 
 **用 exe 的话不用复制文件**:示例库已经打包在程序里,首页提示「还没有工况」时点
 **「载入示例工况」** 按钮即可(原库会先备份成 `cases.db.bak`);命令行 `Casebook.exe --sample` 效果相同。
@@ -149,6 +150,7 @@ python -m app.api
 | [`docs/api.md`](docs/api.md) | 本地 HTTP 接口参考(排错 / 集成用) |
 | [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(管路选型用) |
 | [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型口径说明 |
+| [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md) | 选泵方案:泵参数从哪来、NPSHₐ 口径、中联入口与不自动对接的理由 |
 | [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验方法 |
 | [`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md) | 标准表录入提示词(可整段交给能看图的 AI) |
 | [`docs/README.md`](docs/README.md) | 文档索引与阅读顺序 |
@@ -159,8 +161,8 @@ python -m app.api
 Casebook/
   start.cmd      启动入口:双击即起服务(有控制台,方便看日志)
   requirements.txt  Python 依赖(pywin32、openpyxl)
-  app/           应用代码:aspen(COM)、store(本地库)、design(管路选型纯计算)、api(HTTP)、web(零构建前端)
-  tools/         调试与维护脚本:探测、基准、塔诊断、组成补读、回归自测、发布打包
+  app/           应用代码:aspen(COM 只读)、store(本地库)、design(管路选型 / 泵口径 / 设备家族,纯计算)、api(HTTP)、web(零构建前端)
+  tools/         调试与维护脚本:字段探测、泵字段扫描、示例库生成、回归自测、历史工况重算、发布打包
   docs/          安装、接口、字段地图与管路选型文档
   assets/        图标
   samples/       公开样本数据(可离线演示)
@@ -183,6 +185,20 @@ Casebook/
 
 **表格里有些单元格是 `—`?**
 那不是模型没结果,而是单位没被换算表覆盖(多见于老模型的 ENG 单位集)。顶部「单位诊断」会给出计数。
+泵字段也算在内 —— 扬程、密度读成空时同样会出现在这份统计里。
+
+**泵页几乎全是 `—`?**
+按顺序看三种原因:
+
+1. **旧工况**:泵参数是第二期才加的列,早期读进来的工况没有这些值 —— 重读一次即可
+   (不想重读 Aspen 的话,`python -m tools.repair_cases --apply` 能按最新单位表从原始值重算)
+2. **NPSHₐ 那一列**:它需要饱和蒸气压 `p_v`,逐台手填;没填就显示 `—`,这是刻意的,程序不估算
+3. **进口是两相**:汽蚀余量的公式前提不成立,该台不给 NPSHₐ,悬浮提示会说明
+
+**泵的汽蚀余量是怎么来的?**
+只算**有效**汽蚀余量 NPSHₐ(装置给的);泵**必需**的 NPSHᵣ 只能来自泵厂型谱或选型网站,
+本工具不编造。Aspen 自己也输出一个 `NPSH-AVAIL`,但实测不可靠(相当一部分台位是 0),
+所以没有采用,详见 [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md)。
 
 **不收敛的模型能读吗?**
 能。读数照存,但会标黄并禁止进入统计对比;状态码与模块报错原文都会列出。
@@ -237,6 +253,11 @@ Casebook/
 - 两相流按 8 m/s 保守取流速,选出的管径偏大;引用结论时要注明这一口径
 - 材质与腐蚀裕量来自**你定义的管道等级表**,工具不判断介质耐蚀性;标准表数据不入库,换机器要重新录入
 - 塔与反应器不参与焓平衡校验(这类设备的能量关系不适用简单加和)
+- 泵的**汽蚀余量只做 NPSHₐ**(能算的那半);**NPSHᵣ 不在本工具内**,要自己从型谱/选型页读
+- 泵的 `p_v` 由用户逐台填写,程序不估算;没填就没有 NPSHₐ
+- 泵的「建议电机」按常用档位表取整,是**工程参考值,不是标准原文**;反向工况(轴功率 ≤ 0)不选电机
+- 泵参数在 MET / METCBAR 两种单位集上实测过;ENG 的换算按定义推导,未遇到真实模型验证
+- 进口两相的泵没有实测样本,「拒算 NPSHₐ」只有代码与夹具,没有真实数据验证
 - 只在 Aspen Plus V15 上实测过,其它版本行为未验证
 - 个人项目,非官方产品;Aspen Plus 是 Aspen Technology, Inc. 的商标
 
