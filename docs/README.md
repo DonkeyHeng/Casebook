@@ -11,12 +11,13 @@
 | `pipe-standards-index.md` | 管路选型要用的国标表格**索引**:表 1 / 表 4 / 表 B.1 各在第几页、分页结构与校验方法 | 要录标准数据、或怀疑页码不对时 |
 | `pipe-standards-extract-prompt.md` | **交给 AI 的录入提示词**:要哪几张表、三个 CSV 的文件名与列、格式硬要求、自检办法 | 自己要补标准数据时(整段复制给能看图的 AI) |
 | `pipe-selection-plan.md` | 管路选型功能方案:口径、校验项与不做的事 | 改选型算法之前 |
+| `pump-selection-plan.md` | 选泵功能方案:泵参数从哪来、NPSHₐ 口径、中联选型入口与「不自动对接」的理由 | 改泵参数或做选型台账之前 |
 
 ## 阅读顺序
 
 1. `install.md` —— 先把应用跑起来
 2. `aspen-field-map.md` —— 数据从哪来、字段叫什么
-3. 当前任务对应的文档(如管路选型:`pipe-selection-plan.md` + `pipe-class-codes.md`)
+3. 当前任务对应的文档(如管路选型:`pipe-selection-plan.md` + `pipe-class-codes.md`;泵参数与选型:`pump-selection-plan.md` + `aspen-field-map.md` §13)
 
 ## 约定
 
