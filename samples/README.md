@@ -5,7 +5,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `case-23-error.db` | 一份异常工况快照:121 流股 / 77 模块 / 214 条连接 / 401 条塔板级记录 / 2178 条组成(18 组分 × 121 流股);判定为 `error`、未收敛 |
+| `case-23-error.db` | 一份异常工况快照:121 流股 / 77 模块 / 214 条连接 / 401 条塔板级记录 / 2178 条组成(18 组分 × 121 流股)/ 7 台泵;判定为 `error`、未收敛 |
 | `piping-classes.example.json` | 管路选型的**管道等级表示例**(流股名前缀 + 介质代号 → 材质 / 腐蚀裕量)。复制到 `data/config/piping-classes.json` 生效 |
 
 ## 为什么放一份「有错误的数据」
@@ -16,6 +16,8 @@
   - T0202 报错:`COLUMN DRIES UP OR COLUMN FLOWS VIOLATE BUILT-IN LIMITS`
   - T0205 报错:`COMPONENT BALANCE EQUATIONS FAILED TO CONVERGE.`
   - T0201 / T0206 告警
+- 设备页的「泵」页签在这份数据上是满的(7 台泵,扬程 / 流量 / 效率 / 轴功率 / 压升 / 密度都有值),
+  可以离线看泵参数卡与选型入口;**饱和蒸气压 p_v 一律留空**——那是逐台手填的值,示例不替用户假设。
 
 ## 怎么用
 
