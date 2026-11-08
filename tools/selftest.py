@@ -1148,6 +1148,47 @@ def test_export_consistency() -> None:
           f"前端多出 {sorted(js_fields - server_fields)}")
 
 
+# ---------------------------------------------------------------- 同源校验
+
+def test_guard() -> None:
+    """_guard:Host 白名单 + 写请求客户端标记 + Origin。不启服务,直接喂假请求头。"""
+    from app.api import server
+
+    class FakeServer:
+        server_address = ("127.0.0.1", 8000)
+
+    class Fake:
+        def __init__(self, headers):
+            self.headers = headers
+            self.server = FakeServer()
+            self.err = None
+
+        def _error(self, message, status=400):
+            self.err = status
+
+    guard = server.Handler._guard
+
+    good = Fake({"Host": "127.0.0.1:8000", "X-Casebook-Client": "1"})
+    check("守卫:同源写请求放行", guard(good, change=True) is True and good.err is None,
+          f"err={good.err}")
+
+    read = Fake({"Host": "localhost:8000"})
+    check("守卫:GET 不需要客户端标记", guard(read, change=False) is True, f"err={read.err}")
+
+    rebind = Fake({"Host": "evil.example", "X-Casebook-Client": "1"})
+    check("守卫:假 Host 拒绝(DNS rebinding)",
+          guard(rebind, change=False) is False and rebind.err == 403, f"err={rebind.err}")
+
+    cross = Fake({"Host": "127.0.0.1:8000", "Content-Type": "text/plain"})
+    check("守卫:跨站简单请求拒绝",
+          guard(cross, change=True) is False and cross.err == 403, f"err={cross.err}")
+
+    origin = Fake({"Host": "127.0.0.1:8000", "X-Casebook-Client": "1",
+                   "Origin": "http://evil.example"})
+    check("守卫:跨站 Origin 拒绝",
+          guard(origin, change=True) is False and origin.err == 403, f"err={origin.err}")
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -1174,7 +1215,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("泵 p_v 沿用", test_pump_pv_inherit),
                      ("单位表 units", test_units),
                      ("边界夹具 fixtures", test_fixtures),
-                     ("出口一致性 exports", test_export_consistency)):
+                     ("出口一致性 exports", test_export_consistency),
+                     ("同源校验 guard", test_guard)):
         print(f"\n[{name}]")
         fn()
 

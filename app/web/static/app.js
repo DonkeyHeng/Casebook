@@ -109,9 +109,15 @@ async function api(path) {
   return res.json();
 }
 
+/* 写请求统一带这个头:跨站页面加自定义头会触发预检,而服务端不回应预检 → 浏览器直接不发。
+   服务端 do_POST / do_DELETE 会校验 X-Casebook-Client(见 server.py::_guard)。 */
+function writeInit(extra = {}) {
+  return { ...extra, headers: { "X-Casebook-Client": "1", ...(extra.headers || {}) } };
+}
+
 /* DELETE 单独一个:api() 只做 GET,别为了它把方法参数塞进去到处传 */
 async function apiDelete(path) {
-  const res = await fetch(path, { method: "DELETE" });
+  const res = await fetch(path, writeInit({ method: "DELETE" }));
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `请求失败:${res.status}`);
@@ -120,11 +126,11 @@ async function apiDelete(path) {
 }
 
 async function apiPost(path, body) {
-  const res = await fetch(path, {
+  const res = await fetch(path, writeInit({
     method: "POST",
     headers: body ? { "Content-Type": "application/json" } : {},
     body: body ? JSON.stringify(body) : undefined,
-  });
+  }));
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || data.message || `请求失败:${res.status}`);
@@ -356,11 +362,11 @@ async function savePv(block, text) {
   try {
     const res = await fetch(
       `/api/cases/${state.current.id}/pumps/${encodeURIComponent(block)}/pv`,
-      {
+      writeInit({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pv_bar: pv }),
-      },
+      }),
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     row.pv_bar = pv;
@@ -399,7 +405,7 @@ async function inheritPv() {
   const msg = document.getElementById("pumpInheritMsg");
   if (!confirm("把同一模型更早工况里填过的 p_v 按位号搬过来?\n\n只填空着的格子,已填的不会被覆盖。")) return;
   try {
-    const res = await fetch(`/api/cases/${state.current.id}/pumps/inherit-pv`, { method: "POST" });
+    const res = await fetch(`/api/cases/${state.current.id}/pumps/inherit-pv`, writeInit({ method: "POST" }));
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     state.blocks = await api(`/api/cases/${state.current.id}/blocks`);
@@ -1301,7 +1307,7 @@ async function startRead() {
 
   let payload;
   try {
-    const res = await fetch("/api/read", { method: "POST" });
+    const res = await fetch("/api/read", writeInit({ method: "POST" }));
     payload = await res.json().catch(() => ({}));
     if (res.status === 409) {
       // 已经有一次读取在跑(比如页面刷新过):接管它的进度,而不是弹个错就完事
@@ -2311,7 +2317,7 @@ async function quitApp() {
   btn.disabled = true;
   btn.textContent = "正在退出…";
   try {
-    await fetch("/api/shutdown", { method: "POST" });
+    await fetch("/api/shutdown", writeInit({ method: "POST" }));
   } catch (err) {
     // 服务已经关掉,连接被丢弃属于正常
   }

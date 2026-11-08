@@ -178,11 +178,46 @@ class Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ 路由
 
+    # ------------------------------------------------------------ 同源校验
+
+    def _guard(self, change: bool) -> bool:
+        """Host 白名单 + 写请求的客户端标记与 Origin 校验。返回 False 表示已回过错误。
+
+        防两件事:
+
+        * **DNS rebinding** —— 攻击者域名解析到 127.0.0.1,浏览器带着假 Host 来读工况数据。
+          所以任何请求的 Host 都必须是本机回环。
+        * **跨站请求** —— 任意网页都能向 127.0.0.1 发 `text/plain` 的「简单请求」,
+          不触发预检;能删工况、换库、关服务。
+          写请求要求带 `X-Casebook-Client: 1`:跨站页面加自定义头会触发预检,
+          而本服务不回应预检,浏览器直接不发。
+
+        代价:命令行脚本调写接口要自己带这个头(目前没有脚本这么做)。
+        """
+        port = self.server.server_address[1]
+        allowed = {f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"}
+        host = (self.headers.get("Host") or "").strip().lower()
+        if host and host not in allowed:
+            self._error("拒绝:Host 不在本机白名单(可能是 DNS rebinding)", 403)
+            return False
+        if not change:
+            return True
+        if self.headers.get("X-Casebook-Client") != "1":
+            self._error("拒绝:写请求缺少 X-Casebook-Client 标记", 403)
+            return False
+        origin = (self.headers.get("Origin") or "").strip().lower()
+        if origin and origin not in {f"http://{h}" for h in allowed}:
+            self._error("拒绝:跨站来源", 403)
+            return False
+        return True
+
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
         query = parse_qs(parsed.query)
         try:
+            if not self._guard(change=False):
+                return
             if path.startswith("/api/"):
                 self._api(path, query)
             else:
@@ -210,6 +245,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         path = unquote(urlparse(self.path).path)
         try:
+            if not self._guard(change=True):
+                return
             if path == "/api/shutdown":
                 self._json({"ok": True, "message": "服务已停止"})
                 # 必须换个线程关,否则会在请求处理线程里自己等自己
@@ -329,6 +366,8 @@ class Handler(BaseHTTPRequestHandler):
         path = unquote(urlparse(self.path).path)
         parts = [p for p in path.split("/") if p]
         try:
+            if not self._guard(change=True):
+                return
             if len(parts) == 3 and parts[:2] == ["api", "cases"]:
                 self._delete_case(parts[2])
                 return
@@ -814,6 +853,13 @@ def _stop_after_window_closed(httpd) -> None:
 def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
           open_browser: bool = True, app_window: bool = True) -> None:
     url = f"http://{host}:{port}"
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        # 安装说明对外承诺「只监听本机」;允许改 host 就意味着把工况数据暴露到网络,
+        # 而本服务没有登录、没有加密,必须明确警告而不是悄悄放行。
+        warn = (f"⚠ 正在监听 {host},不是本机回环。\n"
+                "  本服务没有登录与加密,局域网内任何人都能读取工况数据、删除工况。\n"
+                "  只有在你清楚后果时才这样用。")
+        _say(warn)
     handler = type("BoundHandler", (Handler,), {"db_path": db_path})
     # 关掉端口复用:否则同时开两个服务会都"成功"绑上同一端口,请求随机落到旧进程
     ThreadingHTTPServer.allow_reuse_address = False

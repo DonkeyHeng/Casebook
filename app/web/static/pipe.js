@@ -421,7 +421,7 @@ async function savePipeClass() {
   const payload = collectPipeClass();
   const res = await fetch("/api/piping-classes", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "X-Casebook-Client": "1", "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   const body = await res.json().catch(() => ({}));
@@ -435,7 +435,7 @@ async function savePipeClass() {
 }
 
 async function clearPipeClass() {
-  const res = await fetch("/api/piping-classes", { method: "DELETE" });
+  const res = await fetch("/api/piping-classes", { method: "DELETE", headers: { "X-Casebook-Client": "1" } });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || !body.ok) {
     showPipeClassError("清除失败:" + ((body.errors || []).join(";") || `HTTP ${res.status}`));
@@ -616,7 +616,7 @@ async function doPipeStdImport() {
   try {
     const res = await fetch("/api/pipe-standards", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "X-Casebook-Client": "1", "Content-Type": "application/json" },
       body: JSON.stringify({ files }),
     });
     const body = await res.json().catch(() => ({}));
