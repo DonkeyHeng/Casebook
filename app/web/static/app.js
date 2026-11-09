@@ -109,6 +109,86 @@ async function api(path) {
   return res.json();
 }
 
+/* ------------------------------------------------------------ 外观 */
+
+/* 三态:auto(跟随系统)/ light / dark。
+   CSS 只认 html[data-theme] 的明确值(auto 由这里解析),所以样式表里
+   只需要一套 dark,不用把 prefers-color-scheme 抄两遍。 */
+const THEME_KEY = "casebook-theme";
+const THEME_MODES = ["auto", "light", "dark"];
+const THEME_TEXT = { auto: "跟随系统", light: "浅色", dark: "深色" };
+const THEME_ICON = { auto: "#i-auto", light: "#i-sun", dark: "#i-moon" };
+const themeMedia = window.matchMedia("(prefers-color-scheme: dark)");
+let themeMode = "auto";
+
+function applyTheme() {
+  const resolved = themeMode === "auto"
+    ? (themeMedia.matches ? "dark" : "light")
+    : themeMode;
+  document.documentElement.dataset.theme = resolved;
+  const label = document.getElementById("themeLabel");
+  if (label) label.textContent = THEME_TEXT[themeMode];
+  const use = document.querySelector("#themeIcon use");
+  if (use) use.setAttribute("href", THEME_ICON[themeMode]);
+  const btn = document.getElementById("themeBtn");
+  if (btn) btn.title = `外观:${THEME_TEXT[themeMode]}(点一下切换)`;
+}
+
+function cycleTheme() {
+  const i = THEME_MODES.indexOf(themeMode);
+  themeMode = THEME_MODES[(i + 1) % THEME_MODES.length];
+  try { localStorage.setItem(THEME_KEY, themeMode); } catch (e) { /* 隐私模式:不记也照样能切 */ }
+  applyTheme();
+}
+
+function initTheme() {
+  const saved = (() => { try { return localStorage.getItem(THEME_KEY); } catch (e) { return null; } })();
+  themeMode = THEME_MODES.includes(saved) ? saved : "auto";
+  applyTheme();
+  const btn = document.getElementById("themeBtn");
+  if (btn) btn.addEventListener("click", cycleTheme);
+  // 跟随系统时,系统切换了要跟着变
+  themeMedia.addEventListener("change", () => { if (themeMode === "auto") applyTheme(); });
+}
+
+/* 读设计 token 的实际值:图表颜色只在 style.css 里定义一次。
+   以前 JS 里另抄一份调色板,改 CSS 忘了改这里两边就不一致。 */
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+/* 数据页顶部的请求提示条(#dataNotice):
+   加载中说明"正在读哪一份",失败说明"屏幕上这批数字还是旧的"。
+   换工况时下拉已经指到新工况,而表格还是上一份 —— 没有这一条就容易被误读。 */
+function showNotice(text, { err = false } = {}) {
+  const el = document.getElementById("dataNotice");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("err", Boolean(err));
+  el.classList.remove("hidden");
+}
+
+function clearNotice() {
+  const el = document.getElementById("dataNotice");
+  if (!el) return;
+  el.textContent = "";
+  el.classList.add("hidden");
+  el.classList.remove("err");
+}
+
+/* 忙态:给要等的那块挂 aria-busy(样式里是淡淡降透明),读屏也能念出来。
+   必须 try/finally —— 少这一次复位,一次失败就会永远停在"正在加载"。 */
+async function withBusy(ids, fn) {
+  const els = (Array.isArray(ids) ? ids : [ids])
+    .map((id) => document.getElementById(id)).filter(Boolean);
+  els.forEach((el) => el.setAttribute("aria-busy", "true"));
+  try {
+    return await fn();
+  } finally {
+    els.forEach((el) => el.removeAttribute("aria-busy"));
+  }
+}
+
 /* 写请求统一带这个头:跨站页面加自定义头会触发预检,而服务端不回应预检 → 浏览器直接不发。
    服务端 do_POST / do_DELETE 会校验 X-Casebook-Client(见 server.py::_guard)。 */
 function writeInit(extra = {}) {
@@ -273,8 +353,12 @@ function ensureFamily() {
   state.family = seen.get("column") ? "column" : (first ? first.key : "column");
 }
 
+/* 换设备类型 = 换了一批设备,旧的详情(塔剖面/泵参数/组成)不再对应任何一行。
+   不收起来的话,切到换热页还挂着塔的剖面,看着像"这些数属于换热器"。 */
 function setFamily(key) {
   state.family = key;
+  closeDataDrawers();
+  state.column = null;
   renderTable();
   resetTableScroll();
 }
@@ -564,7 +648,10 @@ function renderBlocks() {
         return `<td class="num"${tip ? ` title="${esc(tip)}"` : ""}>${fmt(v, c.digits)}</td>`;
       }
       const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
-      const title = c.key === "balance_note" && row.balance_note ? ` title="${esc(row.balance_note)}"` : "";
+      // 说明 / 平衡说明这两列会被 ellipsis 截断,原文挂 title
+      // (以前只有 balance_note 有,「说明」里放的是 Aspen 原始报错,截断了就看不到)
+      const tipText = c.cls === "msg" ? row[c.key] : null;
+      const title = tipText ? ` title="${esc(tipText)}"` : "";
       return `<td class="${c.cls || ""} ${c.num ? "num" : ""}"${title}>${value}</td>`;
     }).join("")}</tr>`;
   }).join("");
@@ -735,15 +822,89 @@ function renderCompareBlocks(thead, tbody, data) {
 }
 
 function renderTable() {
-  document.getElementById("empty").classList.add("hidden");
   if (state.tab === "streams") renderStreams();
   else if (state.tab === "blocks") renderBlocks();
   else renderCompare();
+  syncTableEmpty();
+}
+
+/* 表画完再决定 #empty 露不露。
+   原来这里无条件 add("hidden"),把「还没有工况」的引导也一起藏了 ——
+   空库点进流股页只剩一张只有表头、写着「0 行」的白表,没有任何下一步。 */
+function syncTableEmpty() {
+  const el = document.getElementById("empty");
+  if (!el) return;
+  const rows = document.querySelectorAll("#table tbody tr").length;
+  if (rows) { hideEmpty(); return; }
+  if (!state.current) { showEmpty(); return; }   // 空库:复用引导文案与「载入示例」入口
+  if (state.tab === "compare" && !state.compare.data) {
+    showTableHint("还没有对比结果。点右上角 ⇄ 选择基础工况与对比工况。");
+    return;
+  }
+  if (state.tab === "compare") {
+    showTableHint("这两个工况没有可对比的行。");
+    return;
+  }
+  if (state.tab === "blocks") {
+    showTableHint("这个设备类型下没有可显示的行。换一个类型页签,或清空左上角的筛选。");
+    return;
+  }
+  showTableHint("没有匹配的行。清空左上角的筛选再试。");
+}
+
+/* 有工况但这一屏没有行:这不是"没有工况",别复用 showEmpty 的错误语义 */
+function showTableHint(text) {
+  const el = document.getElementById("empty");
+  if (!el) return;
+  state.emptyText = "";
+  state.emptyIsError = false;
+  el.textContent = text;
+  el.classList.remove("hidden");
+}
+
+/* 点抽屉外面的空白处关掉详情。
+   判定顺序:抽屉内 → 不动;可交互元素 → 不动(那是要干别的事);
+   另一台设备的入口 → 由它自己"换人",这里也不管。
+   两个坑:打开抽屉的那一次点击会冒泡到 document(用时间戳跳过);
+   拖选文字时的 click 不该收面板(看选区是否为空)。 */
+const DRAWER_CLICKABLE = "a, button, input, select, textarea, label, thead, .btn, .icon-btn, .chart-svg";
+let drawerOpenedAt = 0;
+
+function markDrawerOpened() {
+  drawerOpenedAt = Date.now();
+}
+
+function isOutsideDrawerClick(evt) {
+  if (Date.now() - drawerOpenedAt < 120) return false;      // 就是刚打开它的那一下
+  const sel = window.getSelection && window.getSelection();
+  if (sel && !sel.isCollapsed) return false;                // 正在选字
+  const t = evt.target;
+  if (!t || !t.closest) return false;
+  if (t.closest(".column-panel")) return false;             // 抽屉内部
+  if (t.closest(DRAWER_CLICKABLE)) return false;            // 按钮/链接/输入框/表头/图表
+  return true;
+}
+
+/* Esc 关抽屉:三个抽屉都有 ✕ 按钮,键盘用户也该能关 */
+function closeDataDrawers() {
+  let closed = false;
+  ["columnPanel", "pumpPanel", "compPanel"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && !el.classList.contains("hidden")) {
+      el.classList.add("hidden");
+      closed = true;
+    }
+  });
+  return closed;
 }
 
 /* ------------------------------------------------------------ 塔剖面 */
 
-const COL_CHART = { width: 480, height: 170, padL: 56, padR: 14, padT: 14, padB: 24 };
+/* 画布尺寸跟着"两图并排"走:抽屉内容宽 584,两列各 ≈286。
+   viewBox 收窄到 300×150 后缩放比 ≈0.95,轴文字 11px 落到 ~10.5px;
+   若沿用 480×170 再并排,文字会被压回 6px 级(第 1 批刚修好的正是这个)。
+   padL 要留够最长的刻度(如 1282.4),否则左边缘会切字。 */
+const COL_CHART = { width: 300, height: 150, padL: 54, padR: 12, padT: 16, padB: 22 };
 const columnState = { rows: [], charts: [] };
 
 function chartSVG(series) {
@@ -769,20 +930,27 @@ function chartSVG(series) {
     `<circle class="marker" data-s="${i}" cx="${padL}" cy="${padT}" r="4"
              fill="${s.color}" stroke="#fff" stroke-width="1.5" opacity="0"/>`).join("");
 
-  const legend = series.map((s, i) => `
-    <rect x="${padL + i * 54}" y="3" width="10" height="3" fill="${s.color}"/>
-    <text x="${padL + i * 54 + 14}" y="8" class="axis">${esc(s.label)}</text>`).join("");
-
   return `<svg viewBox="0 0 ${width} ${height}" class="chart-svg">
     <line x1="${padL}" y1="${padT + h}" x2="${width - padR}" y2="${padT + h}" class="axis-line"/>
     ${paths}
     <line class="guide" x1="0" y1="${padT}" x2="0" y2="${padT + h}"
-          stroke="#94a3b8" stroke-dasharray="4 3" stroke-width="1" opacity="0"/>
+          stroke="${cssVar('--chart-guide')}" stroke-dasharray="4 3" stroke-width="1" opacity="0"/>
     ${markers}
-    ${legend}
     <text x="${padL - 6}" y="${padT + 6}" class="axis" text-anchor="end">${max.toFixed(1)}</text>
     <text x="${padL - 6}" y="${padT + h}" class="axis" text-anchor="end">${min.toFixed(1)}</text>
   </svg>`;
+}
+
+/* 图表顶上那一行:标题 + 图例。
+   图例原来画在 SVG 里、紧挨着左侧最大刻度,并排后单图只有 285px,那一角就挤了。
+   挪成 HTML 一行后,标题靠左、图例靠右,和曲线画布彻底分开,也能换行。 */
+function chartHead(title, series) {
+  const items = series.map((s) =>
+    `<span class="lg"><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join("");
+  return `<div class="chart-head">
+    <span class="chart-title">${esc(title)}</span>
+    <span class="chart-legend">${items}</span>
+  </div>`;
 }
 
 /* 鼠标位置 → 第几级(按列宽吸附,不需要对准点) */
@@ -864,13 +1032,25 @@ function positionTip(tip, evt) {
   tip.style.top = `${Math.max(8, top)}px`;
 }
 
-/* 图 ↔ 表联动:高亮同一级,并把它滚到可见区 */
+/* 图 ↔ 表联动:高亮同一级,并把它滚到可见区。
+   只滚表格自己的容器 —— scrollIntoView 会把整条可滚动祖先链都滚一遍,
+   抽屉跟着滚、图表就被顶出视口(40 级塔实测面板 scrollTop 0→395)。 */
 function highlightRow(idx) {
   const rows = document.querySelectorAll("#columnTable tbody tr");
   rows.forEach((tr, i) => tr.classList.toggle("hl", i === idx));
   if (idx === null) return;
   const tr = rows[idx];
-  if (tr && tr.scrollIntoView) tr.scrollIntoView({ block: "nearest" });
+  const wrap = tr && tr.closest(".table-wrap");
+  if (!wrap) return;
+  const head = wrap.querySelector("thead");
+  const headH = head ? head.offsetHeight : 0;   // 表头 sticky,别把行藏在它下面
+  const wr = wrap.getBoundingClientRect();
+  const rr = tr.getBoundingClientRect();
+  if (rr.top - headH < wr.top) {
+    wrap.scrollTop += rr.top - headH - wr.top;
+  } else if (rr.bottom > wr.bottom) {
+    wrap.scrollTop += rr.bottom - wr.bottom;
+  }
 }
 
 /* ------------------------------------------------------------ 泵参数卡 */
@@ -888,6 +1068,7 @@ function openPump(block) {
   const panel = document.getElementById("pumpPanel");
   document.getElementById("pumpTitle").textContent = `泵参数 · ${block}`;
   panel.classList.remove("hidden");
+  markDrawerOpened();
   panel.scrollTop = 0;
 
   const margin = state.pump.margin || 1;
@@ -927,9 +1108,23 @@ async function openColumn(block) {
   document.getElementById("pumpPanel").classList.add("hidden");
   document.getElementById("columnTitle").textContent = `塔剖面 · ${block}`;
   panel.classList.remove("hidden");
+  markDrawerOpened();
   panel.scrollTop = 0;   // 看另一座塔时别带着上一座的滚动位置
 
-  const rows = await api(`/api/cases/${state.current.id}/columns/${encodeURIComponent(block)}`);
+  // 先给占位:接口慢或失败时原来是一块白板(openColumn 的 reject 没人接)
+  document.getElementById("columnCharts").innerHTML = '<p class="comp-note">正在读取…</p>';
+  document.querySelector("#columnTable thead").innerHTML = "";
+  document.querySelector("#columnTable tbody").innerHTML = "";
+
+  let rows;
+  try {
+    rows = await withBusy("columnPanel",
+      () => api(`/api/cases/${state.current.id}/columns/${encodeURIComponent(block)}`));
+  } catch (err) {
+    document.getElementById("columnCharts").innerHTML =
+      `<div class="comp-error">读不到 ${esc(block)} 的塔剖面:${esc(err.message)}</div>`;
+    return;
+  }
   state.column = { block, rows };
   columnState.rows = rows;
   columnState.charts = [];
@@ -939,14 +1134,15 @@ async function openColumn(block) {
   const vap = rows.map((r) => ({ x: r.stage, y: r.vap_flow }));
 
   const chartsEl = document.getElementById("columnCharts");
+  // 系列定义提到外面:顶部标题行的图例和曲线用的是同一份 label 与颜色,别写两遍
+  const tempSeries = [{ points: temps, color: cssVar("--chart-1"), label: "温度" }];
+  const flowSeries = [
+    { points: liq, color: cssVar("--chart-1"), label: "液" },
+    { points: vap, color: cssVar("--chart-2"), label: "气" },
+  ];
   chartsEl.innerHTML =
-    `<figure class="chart"><figcaption>温度</figcaption>${
-      chartSVG([{ points: temps, color: "#2563eb", label: "温度" }])}</figure>`
-    + `<figure class="chart"><figcaption>液/气流量</figcaption>${
-      chartSVG([
-        { points: liq, color: "#2563eb", label: "液" },
-        { points: vap, color: "#f59e0b", label: "气" },
-      ])}</figure>`;
+    `<figure class="chart">${chartHead("温度", tempSeries)}${chartSVG(tempSeries)}</figure>`
+    + `<figure class="chart">${chartHead("液/气流量", flowSeries)}${chartSVG(flowSeries)}</figure>`;
 
   const svgs = [...chartsEl.querySelectorAll("svg.chart-svg")];
   svgs.forEach((svg) => { svg.dataset.n = rows.length; });
@@ -996,8 +1192,8 @@ function pctText(fraction) {
   return `${p.toExponential(1)}%`;
 }
 
-const PHASE_COLORS = ["#2563eb", "#60a5fa", "#93c5fd", "#a5b4fc", "#c4b5fd", "#f59e0b"];
-const PHASE_REST_COLOR = "#cbd5e1";
+const PHASE_COLORS = () => ["--chart-1", "--chart-2", "--chart-3", "--chart-4", "--chart-5", "--chart-6"].map(cssVar);
+const PHASE_REST_COLOR = () => cssVar("--chart-rest");
 
 /* 一条相态条:横条按比例分色(前 6 个组分 + 其他),右边写 Top3 百分比 */
 function phaseRow(label, key, comps, sum) {
@@ -1011,18 +1207,23 @@ function phaseRow(label, key, comps, sum) {
     return `<div class="phase-row">
       <span class="phase-label">${esc(label)}</span>
       <span class="phase-bar"></span>
-      <span class="phase-legend">该相没有可显示的值</span>
+      <span class="phase-legend">无${esc(label)}</span>
     </div>`;
   }
 
-  const head = items.slice(0, 6);
-  const tail = items.slice(6);
+  // 占比 <1.5% 的段在 12px 高的色条上不到 2px,画出来只是一根毛刺(实测 0.9/0.5/0.1px),
+  // 合并进「其他」;具体数字仍然在图例里给。全都 <1.5% 时至少留第一段,别画成一条灰条。
+  const MIN_SHARE = 0.015;
+  const big = items.filter((c) => c.v / total >= MIN_SHARE);
+  const head = big.length ? big.slice(0, 6) : items.slice(0, 1);
+  const headSet = new Set(head);
+  const tail = items.filter((c) => !headSet.has(c));
   const tailSum = tail.reduce((s, c) => s + c.v, 0);
 
   const segs = head.map((c, i) =>
-    `<i class="phase-seg" style="width:${(c.v / total * 100).toFixed(3)}%;background:${PHASE_COLORS[i % PHASE_COLORS.length]}"></i>`
+    `<i class="phase-seg" style="width:${(c.v / total * 100).toFixed(3)}%;background:${PHASE_COLORS()[i % 6]}"></i>`
   ).join("") + (tail.length
-    ? `<i class="phase-seg" style="width:${(tailSum / total * 100).toFixed(3)}%;background:${PHASE_REST_COLOR}"></i>`
+    ? `<i class="phase-seg" style="width:${(tailSum / total * 100).toFixed(3)}%;background:${PHASE_REST_COLOR()}"></i>`
     : "");
 
   const legend = head.slice(0, 3).map((c) => `${esc(c.name)} ${pctText(c.v / total)}`);
@@ -1044,6 +1245,7 @@ async function openComposition(stream) {
   document.getElementById("compBody").innerHTML =
     '<p class="comp-note">正在读取…(工况里存过就直接取;没存过会去当前打开的 Aspen 现读一次,约 0.3 秒)</p>';
   panel.classList.remove("hidden");
+  markDrawerOpened();
 
   // 连点不同流股时,只认最后一次请求的结果,避免慢的响应盖掉新的
   const seq = ++compState.seq;
@@ -1120,9 +1322,22 @@ async function runCompare() {
     renderCompare();
     return;
   }
-  state.compare.data = await api(`/api/compare?base=${baseId}&other=${otherId}`);
+  let next;
+  try {
+    next = await withBusy("tableWrap",
+      () => api(`/api/compare?base=${baseId}&other=${otherId}`));
+  } catch (err) {
+    // 同样保留上一次的结果(清空只会让人以为"没数据"),但摘要里必须写清本次失败
+    document.getElementById("compareSummary").textContent =
+      `对比失败:${err.message}`
+      + (state.compare.data ? "(表格里仍是上一次的对比结果)" : "");
+    syncTableEmpty();
+    return;
+  }
+  state.compare.data = next;
   updateCompareSummary();
   renderCompare();
+  syncTableEmpty();
 }
 
 /* 顶部那行摘要跟着 流股 / 设备 切换,不然看设备表时还写着"共同流股 N 条" */
@@ -1162,11 +1377,8 @@ function resetTableScroll() {
 
 function setTab(tab) {
   state.tab = tab;
-  document.querySelectorAll(".tab").forEach((b) =>
-    b.classList.toggle("active", b.dataset.tab === tab));
   syncToolbar(tab);
-  document.getElementById("columnPanel").classList.add("hidden");
-  document.getElementById("compPanel").classList.add("hidden");
+  closeDataDrawers();   // 三个抽屉一起收(原来漏了泵参数)
   renderBanner();
   if (tab === "compare") {
     // 筛选框在对比页是隐藏的,不清空就会"看不见地"把对比行筛掉
@@ -1229,7 +1441,7 @@ function showReadError(message) {
   const el = readStatusEl();
   el.className = "read-status error";
   el.innerHTML = `<span class="read-text">${esc(message)}</span>
-    <button class="read-close" type="button" title="关闭">✕</button>`;
+    <button class="read-close" type="button" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>`;
   el.querySelector(".read-close").addEventListener("click", () => hideReadStatus());
   el.classList.remove("hidden");
 }
@@ -1294,7 +1506,7 @@ function renderReadDone(snap) {
       ${esc(snap.stream_count ?? "-")} 流股 / ${esc(snap.block_count ?? "-")} 设备 ·
       ${sev.text} · ${Number(snap.elapsed_sec || 0).toFixed(1)} s</span>
     ${gapHint}
-    <button class="read-close" type="button" title="关闭">✕</button>`;
+    <button class="read-close" type="button" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>`;
   el.querySelector(".read-close").addEventListener("click", () => hideReadStatus());
   el.classList.remove("hidden");
   if (!gaps) hideReadStatus(READ_DONE_HIDE_MS);   // 有单位警告就不自动消失,让人看清
@@ -1392,10 +1604,16 @@ async function resumeReadIfRunning() {
    不能用 Kahn),层太多就折行(蛇形,奇偶行反向),再缩放/平移,点设备聚焦上下游 2 层。
    为什么不用图库:项目约定零构建、依赖越少越好;67 个节点自己算完全够用。 */
 
+/* 流程图几何常量。颜色不在这里 —— 全部走 style.css 的 --flow-* token,
+   屏幕、图例、导出图读同一份,免得改一处忘两处。 */
+/* 流程图节点状态的读屏文字。和 style.css 的 --flow-*-line 一一对应 */
+const FLOW_STATE_TEXT = {
+  ok: "通过", bad: "超差", no_data: "无法校验", skip: "不校验", unknown: "未知",
+};
+
 const FLOW = {
   nodeW: 126, nodeH: 40, gapX: 46, gapY: 16, rowGap: 76,
   chipW: 88, chipH: 22, chipGap: 22,
-  color: { ok: "#15803d", bad: "#b91c1c", no_data: "#b45309", skip: "#9ca3af", "": "#9ca3af" },
 };
 
 function flowAdj(data) {
@@ -1663,8 +1881,8 @@ function drawFlow() {
     <defs>
       <marker id="flowArrow" viewBox="0 0 10 10" refX="9" refY="5"
               markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-        <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"
-              stroke="#ffffff" stroke-width="1.8" paint-order="stroke"></path>
+        <path d="M 0 0 L 10 5 L 0 10 z" fill="${cssVar('--flow-edge')}"
+              stroke="${cssVar('--panel')}" stroke-width="1.8" paint-order="stroke"></path>
       </marker>
     </defs>`, `<g class="flow-edges">`];
 
@@ -1739,11 +1957,15 @@ function drawFlow() {
     if (!p) return;
     const tip = `${n.name} · ${n.type || "?"}`
       + (n.dh_kw === null || n.dh_kw === undefined ? "" : ` · ΔH ${fmt(n.dh_kw, 1)} kW`);
+    // tabindex/role:SVG 里的 <g> 默认不可聚焦,键盘用户选不到设备。
+    // aria-label 把"位号 + 类型 + 状态"念出来,别只念一个位号。
+    const stateText = FLOW_STATE_TEXT[n.state] || "未知";
     parts.push(`<g class="${nodeCls(n.name)} st-${n.state || "unknown"}"
-        data-node="${esc(n.name)}" transform="translate(${p.x} ${p.y})">
+        data-node="${esc(n.name)}" transform="translate(${p.x} ${p.y})"
+        tabindex="0" role="button" aria-label="${esc(n.name)} ${esc(n.type || "")} ${stateText}">
         <title>${esc(tip)}</title>
         <rect class="node-body" width="${p.w}" height="${p.h}" rx="8"></rect>
-        <rect width="4" height="${p.h}" rx="2" class="flow-stripe"></rect>
+        <rect width="6" height="${p.h}" rx="3" class="flow-stripe"></rect>
         <text x="13" y="${p.h / 2 + 4}">${esc(n.name)}</text>
       </g>`);
   });
@@ -1755,14 +1977,17 @@ function drawFlow() {
 function renderFlowLegend() {
   const el = document.getElementById("flowLegend");
   if (!el) return;
+  /* 图例直接引用 token:和屏幕上节点用的是同一份值,不再各写一份调色板。
+     「无法校验」的方块也画成虚线 —— 和节点上的虚线框对应,缩略图里不至于看混。 */
   const items = [
-    ["ok", "通过"], ["bad", "超差"], ["no_data", "无法校验"], ["skip", "不校验"],
-    ["boundary", "进料 / 产品"],
+    ["通过", "var(--flow-ok-line)", "", "var(--panel)"],
+    ["超差", "var(--flow-bad-line)", "", "var(--panel)"],
+    ["无法校验", "var(--flow-nodata-line)", "border-style:dashed;", "var(--panel)"],
+    ["不校验", "var(--flow-idle-line)", "", "var(--panel)"],
+    ["进料 / 产品", "var(--flow-idle-line)", "border-style:dashed;", "var(--surface-hover)"],
   ];
-  el.innerHTML = items.map(([key, text]) => {
-    const color = key === "boundary" ? "#cbd5e1" : FLOW.color[key];
-    return `<span><i style="border-color:${color};background:${key === "boundary" ? "#f8fafc" : "#fff"}"></i>${text}</span>`;
-  }).join("");
+  el.innerHTML = items.map(([text, color, extra, bg]) =>
+    `<span><i style="border-color:${color};background:${bg};${extra}"></i>${text}</span>`).join("");
 }
 
 function flowNeighbors(name) {
@@ -1895,34 +2120,41 @@ async function renderFlow() {
 
 /* ------------------------------------------------------------ 流程图导出 */
 
-/* 导出的 SVG 是独立文件,读不到 style.css —— 所以把流程图用到的规则原样内联一份。
-   改 style.css 里 .flow-* 的颜色时记得同步这里(否则"屏幕上"和"导出的图"会不一样)。 */
-const FLOW_EXPORT_CSS = `
-  .flow-edge { fill: none; stroke: #94a3b8; stroke-width: 1.2; }
+/* 导出的 SVG 是独立文件,读不到 style.css —— 所以导出时把当前生效的 token 值
+   取出来内联一份。以前这里抄了一份硬编码 + 一句"改 style.css 记得同步",
+   字体栈还和屏幕不一致(屏幕 Segoe UI 优先、导出 YaHei 优先,同一串设备名宽度不同)。 */
+function flowExportCss() {
+  const v = cssVar;
+  return `
+  .flow-edge { fill: none; stroke: ${v("--flow-edge")}; stroke-width: 1.2; }
   .flow-edge.dim { opacity: .1; }
-  .flow-edge.on { stroke: #2563eb; stroke-width: 2; }
-  .flow-label { font-size: 9.5px; fill: #6b7280; paint-order: stroke; stroke: #fff; stroke-width: 2.5px; }
-  .flow-node rect { fill: #fff; stroke: #cbd5e1; stroke-width: 1.2; }
-  .flow-node .node-body { fill: #fff; fill-opacity: .82; }
-  .flow-node .flow-stripe { fill: #9ca3af; stroke: none; }
-  .flow-node text { font-family: "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
-    font-size: 14.5px; font-weight: 600; fill: #1f2328; }
-  .flow-node.st-ok rect { stroke: #86efac; }
-  .flow-node.st-ok .flow-stripe { fill: #15803d; }
-  .flow-node.st-bad rect { stroke: #fca5a5; }
-  .flow-node.st-bad .flow-stripe { fill: #b91c1c; }
-  .flow-node.st-no_data rect { stroke: #fcd34d; }
-  .flow-node.st-no_data .flow-stripe { fill: #b45309; }
-  .flow-node.st-skip rect { stroke: #d1d5db; }
-  .flow-node.st-skip .flow-stripe { fill: #cbd5e1; }
+  .flow-edge.on { stroke: ${v("--accent")}; stroke-width: 2; }
+  .flow-label { font-size: 9.5px; fill: ${v("--muted")}; paint-order: stroke;
+    stroke: ${v("--panel")}; stroke-width: 2.5px; }
+  .flow-node .node-body { fill: ${v("--panel")}; fill-opacity: .82;
+    stroke: ${v("--flow-idle-line")}; stroke-width: 1.2; }
+  .flow-node .flow-stripe { fill: ${v("--muted")}; stroke: none; }
+  .flow-node text { font-family: ${v("--font-sans")}; font-size: 14.5px;
+    font-weight: 600; fill: ${v("--text")}; }
+  .flow-node.st-ok .node-body { stroke: ${v("--flow-ok-line")}; }
+  .flow-node.st-ok .flow-stripe { fill: ${v("--ok-text")}; }
+  .flow-node.st-bad .node-body { stroke: ${v("--flow-bad-line")}; }
+  .flow-node.st-bad .flow-stripe { fill: ${v("--err-text")}; }
+  .flow-node.st-no_data .node-body { stroke: ${v("--flow-nodata-line")}; stroke-dasharray: 4 3; }
+  .flow-node.st-no_data .flow-stripe { fill: ${v("--warn-text")}; }
+  .flow-node.st-skip .node-body { stroke: ${v("--flow-idle-line")}; }
+  .flow-node.st-skip .flow-stripe { fill: ${v("--flow-idle-line")}; }
   .flow-node.dim { opacity: .18; }
-  .flow-node.on .node-body { stroke: #93c5fd; stroke-width: 1.6; fill-opacity: .92; }
-  .flow-node.center .node-body { fill: #eff6ff; fill-opacity: 1; stroke: #2563eb; stroke-width: 2.6; }
-  .flow-node.center .flow-stripe { fill: #2563eb; }
-  .flow-node.center text { fill: #2563eb; font-weight: 700; }
-  .flow-boundary rect { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; stroke-dasharray: 3 3; }
-  .flow-boundary text { font-size: 10.5px; fill: #6b7280; }
+  .flow-node.on .node-body { stroke: ${v("--accent-300")}; stroke-width: 1.6; fill-opacity: .92; }
+  .flow-node.center .node-body { fill: ${v("--accent-soft")}; fill-opacity: 1;
+    stroke: ${v("--accent")}; stroke-width: 2.6; }
+  .flow-node.center .flow-stripe { fill: ${v("--accent")}; }
+  .flow-node.center text { fill: ${v("--accent")}; font-weight: 700; }
+  .flow-boundary rect { fill: ${v("--surface-hover")}; stroke: ${v("--flow-idle-line")};
+    stroke-width: 1.2; stroke-dasharray: 3 3; }
+  .flow-boundary text { font-size: 10.5px; fill: ${v("--muted")}; }
 `;
+}
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -1937,15 +2169,21 @@ function flowExportSvg() {
   clone.setAttribute("width", Math.round(view.w));
   clone.setAttribute("height", Math.round(view.h));
 
+  // 导出图固定用浅色主题:深色图贴进 Word/PPT 会变成一整块黑
+  const html = document.documentElement;
+  const keepTheme = html.dataset.theme;
+  html.dataset.theme = "light";
+  const exportCss = flowExportCss();
+  html.dataset.theme = keepTheme || "light";
   const style = document.createElementNS(SVG_NS, "style");
-  style.textContent = FLOW_EXPORT_CSS;
+  style.textContent = exportCss;
   // 白底:SVG 默认透明,贴进 Word/PPT 会变成看不清的"白线浮在白纸"
   const bg = document.createElementNS(SVG_NS, "rect");
   bg.setAttribute("x", view.x);
   bg.setAttribute("y", view.y);
   bg.setAttribute("width", view.w);
   bg.setAttribute("height", view.h);
-  bg.setAttribute("fill", "#ffffff");
+  bg.setAttribute("fill", cssVar("--panel"));
   clone.insertBefore(bg, clone.firstChild);
   clone.insertBefore(style, clone.firstChild);
 
@@ -1998,7 +2236,7 @@ function exportFlowPng() {
     canvas.width = out.width * scale;
     canvas.height = out.height * scale;
     const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = cssVar("--panel");
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     URL.revokeObjectURL(url);
@@ -2063,13 +2301,24 @@ async function refreshCases(preferId = null) {
 }
 
 async function loadCase(id) {
-  const [detail, streams, blocks, impact] = await Promise.all([
-    api(`/api/cases/${id}`),
-    api(`/api/cases/${id}/streams`),
-    api(`/api/cases/${id}/blocks`),
-    // 波及范围是锦上添花:接口不通(老版本服务)不该拖垮整页
-    api(`/api/cases/${id}/impact`).catch(() => null),
-  ]);
+  // 失败时不清空表:旧数据留着更有用,但必须说清它是哪一份,别被当成新工况读
+  const prevId = state.current ? state.current.id : null;
+  showNotice(`正在加载工况 #${id}…`);
+  let payload;
+  try {
+    payload = await withBusy("tableWrap", () => Promise.all([
+      api(`/api/cases/${id}`),
+      api(`/api/cases/${id}/streams`),
+      api(`/api/cases/${id}/blocks`),
+      // 波及范围是锦上添花:接口不通(老版本服务)不该拖垮整页
+      api(`/api/cases/${id}/impact`).catch(() => null),
+    ]));
+  } catch (err) {
+    showNotice(`工况 #${id} 没加载成功:${err.message}。`
+      + (prevId ? `表格里仍是 #${prevId} 的数据。` : ""), { err: true });
+    return;
+  }
+  const [detail, streams, blocks, impact] = payload;
   state.current = detail;
   state.streams = streams;
   state.blocks = blocks;
@@ -2097,6 +2346,7 @@ async function loadCase(id) {
   } else if (state.tab !== "compare") {
     renderTable();
   }
+  clearNotice();
   resetTableScroll();   // 换工况也从第一行看起
 }
 
@@ -2113,8 +2363,11 @@ function readHashPage() {
 
 function setPage(page, { push = true } = {}) {
   if (!PAGES.includes(page)) page = "home";
+  // 换页就把详情收掉:数据页的抽屉是挂在 #pageData 里的,
+  // 只是把整页藏起来的话,绕一圈回到设备页它又会冒出来
+  closeDataDrawers();
   state.page = page;
-  document.querySelectorAll(".side-nav .tab").forEach((b) =>
+  document.querySelectorAll(".side-nav .nav-item").forEach((b) =>
     b.classList.toggle("active", b.dataset.tab === page));
 
   const isHome = page === "home";
@@ -2221,11 +2474,8 @@ function renderHome() {
     </section>
 
     <section class="card">
-      <h3>收敛判定</h3>
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
-        <span class="badge ${s.cls}">${s.text}</span>
-        <span class="muted">${c.converged ? "可用于统计对比" : "不建议做定量结论"}</span>
-      </div>
+      <h3>判定依据</h3>
+      <div class="muted" style="margin-bottom:8px">${c.converged ? "可用于统计对比" : "不建议做定量结论"}</div>
       ${kv("判定理由", (c.reasons || []).length ? `${(c.reasons || []).length} 条` : "无")}
       ${(() => {
         const codes = Object.entries(c.status || {})
@@ -2336,7 +2586,7 @@ function bindEvents() {
     loadCase(Number(e.target.value));
   });
 
-  document.querySelectorAll(".side-nav .tab").forEach((btn) => {
+  document.querySelectorAll(".side-nav .nav-item").forEach((btn) => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
       setPage(btn.dataset.tab);
@@ -2386,6 +2636,11 @@ function bindEvents() {
     document.getElementById("compPanel").classList.add("hidden"));
   document.getElementById("closePump").addEventListener("click", () =>
     document.getElementById("pumpPanel").classList.add("hidden"));
+
+  // 点抽屉外面的空白处也能关(三个抽屉共用;判定见 isOutsideDrawerClick)
+  document.addEventListener("click", (e) => {
+    if (isOutsideDrawerClick(e)) closeDataDrawers();
+  });
 
   // 打开中联选型:只开页面,不拼参数(noopener/noreferrer,别让外站碰到本页)
   document.getElementById("pumpZhonglian").addEventListener("click", () => {
@@ -2482,8 +2737,39 @@ function bindEvents() {
       flowSvg.classList.remove("dragging");
     });
     flowSvg.addEventListener("dblclick", fitFlow);
+    // Esc 只处理当前真正开着的东西。原来无条件 clearFlowFocus():
+    // 在任何页面按 Esc 都会重画一遍流程图,还抢在弹窗自己的 Esc 之前处理。
+    // 缩放按钮与快捷键:滚轮之外的第二条通道(键盘、触屏都要有)
+    const zoomIn = document.getElementById("flowZoomIn");
+    const zoomOut = document.getElementById("flowZoomOut");
+    if (zoomIn) zoomIn.addEventListener("click", () => zoomFlow(1.2));
+    if (zoomOut) zoomOut.addEventListener("click", () => zoomFlow(1 / 1.2));
+
+    // 节点用 Tab 选中后,回车/空格等同点击
+    flowSvg.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" && e.key !== " ") return;
+      const g = e.target.closest && e.target.closest(".flow-node");
+      if (!g || !g.dataset.node) return;
+      e.preventDefault();
+      flowSvg.focus({ preventScroll: true });
+      focusFlow(g.dataset.node);
+    });
+
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") clearFlowFocus();
+      const typing = e.target && e.target.closest
+        && e.target.closest("input, select, textarea");
+      // 流程页的缩放快捷键(在输入框里打字时不抢)
+      if (state.page === "flow" && !typing) {
+        if (e.key === "+" || e.key === "=") { e.preventDefault(); zoomFlow(1.2); return; }
+        if (e.key === "-" || e.key === "_") { e.preventDefault(); zoomFlow(1 / 1.2); return; }
+        if (e.key === "0") { e.preventDefault(); fitFlow(); return; }
+      }
+      if (e.key !== "Escape") return;
+      if (state.page === "flow") {
+        if (state.flow.focus) clearFlowFocus();
+        return;
+      }
+      closeDataDrawers();   // 数据页的三个抽屉(塔剖面 / 泵参数 / 流股组成)
     });
   }
   document.getElementById("deleteBtn").addEventListener("click", deleteCurrentCase);
@@ -2518,6 +2804,7 @@ async function installSampleData() {
 }
 
 async function init() {
+  initTheme();
   bindEvents();
 
   try {

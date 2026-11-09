@@ -15,6 +15,7 @@
 | `selftest.py` | 判定 / 单位 / 焓平衡 / 管路选型回归自测,拿真实工况当固定样本 | ❌ | 只读库 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
+| `ui_sweep.py` | 界面回归自检:无头浏览器过 6 个页签(浅色 + 深色),截图并收集控制台报错 | ❌ | 写 `data/preview/ui-check/` |
 | `make_icon.py` | 源图 → `.ico`(圆形抠底 + 6 个尺寸) | ❌ | 写 `assets/` |
 | `check_public_safe.py` | 提交 / 发布前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
 | `build_exe.py` | 用 PyInstaller 打单文件 `Casebook.exe`(需要 `pip install pyinstaller`) | ❌ | 写 `data/preview/{dist,build}` |

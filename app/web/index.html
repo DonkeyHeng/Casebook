@@ -6,8 +6,36 @@
   <title>Casebook · 工况数据</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <link rel="stylesheet" href="/static/style.css">
+  <script>
+    /* 尽量早地定下主题:深色用户加载时不会先白闪一下。
+       真正的三态(auto/light/dark)逻辑在 app.js,这里只是先写属性。 */
+    (function () {
+      try {
+        var m = localStorage.getItem("casebook-theme") || "auto";
+        var dark = m === "dark"
+          || (m === "auto" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+      } catch (e) {
+        document.documentElement.dataset.theme = "light";
+      }
+    })();
+  </script>
 </head>
 <body>
+  <!-- 图标 sprite:内联 SVG,不引外部字体/图标库(这个工具要能离线双击跑)。
+       统一 24×24 viewBox、stroke-width 1.5、stroke=currentColor,
+       实际尺寸由 .ico / .ico-lg 控制;用 <use href="#i-xxx"> 引用。 -->
+  <svg class="icon-sprite" width="0" height="0" aria-hidden="true" focusable="false">
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 9h13l-3-3M20 15H7l3 3"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-8 8M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></symbol>
+  </svg>
   <!-- 左侧栏:品牌 + 当前工况(全局语境)+ 模块导航 + 退出 -->
   <aside class="sidebar">
     <div class="brand">Casebook</div>
@@ -20,15 +48,20 @@
     </div>
 
     <nav class="side-nav">
-      <a class="tab nav-item" data-tab="home" href="#home">首页</a>
-      <a class="tab nav-item" data-tab="streams" href="#streams">流股</a>
-      <a class="tab nav-item" data-tab="pipes" href="#pipes">管道</a>
-      <a class="tab nav-item" data-tab="blocks" href="#blocks">设备</a>
-      <a class="tab nav-item" data-tab="compare" href="#compare">对比</a>
-      <a class="tab nav-item" data-tab="flow" href="#flow">流程</a>
+      <a class="nav-item" data-tab="home" href="#home">首页</a>
+      <a class="nav-item" data-tab="streams" href="#streams">流股</a>
+      <a class="nav-item" data-tab="pipes" href="#pipes">管道</a>
+      <a class="nav-item" data-tab="blocks" href="#blocks">设备</a>
+      <a class="nav-item" data-tab="compare" href="#compare">对比</a>
+      <a class="nav-item" data-tab="flow" href="#flow">流程</a>
     </nav>
 
     <div class="side-foot">
+      <!-- 三态:跟随系统 → 浅色 → 深色。按钮上的图标与文字由 app.js 换 -->
+      <button id="themeBtn" class="btn block with-ico" type="button" title="外观:跟随系统">
+        <svg class="ico" id="themeIcon"><use href="#i-auto"/></svg>
+        <span id="themeLabel">跟随系统</span>
+      </button>
       <button id="quitBtn" class="btn block" title="停止服务并关闭窗口">退出</button>
     </div>
   </aside>
@@ -60,16 +93,25 @@
     <section id="pageFlow" class="page hidden">
       <header class="page-head">
         <h2>流程</h2>
+        <!-- 缩放按钮曾经被拿掉(说"占地方"),结果滚轮成了唯一入口:键盘和触屏都用不了 -->
         <div class="page-actions">
-          <button id="flowFit" class="btn" title="缩放到全部设备(双击画布同效)">适应窗口</button>
-          <button id="flowLabels" class="btn" title="在连线上显示流股名">流股名</button>
-          <button id="flowExportSvg" class="btn" title="把当前视图导成 SVG(矢量,可以无限放大)">导出 SVG</button>
-          <button id="flowExportPng" class="btn" title="把当前视图导成 PNG(2 倍像素,贴报告用)">导出 PNG</button>
+          <div class="btn-group">
+            <button id="flowZoomOut" class="icon-btn" type="button" title="缩小(快捷键 -)"><svg class="ico"><use href="#i-minus"/></svg></button>
+            <button id="flowZoomIn" class="icon-btn" type="button" title="放大(快捷键 +)"><svg class="ico"><use href="#i-plus"/></svg></button>
+            <button id="flowFit" class="btn" title="缩放到全部设备(快捷键 0,双击画布同效)">适应窗口</button>
+          </div>
+          <div class="btn-group">
+            <button id="flowLabels" class="btn" title="在连线上显示流股名">流股名</button>
+          </div>
+          <div class="btn-group">
+            <button id="flowExportSvg" class="btn" title="把当前视图导成 SVG(矢量,可以无限放大)">导出 SVG</button>
+            <button id="flowExportPng" class="btn" title="把当前视图导成 PNG(2 倍像素,贴报告用)">导出 PNG</button>
+          </div>
         </div>
       </header>
 
       <div class="flow-bar">
-        <span class="muted" id="flowHint">滚轮缩放、拖动平移;点击设备聚焦它上下游 2 层,Esc 取消。</span>
+        <span class="muted" id="flowHint">滚轮或 +/− 缩放、拖动平移、0 适应窗口;点击(或 Tab 选中后回车)设备聚焦它上下游 2 层,Esc 取消。</span>
         <span class="spacer"></span>
         <span id="flowLegend" class="legend"></span>
       </div>
@@ -82,7 +124,7 @@
       <section id="flowPanel" class="card flow-panel hidden">
         <header class="panel-head">
           <h3 id="flowPanelTitle">设备</h3>
-          <button id="flowPanelClose" class="close" title="取消聚焦">✕</button>
+          <button id="flowPanelClose" class="close" title="取消聚焦"><svg class="ico"><use href="#i-close"/></svg></button>
         </header>
         <div id="flowPanelBody"></div>
       </section>
@@ -92,14 +134,21 @@
     <section id="pagePipes" class="page hidden">
       <header class="page-head">
         <h2>管道</h2>
+        <!-- 三组:算 / 出 / 配。原来七个同级按钮连成一排,导出和"恢复默认"挨着,容易误点 -->
         <div class="page-actions">
-          <button id="pipeRecalc" class="btn" title="参数改了会自动重算,这里用于手动再算一次">重算</button>
-          <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
-          <button id="pipeExportXlsx" class="btn" title="导出整个工况的 Excel(含「管道」「管道计算书」两张表)">导出 Excel</button>
-          <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
-          <button id="pipeStdOpen" class="btn" title="导入 GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的 CSV(数据受著作权保护,需要你自己整理)">标准表</button>
-          <button id="pipeClassOpen" class="btn" title="配置管道等级表(可选:不配就全部按默认材质)">等级表</button>
-          <button id="pipeDocOpen" class="btn" title="管道计算说明:十步流程、公式、数据来源与已知局限(想核对算法时看)">计算说明</button>
+          <div class="btn-group">
+            <button id="pipeRecalc" class="btn" title="参数改了会自动重算,这里用于手动再算一次">重算</button>
+            <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
+          </div>
+          <div class="btn-group">
+            <button id="pipeExportXlsx" class="btn" title="导出整个工况的 Excel(含「管道」「管道计算书」两张表)">导出 Excel</button>
+            <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
+          </div>
+          <div class="btn-group">
+            <button id="pipeStdOpen" class="btn" title="导入 GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的 CSV(数据受著作权保护,需要你自己整理)">标准表</button>
+            <button id="pipeClassOpen" class="btn" title="配置管道等级表(可选:不配就全部按默认材质)">等级表</button>
+            <button id="pipeDocOpen" class="btn" title="管道计算说明:十步流程、公式、数据来源与已知局限(想核对算法时看)">计算说明</button>
+          </div>
         </div>
       </header>
 
@@ -144,7 +193,7 @@
         <table id="pipeTable"><thead></thead><tbody></tbody></table>
       </div>
 
-      <div id="pipeEmpty" class="empty hidden"></div>
+      <div id="pipeEmpty" class="empty empty--block hidden"></div>
 
       <section id="pipeMissing" class="card wide hidden">
         <h3 id="pipeMissingTitle">未选型的流股</h3>
@@ -161,7 +210,7 @@
         <div class="pipe-modal-box">
           <header class="panel-head">
             <h3 id="pipeClassTitle">管道等级表(可选)</h3>
-            <button id="pipeClassClose" class="close" title="关闭,不保存">✕</button>
+            <button id="pipeClassClose" class="close" title="关闭,不保存"><svg class="ico"><use href="#i-close"/></svg></button>
           </header>
           <p class="pipe-class-hint">
             <b>不知道这是什么就不用管它</b> —— 关掉这个窗口,所有管子都按页面上的「默认管材」计算。<br>
@@ -206,7 +255,7 @@
         <div class="pipe-modal-box pipe-std-box">
           <header class="panel-head">
             <h3 id="pipeStdTitle">导入标准表</h3>
-            <button id="pipeStdClose" class="close" title="关闭,不导入">✕</button>
+            <button id="pipeStdClose" class="close" title="关闭,不导入"><svg class="ico"><use href="#i-close"/></svg></button>
           </header>
           <p class="pipe-class-hint">
             管路选型要查 <b>GB/T 17395-2024 的表 1、表 4</b> 和 <b>GB/T 20801.1-2025 的表 B.1</b>。
@@ -235,7 +284,7 @@
         <div class="pipe-modal-box pipe-doc">
           <header class="panel-head">
             <h3 id="pipeDocTitle">管道计算说明</h3>
-            <button id="pipeDocClose" class="close" title="关闭">✕</button>
+            <button id="pipeDocClose" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
           </header>
 
           <p class="pipe-doc-callout">
@@ -396,13 +445,16 @@
         </span>
         <span id="count" class="muted"></span>
         <span class="spacer"></span>
-        <button id="compareHint" class="icon-btn" type="button" title="对比两个工况">⇄</button>
+        <button id="compareHint" class="icon-btn" type="button" title="对比两个工况"><svg class="ico"><use href="#i-swap"/></svg></button>
         <span id="compareControls" class="compare-controls hidden">
           <label>基础 <select id="baseSelect"></select></label>
           <label>对比 <select id="otherSelect"></select></label>
           <span id="compareSummary" class="muted"></span>
         </span>
       </nav>
+
+      <!-- 请求提示:换工况 / 跑对比期间说清"屏幕上是哪一份数据",失败时说清原因 -->
+      <p id="dataNotice" class="notice hidden" role="status" aria-live="polite"></p>
 
       <!-- 泵参数条:只在「泵」家族显示。改这里只影响本页显示,不写库 -->
       <div id="pumpBar" class="pump-bar hidden">
@@ -421,12 +473,13 @@
         <span class="muted">余量只影响显示 · p_v 逐台填</span>
         <button id="pumpInherit" class="btn" type="button"
                 title="把同一模型、更早工况里填过的 p_v 按位号搬过来;只填空着的格子,不覆盖手填值">沿用上一工况 p_v</button>
-        <button id="pumpZhonglian" class="btn primary" type="button"
-                title="在浏览器里打开中联水泵选型页(不带任何参数,流量/扬程由你自己填)">打开中联选型</button>
+        <button id="pumpZhonglian" class="btn" type="button"
+                title="在浏览器里打开中联水泵选型页(不带任何参数,流量/扬程由你自己填)">打开中联选型<svg class="ico"><use href="#i-external"/></svg></button>
         <span id="pumpInheritMsg" class="muted"></span>
       </div>
 
-      <div class="table-wrap" id="tableWrap">
+      <!-- tabindex: 表格横向滚很长,键盘用户也要能滚(与管道页 #pipeTableWrap 一致) -->
+      <div class="table-wrap" id="tableWrap" tabindex="0" aria-label="数据表,可用方向键滚动">
         <table id="table">
           <thead></thead>
           <tbody></tbody>
@@ -437,7 +490,7 @@
       <section id="columnPanel" class="column-panel hidden">
         <header class="panel-head">
           <h3 id="columnTitle">塔剖面</h3>
-          <button id="closeColumn" class="close" title="关闭">✕</button>
+          <button id="closeColumn" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
         </header>
         <div id="columnCharts" class="charts"></div>
         <div class="table-wrap small">
@@ -448,7 +501,7 @@
       <section id="pumpPanel" class="column-panel hidden">
         <header class="panel-head">
           <h3 id="pumpTitle">泵参数</h3>
-          <button id="closePump" class="close" title="关闭">✕</button>
+          <button id="closePump" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
         </header>
         <p class="muted pump-panel-hint">中联表单:分类 · 型号 · 流量 · 扬程 · 配套功率</p>
         <div class="table-wrap small">
@@ -459,7 +512,7 @@
       <section id="compPanel" class="column-panel comp-panel hidden">
         <header class="panel-head">
           <h3 id="compTitle">流股组成</h3>
-          <button id="closeComp" class="close" title="关闭">✕</button>
+          <button id="closeComp" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
         </header>
         <div id="compBody" class="comp-body"></div>
       </section>

@@ -325,10 +325,31 @@ function bindPipeEvents() {
 
 /* ------------------------------------------------------------ 管道计算说明 */
 
+/* 弹窗的键盘与焦点行为(三个弹窗共用):
+   打开时把焦点移进弹窗、记住是哪个按钮打开的,关闭时还回去。
+   role="dialog" / aria-modal 早就在标记里了,但焦点一直没跟进 ——
+   读屏会继续念遮罩后面的内容,键盘用户 Tab 一圈还在页面底下。 */
+const modalFocus = { trigger: null };
+
+function focusIntoModal(modal) {
+  if (!modal) return;
+  modalFocus.trigger = document.activeElement;
+  const first = modal.querySelector("input:not([type=hidden]), select, textarea")
+    || modal.querySelector("button, [href]");
+  if (first) first.focus();
+}
+
+function restoreModalFocus() {
+  const t = modalFocus.trigger;
+  modalFocus.trigger = null;
+  if (t && typeof t.focus === "function") t.focus();
+}
+
 function openPipeDoc() {
   const modal = document.getElementById("pipeDocModal");
   if (!modal) return;
   modal.classList.remove("hidden");
+  focusIntoModal(modal);
   document.addEventListener("keydown", pipeDocEsc);
 }
 
@@ -336,6 +357,7 @@ function closePipeDoc() {
   const modal = document.getElementById("pipeDocModal");
   if (modal) modal.classList.add("hidden");
   document.removeEventListener("keydown", pipeDocEsc);
+  restoreModalFocus();
 }
 
 function pipeDocEsc(e) {
@@ -354,6 +376,8 @@ function openPipeClass() {
   if (!modal) return;
   modal.classList.remove("hidden");
   showPipeClassError("");
+  focusIntoModal(modal);
+  document.addEventListener("keydown", pipeClassEsc);
   api("/api/piping-classes").then((data) => {
     const grades = (data && data.grades) || PIPE_CLASS_GRADES;
     const defaultSel = document.getElementById("pipeClassDefault");
@@ -372,6 +396,13 @@ function openPipeClass() {
 function closePipeClass() {
   const modal = document.getElementById("pipeClassModal");
   if (modal) modal.classList.add("hidden");
+  document.removeEventListener("keydown", pipeClassEsc);
+  restoreModalFocus();
+}
+
+/* 等级表弹窗原来没有 Esc:计算说明和标准表导入都有,只有它要摸鼠标去点 ✕ */
+function pipeClassEsc(e) {
+  if (e.key === "Escape") closePipeClass();
 }
 
 function showPipeClassError(text) {
@@ -395,7 +426,7 @@ function addPipeClassRow(rule, grades) {
       `<option value="${esc(g)}"${g === rule.grade ? " selected" : ""}>${esc(g)}</option>`).join("")}</select></td>
     <td><input class="pc-c2" type="number" step="0.1" min="0" max="20" value="${rule.corrosion_mm ?? 0}"></td>
     <td><input class="pc-note" placeholder="可选" value="${esc(rule.note || "")}"></td>
-    <td><button class="btn pc-del" type="button" title="删掉这一条">✕</button></td>`;
+    <td><button class="btn pc-del" type="button" title="删掉这一条"><svg class="ico"><use href="#i-close"/></svg></button></td>`;
   tr.querySelector(".pc-del").addEventListener("click", () => tr.remove());
   tbody.appendChild(tr);
 }
@@ -460,6 +491,7 @@ function openPipeStd() {
   showPipeStdError("");
   showPipeStdOk("");
   Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
+  focusIntoModal(modal);
   document.addEventListener("keydown", pipeStdEsc);
   loadPipeStdInfo();
 }
@@ -468,6 +500,7 @@ function closePipeStd() {
   const modal = document.getElementById("pipeStdModal");
   if (modal) modal.classList.add("hidden");
   document.removeEventListener("keydown", pipeStdEsc);
+  restoreModalFocus();
 }
 
 function pipeStdEsc(e) {
