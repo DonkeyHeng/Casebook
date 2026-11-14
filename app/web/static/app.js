@@ -641,8 +641,9 @@ function renderBlocks() {
       }
       if (c.pvInput) {
         const pv = row[c.key];
-        const val = pv === null || pv === undefined ? "" : pv;
-        return `<td class="pv-cell"><input class="pv-input" type="number" step="0.1" min="0"
+        // 显示保留 3 位(与参数卡一致),避免 1.04824999… 这种长尾把格子撑爆
+        const val = pv === null || pv === undefined ? "" : fmt(pv, 3);
+        return `<td class="pv-cell"><input class="pv-input" type="number" step="0.001" min="0"
                    value="${val}" data-pv="${esc(row.name)}"
                    title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它。模型读不到时:物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况"></td>`;
       }
@@ -2656,6 +2657,35 @@ function bindEvents() {
   document.addEventListener("click", (e) => {
     if (isOutsideDrawerClick(e)) closeDataDrawers();
   });
+
+  // 泵参数条上的「?」操作指南:悬浮展开、点击固定,点外面 / Esc 收起
+  const pvHelp = document.getElementById("pvHelp");
+  const pvHelpBtn = document.getElementById("pvHelpBtn");
+  const pvHelpBody = document.getElementById("pvHelpBody");
+  if (pvHelp && pvHelpBtn && pvHelpBody) {
+    let pinned = false;
+    const setPvHelp = (open) => {
+      pvHelpBody.classList.toggle("show", open);
+      pvHelpBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (!open) pinned = false;
+    };
+    pvHelp.addEventListener("mouseenter", () => setPvHelp(true));
+    pvHelp.addEventListener("mouseleave", () => {
+      if (!pinned) setPvHelp(false);
+    });
+    pvHelpBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const open = !pvHelpBody.classList.contains("show");
+      setPvHelp(open);
+      pinned = open;
+    });
+    document.addEventListener("click", (e) => {
+      if (!pvHelp.contains(e.target)) setPvHelp(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") setPvHelp(false);
+    });
+  }
 
   // 打开中联选型:只开页面,不拼参数(noopener/noreferrer,别让外站碰到本页)
   document.getElementById("pumpZhonglian").addEventListener("click", () => {
