@@ -88,7 +88,8 @@ def _fail(message: str) -> None:
 def start(db_path: str, include_composition: bool = False) -> tuple[dict, bool]:
     """开始一次读取。
 
-    include_composition=True 时连流股组成一起读(慢:每条流股 36 次 COM 调用)。
+    include_composition=True 时连流股组成一起读(慢:每条流股 54 次 COM 调用 ——
+    液相 x + 气相 y + 各组分质量流量)。
 
     Returns:
         (状态快照, 是否真的启动了新任务)。已有任务在跑时返回 False。

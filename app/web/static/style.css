@@ -1788,9 +1788,11 @@ input:focus-visible {
   background: var(--bg, transparent); color: inherit;
 }
 
+/* 设备勾选不设最大高度:一个工况最多几十台,整段铺开比缩在 340px 小框里好点。
+   页面本身已经能滚(#pageReport overflow-y:auto)。 */
 .report-blocks {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 4px 12px; max-height: 340px; overflow: auto;
+  gap: 4px 12px;
   border: 1px solid var(--line); border-radius: var(--r-md, 8px); padding: 8px 10px;
 }
 
