@@ -802,6 +802,21 @@ def test_report_export() -> None:
             check("report: 封面标题在", report_export.TITLE in text)
             check("report: 附注写了非工程设计依据", "非工程设计依据" in text)
             check("report: 附注写了数据来源", "数据来源" in text)
+            # 按册导出:物料册没有能量章,能量册没有物料章,文件名带册别
+            mass_doc = report_export.render(data, "mass")
+            mass_text = "\n".join(p.text for p in __import__("docx").Document(
+                __import__("io").BytesIO(mass_doc)).paragraphs)
+            check("report: 物料册不含能量章", "二、能量衡算" not in mass_text)
+            check("report: 物料册有封面册别", "物料衡算册" in mass_text)
+            energy_doc = report_export.render(data, "energy")
+            energy_text = "\n".join(p.text for p in __import__("docx").Document(
+                __import__("io").BytesIO(energy_doc)).paragraphs)
+            check("report: 能量册不含物料章", "一、物料衡算" not in energy_text)
+            check("report: 能量册有封面册别", "能量衡算册" in energy_text)
+            check_eq("report: 文件名带册别",
+                     (report_export.filename(case_id, "mass").count("_mass_"),
+                      report_export.filename(case_id, "energy").count("_energy_")),
+                     (1, 1))
         conn.close()
     finally:
         try:

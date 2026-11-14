@@ -72,6 +72,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="设备家族 key,逗号分隔(如 mix,column)")
     parser.add_argument("--out", default=os.path.join("data", "preview"),
                         help="输出目录(默认 data/preview)")
+    parser.add_argument("--kind", default="all",
+                        choices=["mass", "energy", "all"],
+                        help="导出哪一册:mass 物料 / energy 能量 / all 合成一本(默认)")
     parser.add_argument("--list", action="store_true", help="列出库里的工况")
     args = parser.parse_args(argv)
 
@@ -127,7 +130,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         data = report_export.build_data(conn, args.case, parts, picked)
-        blob = report_export.render(data)
+        blob = report_export.render(data, args.kind)
     except ImportError as exc:
         print(f"无法生成: {exc}\n先装依赖:{sys.executable} -m pip install "
               f"\u0022python-docx>=1.1\u0022")
@@ -136,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"无法生成:{exc}")
         return 2
 
-    fname = report_export.filename(args.case)
+    fname = report_export.filename(args.case, args.kind)
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, fname)
@@ -146,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     n_zone = len(data["wide"]["zones"])
     n_comp = len(data["wide"]["components"])
     has_mass_comp = any(z["has_mass_comp"] for z in data["wide"]["zones"])
-    print(f"已生成:{path}")
+    print(f"已生成({args.kind}):{path}")
     print(f"  物料表 {n_zone} 个工段 + 全流程,组分 {n_comp} 个"
           f"({'含质量段' if has_mass_comp else '只有摩尔段,重读工况可补质量段'}),"
           f"能量表 {len(data['energy']['devices'])} 行,"

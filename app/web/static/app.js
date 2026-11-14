@@ -2651,16 +2651,18 @@ async function saveReportSections() {
   }
 }
 
-function downloadReport() {
+/* kind: mass 物料册 / energy 能量册。两个按钮共用这一个下载函数 */
+function downloadReport(kind) {
   const c = state.current;
   if (!c) { reportNotice("还没有工况", "warn"); return; }
   const picked = [...state.report.picked];
-  const query = picked.length
-    ? `?blocks=${encodeURIComponent(picked.join(","))}` : "";
+  const query = new URLSearchParams({ kind });
+  if (picked.length) query.set("blocks", picked.join(","));
   // 直接用地址栏下载:文件名走 Content-Disposition,和「导出 Excel」一致
-  const url = `/api/cases/${c.id}/balance-report.docx${query}`;
-  window.location.href = url;
-  reportNotice("正在生成报告,请留意浏览器下载栏。");
+  window.location.href = `/api/cases/${c.id}/balance-report.docx?${query}`;
+  reportNotice(kind === "energy"
+    ? "正在生成能量衡算册,请留意浏览器下载栏。"
+    : "正在生成物料衡算册,请留意浏览器下载栏。");
 }
 
 function bindReportPage() {
@@ -2677,8 +2679,10 @@ function bindReportPage() {
     });
   }
 
-  const download = document.getElementById("reportDownload");
-  if (download) download.addEventListener("click", () => downloadReport());
+  const dlMass = document.getElementById("reportDownloadMass");
+  if (dlMass) dlMass.addEventListener("click", () => downloadReport("mass"));
+  const dlEnergy = document.getElementById("reportDownloadEnergy");
+  if (dlEnergy) dlEnergy.addEventListener("click", () => downloadReport("energy"));
 
   const filter = document.getElementById("reportFilter");
   if (filter) {

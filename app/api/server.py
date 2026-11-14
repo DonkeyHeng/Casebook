@@ -825,8 +825,13 @@ class Handler(BaseHTTPRequestHandler):
             parts = section_rules.merge(
                 section_rules.draft(blocks, connections), confirmed, deleted)
 
+        kind = _q("kind") or "all"
+        if kind not in report_export.KINDS:
+            self._error(f"未知册别:{kind}(可用 {'/'.join(report_export.KIND_KEYS)})", 400)
+            return
         try:
-            data, fname = report_export.build_report(conn, case_id, parts, picked_list)
+            data, fname = report_export.build_report(conn, case_id, parts, picked_list,
+                                                     kind)
         except ImportError:
             self._error('服务器没有安装 python-docx,无法生成 Word 报告。'
                         '请先 pip install "python-docx>=1.1"', 500)

@@ -34,6 +34,23 @@ from app.store import db
 
 TITLE = "物料与能量衡算报告"
 
+# 一册一主题色:物料册冷蓝、能量册暖砖红。黑白打印时靠封面「册别」与章节标题
+# 的文字区分,颜色只是辅助 —— 评委多半会打印出来看。
+KINDS: dict[str, dict] = {
+    "mass": {"title": "物料衡算报告", "book": "物料衡算册",
+             "accent": "1F4E79", "light": "DCE6F1", "zebra": "F7FAFD"},
+    "energy": {"title": "能量衡算报告", "book": "能量衡算册",
+               "accent": "9C3B23", "light": "F7E3DD", "zebra": "FDF8F6"},
+    "all": {"title": "物料与能量衡算报告", "book": "衡算报告",
+            "accent": "1F4E79", "light": "DCE6F1", "zebra": "F7FAFD"},
+}
+KIND_KEYS = tuple(KINDS)
+_ACTIVE_KIND = KINDS["all"]
+
+
+def kind_meta(kind: str) -> dict:
+    return KINDS.get(kind) or KINDS["all"]
+
 # 焓平衡状态(库里存的就是这四个)
 _BALANCE_STATE = energy_report.STATE_TEXT
 # 三种塔负荷来源
@@ -148,30 +165,70 @@ def _percent(rel) -> str:
     return "" if value is None else f"{value * 100:.3f}%"
 
 
-def filename(case_id: int) -> str:
+def filename(case_id: int, kind: str = "all") -> str:
+    """文件名带册别:case42_mass_… / case42_energy_… / case42_balance_…。"""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    return f"Casebook_case{case_id}_balance_{stamp}.docx"
+    tag = {"mass": "mass", "energy": "energy"}.get(kind, "balance")
+    return f"Casebook_case{case_id}_{tag}_{stamp}.docx"
 
 
 # ---------------------------------------------------------------- 文档骨架
 
-def _setup(doc, case: dict) -> None:
-    """页面设成 A4,默认字体设成宋体。"""
-    from docx.shared import Cm, Pt
+def _setup(doc, case: dict, kind: str = "all") -> None:
+    """A4 版面 + 页眉(册别/工况)+ 页脚(页码)。"""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt
 
+    meta = kind_meta(kind)
     section = doc.sections[0]
     section.page_width = Cm(21.0)
     section.page_height = Cm(29.7)
     section.left_margin = Cm(2.5)
     section.right_margin = Cm(2.5)
-    section.top_margin = Cm(2.5)
-    section.bottom_margin = Cm(2.5)
+    section.top_margin = Cm(2.4)
+    section.bottom_margin = Cm(2.2)
 
     style = doc.styles["Normal"]
     style.font.size = Pt(10.5)
     style.font.name = "宋体"
     style.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
+    style.paragraph_format.line_spacing = 1.22
+
+    # 页眉:左「Casebook · 册别」,右「#工况号 模型名」,底边一条主题色细线
+    head = section.header.paragraphs[0]
+    head.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    _font(head.add_run(f"Casebook · {meta['book']}"), Pt(8.5), False)
+    _font(head.add_run(f"　　#{case.get('id')}　{case.get('model_name') or ''}"),
+          Pt(8.5), False).font.color.rgb = _rgb("808080")
+    p_pr = head._p.get_or_add_pPr()
+    borders = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "6")
+    bottom.set(qn("w:color"), meta["accent"])
+    bottom.set(qn("w:space"), "2")
+    borders.append(bottom)
+    p_pr.append(borders)
+
+    # 页脚:第 X 页(PAGE 域,Word/WPS 打开自动计算)
+    foot = section.footer.paragraphs[0]
+    foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _font(foot.add_run("第 "), Pt(8.5), False).font.color.rgb = _rgb("808080")
+    run = foot.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = "PAGE"
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(end)
+    run.font.size = Pt(8.5)
+    _font(foot.add_run(" 页"), Pt(8.5), False).font.color.rgb = _rgb("808080")
 
 
 def _font(run, size=None, bold=None, name="宋体"):
@@ -183,6 +240,7 @@ def _font(run, size=None, bold=None, name="宋体"):
         run.font.size = size
     if bold is not None:
         run.font.bold = bold
+    return run
 
 
 def _para(doc, text="", size=None, bold=False, align=None, space_after=None,
@@ -211,6 +269,23 @@ def _heading(doc, text, level=1):
     return para
 
 
+def _rgb(hex_color: str):
+    from docx.shared import RGBColor
+    return RGBColor.from_string(hex_color)
+
+
+def _tint(cell, color=None, bold=None, italic=None) -> None:
+    """给单元格里的文字上色 / 加粗 / 斜体(状态列用)。"""
+    for para in cell.paragraphs:
+        for run in para.runs:
+            if color:
+                run.font.color.rgb = _rgb(color)
+            if bold is not None:
+                run.font.bold = bold
+            if italic is not None:
+                run.font.italic = italic
+
+
 def _shade(cell, hex_fill: str) -> None:
     """给单元格铺底色(超差行标红用)。"""
     from docx.oxml import OxmlElement
@@ -224,7 +299,7 @@ def _shade(cell, hex_fill: str) -> None:
 
 
 def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
-                header_extra=None):
+                header_extra=None, status_col=None):
     """三线表:顶线 1.5 pt、表头下线 0.75 pt、底线 1.5 pt,无竖线无内部横线。
 
     python-docx 没有内置三线表样式,只能直接写 `w:tblBorders`。
@@ -237,10 +312,15 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
     from docx.shared import Cm, Pt
 
     size = Pt(font_pt) if font_pt else Pt(9.5)
+    meta = _ACTIVE_KIND
     if caption:
-        cap = _para(doc, caption, Pt(10), True, space_after=2)
-        # 表题不能单独留在页底:后面紧跟的表格要跟着一起走
-        cap.paragraph_format.keep_with_next = True
+        cap = doc.add_paragraph()
+        cap.paragraph_format.space_before = Pt(8)
+        cap.paragraph_format.space_after = Pt(2)
+        cap.paragraph_format.keep_with_next = True   # 表题不单独留在页底
+        # 表题前的小色块:黑白打印时是灰块,仍能分出"这是表题"
+        _font(cap.add_run("■ "), Pt(7), True).font.color.rgb = _rgb(meta["accent"])
+        _font(cap.add_run(caption), Pt(10), True)
 
     table = doc.add_table(rows=1 + len(rows), cols=len(headers))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -260,7 +340,9 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
             node.set(qn("w:val"), "none")
             node.set(qn("w:sz"), "0")
         borders.append(node)
-    table._tbl.tblPr.append(borders)
+    table._tbl.tblPr.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook",
+        "w:tblCaption", "w:tblDescription")
 
     def _row_flag(row, tag: str) -> None:
         """给整行加一个 w:trPr 开关(tblHeader / cantSplit)。"""
@@ -277,6 +359,7 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
 
     for index, head in enumerate(headers):
         fill(table.rows[0].cells[index], head, True)
+        _shade(table.rows[0].cells[index], meta["light"])
     # 表头跨页重复:表格被分页时,下一页顶部仍有列头(否则读者看不到单位)
     _row_flag(table.rows[0], "tblHeader")
     # 表头下方的线(三线表的第二条)
@@ -290,17 +373,43 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         borders_cell.append(node)
         tc_pr.append(borders_cell)
 
+    stripe = 0
     for row_index, row in enumerate(rows, start=1):
         _row_flag(table.rows[row_index], "cantSplit")
         cells = table.rows[row_index].cells
         cells_data, bold, fill_hex = (row if isinstance(row, tuple)
                                       else (row, False, None))
+        # 只有第一格有字 = 组分分段行(整行浅色带,把两个数据块分开)
+        is_group = bool(cells_data) and not any(
+            str(v).strip() for v in cells_data[1:])
         for index, value in enumerate(cells_data):
             align = (WD_ALIGN_PARAGRAPH.LEFT if index == 0
                      else WD_ALIGN_PARAGRAPH.RIGHT)
             fill(cells[index], value, bold, align)
-            if fill_hex:
-                _shade(cells[index], fill_hex)
+
+        if fill_hex:                      # 超差行:整行浅红
+            for cell in cells:
+                _shade(cell, fill_hex)
+        elif is_group:                    # 分组行:主题浅色带
+            for cell in cells:
+                _shade(cell, meta["light"])
+        elif stripe % 2 == 1:             # 斑马纹:宽表不串行
+            for cell in cells:
+                _shade(cell, meta["zebra"])
+        if not is_group:
+            stripe += 1
+
+        # 状态列不只靠颜色:超差前置实心点并加粗;无法校验变灰斜体
+        if status_col is not None and status_col < len(cells_data):
+            text = str(cells_data[status_col]).strip()
+            para = cells[status_col].paragraphs[0]
+            if text == "超差" and para.runs:
+                para.runs[0].text = "● " + para.runs[0].text
+                _tint(cells[status_col], color="B00020", bold=True)
+            elif text in ("无法校验", "流量过小"):
+                _tint(cells[status_col], color="8A6D3B", italic=True)
+            elif text == "不校验":
+                _tint(cells[status_col], color="7F7F7F")
 
     for index, width in enumerate(widths):
         table.columns[index].width = Cm(width)
@@ -328,14 +437,32 @@ class _Captions:
         body = f"表 {self.chapter}-{self.n}"
         return f"{body}  {text}" if text else body
 
-def _cover(doc, case: dict) -> None:
+def _cover(doc, case: dict, kind: str = "all") -> None:
+    """封面:主题色带 + 主标题 + 册别 + 工况信息块。"""
+    from docx.enum.table import WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Pt
+    from docx.shared import Cm, Pt
+
+    meta = kind_meta(kind)
+
+    band = doc.add_table(rows=1, cols=1)
+    band.autofit = False
+    band.alignment = WD_TABLE_ALIGNMENT.CENTER
+    cell = band.rows[0].cells[0]
+    cell.width = Cm(16.0)
+    _shade(cell, meta["accent"])
+    band.rows[0].height = Cm(0.45)
+    para = cell.paragraphs[0]
+    para.paragraph_format.space_after = Pt(0)
+    _font(para.add_run(""), Pt(1))
 
     _para(doc, "", Pt(10), space_after=60)
-    _para(doc, TITLE, Pt(24), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=18, name="黑体")
-    _para(doc, "（来自本工具工况快照，非工程设计依据）", Pt(11), False,
-          WD_ALIGN_PARAGRAPH.CENTER, space_after=90)
+    _para(doc, meta["title"], Pt(26), True, WD_ALIGN_PARAGRAPH.CENTER,
+          space_after=10, name="黑体").runs[0].font.color.rgb = _rgb(meta["accent"])
+    _para(doc, meta["book"], Pt(13), False, WD_ALIGN_PARAGRAPH.CENTER,
+          space_after=8)
+    _para(doc, "（依据本工具工况快照生成 · 非工程设计依据）", Pt(9.5), False,
+          WD_ALIGN_PARAGRAPH.CENTER, space_after=80)
 
     rows = [
         ("工况", case.get("model_name") or ""),
@@ -345,49 +472,66 @@ def _cover(doc, case: dict) -> None:
         ("收敛判定", {"ok": "通过", "warning": "告警", "error": "报错"}.get(
             case.get("severity") or "", case.get("severity") or "")),
         ("流股 / 设备", f"{case.get('stream_count') or 0} / {case.get('block_count') or 0}"),
-        ("生成时间", datetime.now().strftime("%Y-%m-%d %H:%M")),
     ]
-    for label, value in rows:
-        para = _para(doc, "", Pt(11), False, WD_ALIGN_PARAGRAPH.CENTER, space_after=6)
-        _font(para.add_run(f"{label}："), Pt(11), True)
-        _font(para.add_run(str(value)), Pt(11), False)
+    # 用制表位排信息块,不用表格 —— 表格在部分渲染器里会画出一圈莫名其妙的框线
+    from docx.enum.text import WD_TAB_ALIGNMENT
 
+    for label, value in rows:
+        para = doc.add_paragraph()
+        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        para.paragraph_format.left_indent = Cm(2.6)
+        para.paragraph_format.space_after = Pt(5)
+        stops = para.paragraph_format.tab_stops
+        stops.add_tab_stop(Cm(9.4), WD_TAB_ALIGNMENT.RIGHT)
+        stops.add_tab_stop(Cm(9.8), WD_TAB_ALIGNMENT.LEFT)
+        _font(para.add_run(label + "\t"), Pt(10.5), False).font.color.rgb = _rgb("595959")
+        _font(para.add_run(value + "\t"), Pt(10.5), True)
+
+    _para(doc, "", Pt(10), space_after=44)
+    _para(doc, f"生成时间:{datetime.now().strftime('%Y-%m-%d %H:%M')}", Pt(9.5),
+          False, WD_ALIGN_PARAGRAPH.CENTER).runs[0].font.color.rgb = _rgb("808080")
     doc.add_page_break()
 
 
-def _toc(doc, has_detail: bool) -> None:
-    """目录页:固定结构,手写条目 —— 不依赖 Word 的 TOC 域(打开时不会空白)。"""
+def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
+    """目录页:按册列出条目(手写目录,不依赖 Word 的 TOC 域)。"""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-    _para(doc, "", None, space_after=6)
-    _para(doc, "目  录", 16, True, WD_ALIGN_PARAGRAPH.CENTER, space_after=18, name="黑体")
-    entries = [
-        ("校核结论摘要", 0),
-        ("一、物料衡算", 0),
-        ("1.1 各工段物料平衡表", 1),
-        ("1.2 全流程物料平衡表", 1),
-        ("1.3 物料消耗与产出汇总", 1),
-        ("二、能量衡算", 0),
-        ("2.1 逐设备能量衡算", 1),
-    ]
-    if has_detail:
-        entries.append(("2.2 选中设备的进出口明细", 1))
-    entries += [
-        (("2.3" if has_detail else "2.2") + " 全流程能量汇总", 1),
-        (("2.4" if has_detail else "2.3") + " 塔的冷凝器 / 再沸器负荷", 1),
-        ("附注", 0),
-    ]
     from docx.shared import Pt
+
+    meta = kind_meta(kind)
+    _para(doc, "", None, space_after=4)
+    _para(doc, "目　录", Pt(16), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=14,
+          name="黑体").runs[0].font.color.rgb = _rgb(meta["accent"])
+    _para(doc, meta["book"], Pt(9.5), False, WD_ALIGN_PARAGRAPH.CENTER,
+          space_after=22).runs[0].font.color.rgb = _rgb("808080")
+
+    entries: list[tuple[str, int]] = [("校核结论摘要", 0)]
+    if kind in ("mass", "all"):
+        entries += [("一、物料衡算", 0),
+                    ("1.1 各工段物料平衡表", 1),
+                    ("1.2 全流程物料平衡表", 1),
+                    ("1.3 物料消耗与产出汇总", 1)]
+    if kind in ("energy", "all"):
+        entries.append(("二、能量衡算", 0))
+        entries.append(("2.1 逐设备能量衡算", 1))
+        if has_detail:
+            entries.append(("2.2 选中设备的进出口明细", 1))
+        base = 3 if has_detail else 2
+        entries += [(f"2.{base} 全流程能量汇总", 1),
+                    (f"2.{base + 1} 塔的冷凝器 / 再沸器负荷", 1)]
+    entries.append(("附注", 0))
 
     for text, level in entries:
         para = doc.add_paragraph()
-        para.paragraph_format.space_after = Pt(6)
-        para.paragraph_format.left_indent = Pt(24 * level)
-        _font(para.add_run(text), Pt(12 if level == 0 else 11), level == 0)
+        para.paragraph_format.space_after = Pt(8)
+        para.paragraph_format.left_indent = Pt(28 * level)
+        run = _font(para.add_run(text), Pt(12 if level == 0 else 11), level == 0)
+        if level == 0:
+            run.font.color.rgb = _rgb(meta["accent"])
     doc.add_page_break()
 
 
-def _summary_chapter(doc, data: dict, cap: "_Captions") -> None:
+def _summary_chapter(doc, data: dict, cap: "_Captions", kind: str = "all") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     zone_sum = data["zone"]["summary"]
@@ -396,44 +540,45 @@ def _summary_chapter(doc, data: dict, cap: "_Captions") -> None:
 
     cap.start("1")
     _heading(doc, "校核结论摘要", 1)
-    text = (
-        f"本次校核 {zone_sum['total']} 个工段、{dev_sum['total']} 台设备。"
-        f"工段界区衡算：通过 {zone_sum[mass_balance.PASS]} 个、"
-        f"超差 {zone_sum[mass_balance.FAIL]} 个、"
-        f"无法校验 {zone_sum[mass_balance.NO_DATA]} 个。"
-        f"逐设备质量守恒：通过 {dev_sum[mass_balance.PASS]} 台、"
-        f"超差 {dev_sum[mass_balance.FAIL]} 台、"
-        f"无法校验 {dev_sum[mass_balance.NO_DATA]} 台、"
-        f"流量过小 {dev_sum[mass_balance.TOO_SMALL]} 台。"
-    )
-    _para(doc, text, None, False, WD_ALIGN_PARAGRAPH.LEFT)
 
-    states = [mass_balance.PASS, mass_balance.FAIL, mass_balance.NO_DATA,
-              mass_balance.TOO_SMALL]
-    headers = ["项目", "通过", "超差", "无法校验", "流量过小", "合计"]
-    rows = [
-        ["工段界区衡算"] + [zone_sum[s] for s in states] + [zone_sum["total"]],
-        ["逐设备质量守恒"] + [dev_sum[s] for s in states] + [dev_sum["total"]],
-    ]
-    _three_line(doc, headers, rows, (4.4, 1.8, 1.8, 2.2, 1.8, 1.8),
-                cap.next("质量守恒校验结果"))
+    if kind in ("mass", "all"):
+        text = (
+            f"本次校核 {zone_sum['total']} 个工段、{dev_sum['total']} 台设备。"
+            f"工段界区衡算：通过 {zone_sum[mass_balance.PASS]} 个、"
+            f"超差 {zone_sum[mass_balance.FAIL]} 个、"
+            f"无法校验 {zone_sum[mass_balance.NO_DATA]} 个。"
+            f"逐设备质量守恒：通过 {dev_sum[mass_balance.PASS]} 台、"
+            f"超差 {dev_sum[mass_balance.FAIL]} 台、"
+            f"无法校验 {dev_sum[mass_balance.NO_DATA]} 台、"
+            f"流量过小 {dev_sum[mass_balance.TOO_SMALL]} 台。"
+        )
+        _para(doc, text, None, False, WD_ALIGN_PARAGRAPH.LEFT)
+        states = [mass_balance.PASS, mass_balance.FAIL, mass_balance.NO_DATA,
+                  mass_balance.TOO_SMALL]
+        headers = ["项目", "通过", "超差", "无法校验", "流量过小", "合计"]
+        rows = [
+            ["工段界区衡算"] + [zone_sum[s] for s in states] + [zone_sum["total"]],
+            ["逐设备质量守恒"] + [dev_sum[s] for s in states] + [dev_sum["total"]],
+        ]
+        _three_line(doc, headers, rows, (3.6, 2.0, 2.0, 2.4, 2.0, 2.0),
+                    cap.next("质量守恒校验结果"), status_col=2)
 
-    order = [energy_report.OK, energy_report.BAD, energy_report.NO_DATA]
-    by_state = energy["by_state"]
-    rows = [[energy_report.STATE_TEXT[s], by_state.get(s, 0)] for s in order]
-    rows.append(["不校验（换热器热侧，不单独校验）",
-                 by_state.get(energy_report.SKIP, 0)])
-    _three_line(doc, ["焓平衡状态", "表内行数"], rows, (7.6, 3.2),
-                cap.next("焓平衡结论分布"))
-
-    text = (
-        f"能量汇总：总加热 {energy['heat_total_kw']:,.2f} kW"
-        f"（其中塔再沸器 {energy['tower_reb_kw']:,.2f} kW）、"
-        f"总冷却 {energy['cool_total_kw']:,.2f} kW"
-        f"（其中塔冷凝器 {energy['tower_cond_kw']:,.2f} kW）、"
-        f"泵与压缩机总轴功 {energy['shaft_kw']:,.2f} kW。"
-    )
-    _para(doc, text)
+    if kind in ("energy", "all"):
+        order = [energy_report.OK, energy_report.BAD, energy_report.NO_DATA]
+        by_state = energy["by_state"]
+        rows = [[energy_report.STATE_TEXT[s], by_state.get(s, 0)] for s in order]
+        rows.append(["不校验（换热器热侧，不单独校验）",
+                     by_state.get(energy_report.SKIP, 0)])
+        _three_line(doc, ["焓平衡状态", "表内行数"], rows, (7.8, 3.2),
+                    cap.next("焓平衡结论分布"), status_col=0)
+        text = (
+            f"能量汇总：总加热 {energy['heat_total_kw']:,.2f} kW"
+            f"（其中塔再沸器 {energy['tower_reb_kw']:,.2f} kW）、"
+            f"总冷却 {energy['cool_total_kw']:,.2f} kW"
+            f"（其中塔冷凝器 {energy['tower_cond_kw']:,.2f} kW）、"
+            f"泵与压缩机总轴功 {energy['shaft_kw']:,.2f} kW。"
+        )
+        _para(doc, text)
 
 
 def _phase_of(column) -> str:
@@ -774,7 +919,7 @@ def _notes_chapter(doc, data: dict) -> None:
 
 # ---------------------------------------------------------------- 入口
 
-def render(data: dict) -> bytes:
+def render(data: dict, kind: str = "all") -> bytes:
     """把 `build_data()` 的结果渲染成 .docx 字节。
 
     缺 python-docx 时抛 `ImportError`。CLI 要先打印摘要再落盘,所以数据组装
@@ -785,15 +930,24 @@ def render(data: dict) -> bytes:
     except ImportError as exc:  # pragma: no cover - 取决于运行环境
         raise ImportError("没有安装 python-docx,无法生成 Word 报告") from exc
 
+    global _ACTIVE_KIND
+    if kind not in KINDS:
+        kind = "all"
+    _ACTIVE_KIND = kind_meta(kind)
+
     doc = Document()
     cap = _Captions()
-    _setup(doc, data["case"])
-    _cover(doc, data["case"])
-    _toc(doc, bool(data.get("picked")))
-    _summary_chapter(doc, data, cap)
-    _mass_chapter(doc, data, cap)
-    doc.add_page_break()
-    _energy_chapter(doc, data, cap)
+    _setup(doc, data["case"], kind)
+    _cover(doc, data["case"], kind)
+    _toc(doc, kind, bool(data.get("picked")))
+    _summary_chapter(doc, data, cap, kind)
+
+    if kind in ("mass", "all"):
+        _mass_chapter(doc, data, cap)
+        if kind == "all":
+            doc.add_page_break()
+    if kind in ("energy", "all"):
+        _energy_chapter(doc, data, cap)
     doc.add_page_break()
     _notes_chapter(doc, data)
 
@@ -802,10 +956,11 @@ def render(data: dict) -> bytes:
     return buffer.getvalue()
 
 
-def build_report(conn, case_id: int, parts=None, picked=None) -> tuple[bytes, str]:
+def build_report(conn, case_id: int, parts=None, picked=None,
+                 kind: str = "all") -> tuple[bytes, str]:
     """一步生成 .docx,返回 `(字节, 文件名)`。
 
     缺 python-docx 时抛 `ImportError`;工况不存在时抛 `LookupError`。
     """
     data = build_data(conn, case_id, parts, picked)
-    return render(data), filename(case_id)
+    return render(data, kind), filename(case_id, kind)
