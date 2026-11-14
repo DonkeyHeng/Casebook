@@ -29,6 +29,7 @@ from pathlib import Path
 
 from app.aspen import balance as balance_rules
 from app.aspen import reader
+from app.design import energy_report as energy_rules
 from app.design import mass_balance as mass_rules
 from app.design import sections as section_rules
 from app.store import db
@@ -570,6 +571,126 @@ def test_mass_balance() -> None:
             scratch.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def _energy(eid, state, dh=None, ref=None, kind="", note="") -> dict:
+    """balance.compute() 结果的形状(报告只认这份,不重算)。"""
+    return {eid: {"dh_kw": dh, "ref_kw": ref, "ref_kind": kind,
+                  "balance_state": state, "balance_note": note}}
+
+
+def test_energy_report() -> None:
+    """energy_report.build():ΔH 引用注入的 compute() 结果,只补进出口合计。"""
+    # ① Heater:热负荷类,偏差 = ΔH − duty
+    blocks = [{"name": "E0101", "type": "Heater", "duty_kw": 100.0}]
+    streams = [{"name": "0101", "enthalpy_flow_kw": 10.0},
+               {"name": "0102", "enthalpy_flow_kw": 110.0}]
+    conns = _mb_conns(("E0101", "in", "0101"), ("E0101", "out", "0102"))
+    res = _energy("E0101", balance_rules.OK, dh=100.0, ref=100.0, kind="duty",
+                  note="ΔH 与 duty 一致")
+    rep = energy_rules.build(blocks, streams, conns, res)
+    row = rep["devices"][0]
+    check_eq("energy: Heater 进口焓流合计", row["h_in_kw"], 10.0)
+    check_eq("energy: Heater 出口焓流合计", row["h_out_kw"], 110.0)
+    check_eq("energy: Heater ΔH 取注入值", row["dh_kw"], 100.0)
+    check_eq("energy: Heater 对照值取 duty", (row["dev_kw"], row["dev_kind"]), (100.0, "duty"))
+    check_eq("energy: Heater 偏差", row["delta_kw"], 0.0)
+    check_eq("energy: Heater 状态沿用注入判定", row["state"], balance_rules.OK)
+
+    # ② 泵:机械功类,轴功率进汇总
+    blocks = [{"name": "P0201", "type": "Pump", "power_kw": 50.0}]
+    res = _energy("P0201", balance_rules.OK, dh=50.0, ref=50.0, kind="power")
+    rep = energy_rules.build(
+        blocks, [{"name": "0201", "enthalpy_flow_kw": 1.0},
+                 {"name": "0202", "enthalpy_flow_kw": 51.0}],
+        _mb_conns(("P0201", "in", "0201"), ("P0201", "out", "0202")), res)
+    check_eq("energy: 泵对照值取轴功率", rep["devices"][0]["dev_kind"], "power")
+    check_eq("energy: 泵轴功进汇总", rep["summary"]["shaft_kw"], 50.0)
+
+    # ③ HeatX:冷热两侧各一行,热侧不重复判
+    blocks = [{"name": "EX0101", "type": "HeatX", "duty_kw": 1600.0}]
+    streams = [{"name": "h1", "enthalpy_flow_kw": 5200.0},
+               {"name": "h2", "enthalpy_flow_kw": 3600.0},
+               {"name": "c1", "enthalpy_flow_kw": 800.0},
+               {"name": "c2", "enthalpy_flow_kw": 2400.0}]
+    conns = _mb_conns(("EX0101", "in", "h1", "hot"), ("EX0101", "out", "h2", "hot"),
+                      ("EX0101", "in", "c1", "cold"), ("EX0101", "out", "c2", "cold"))
+    res = _energy("EX0101", balance_rules.OK, dh=1600.0, ref=1600.0, kind="hx_cold")
+    rep = energy_rules.build(blocks, streams, conns, res)
+    cold, hot = rep["devices"]
+    check_eq("energy: HeatX 出两行", len(rep["devices"]), 2)
+    check_eq("energy: HeatX 冷侧行", (cold["side"], cold["dh_kw"]),
+             ("冷", 1600.0))
+    check_eq("energy: HeatX 冷侧合计只算冷侧", (cold["h_in_kw"], cold["h_out_kw"]),
+             (800.0, 2400.0))
+    check_eq("energy: HeatX 热侧不判 ΔH", hot["dh_kw"], None)
+    check_eq("energy: HeatX 热侧状态", hot["state"], balance_rules.SKIP)
+    check("energy: HeatX 热侧说明点明 −冷侧", "冷侧" in hot["note"])
+    check_eq("energy: HeatX 热侧合计只算热侧",
+             (hot["h_in_kw"], hot["h_out_kw"]), (5200.0, 3600.0))
+
+    # ④ 塔:焓平衡不校验,负荷走明细表
+    blocks = [{"name": "T0101", "type": "RadFrac",
+               "cond_duty_kw": -4809.23, "reb_duty_kw": 4950.80}]
+    res = _energy("T0101", balance_rules.SKIP, note="塔不校验")
+    tower = energy_rules.tower_duties(blocks, {})
+    check_eq("energy: 塔负荷优先取块字段", tower["T0101"]["source"], "block")
+    rep = energy_rules.build(blocks, [], [], res, tower)
+    check_eq("energy: 塔也出设备行(附塔负荷)", len(rep["devices"]), 1)
+    check_eq("energy: 塔状态沿用不校验", rep["devices"][0]["state"], balance_rules.SKIP)
+    check_eq("energy: 塔负荷明细冷凝器", rep["towers"][0]["cond_kw"], -4809.23)
+    check_eq("energy: 塔负荷进汇总(再沸)", rep["summary"]["tower_reb_kw"], 4950.80)
+
+    # ⑤ 塔负荷回退:没有块字段就用逐级首/末级(部分冷凝器只算近似)
+    blocks = [{"name": "T1", "type": "RadFrac"}]
+    stages = {"T1": [{"stage": 1, "duty_kw": -100.0}, {"stage": 2, "duty_kw": 0.0},
+                     {"stage": 3, "duty_kw": 120.0}]}
+    tower = energy_rules.tower_duties(blocks, stages)
+    check_eq("energy: 塔负荷回退逐级", (tower["T1"]["cond_kw"], tower["T1"]["reb_kw"]),
+             (-100.0, 120.0))
+    check_eq("energy: 塔负荷回退来源标逐级", tower["T1"]["source"], "stage")
+    tower = energy_rules.tower_duties([{"name": "T2", "type": "RadFrac"}], {})
+    check_eq("energy: 无块字段也无剖面 → 留空", tower["T2"]["cond_kw"], None)
+    check_eq("energy: 非塔设备不进负荷明细",
+             energy_rules.tower_duties([{"name": "E1", "type": "Heater"}], {}), {})
+
+    # ⑥ 汇总:正/负 duty + 塔 + 轴功;反应器反应热不计入总量
+    blocks = [{"name": "E1", "type": "Heater", "duty_kw": 100.0},
+              {"name": "E2", "type": "Heater", "duty_kw": -200.0},
+              {"name": "P1", "type": "Pump", "power_kw": 50.0},
+              {"name": "R1", "type": "RPlug", "duty_kw": 7337.97},
+              {"name": "T1", "type": "RadFrac", "reb_duty_kw": 500.0,
+               "cond_duty_kw": -400.0}]
+    res = {}
+    res.update(_energy("E1", balance_rules.OK, dh=100.0, ref=100.0, kind="duty"))
+    res.update(_energy("E2", balance_rules.OK, dh=-200.0, ref=-200.0, kind="duty"))
+    res.update(_energy("P1", balance_rules.OK, dh=50.0, ref=50.0, kind="power"))
+    res.update(_energy("R1", balance_rules.SKIP))
+    res.update(_energy("T1", balance_rules.SKIP))
+    rep = energy_rules.build(blocks, [], [], res, energy_rules.tower_duties(blocks, {}))
+    s = rep["summary"]
+    check_eq("energy: 汇总 正 duty", s["heat_pos_kw"], 100.0)
+    check_eq("energy: 汇总 负 duty", s["cool_neg_kw"], -200.0)
+    check_eq("energy: 汇总 总加热含再沸器", s["heat_total_kw"], 600.0)
+    check_eq("energy: 汇总 总冷却含冷凝器", s["cool_total_kw"], -600.0)
+    check_eq("energy: 汇总 轴功", s["shaft_kw"], 50.0)
+    check_eq("energy: 汇总 反应器反应热单独记,不进总量", s["reaction_net_kw"], 7337.97)
+    check_eq("energy: 汇总 塔数", s["tower_count"], 1)
+
+    # ⑦ 缺焓值:合计留空,状态沿用注入判定(不自己补 0)
+    blocks = [{"name": "E3", "type": "Heater", "duty_kw": 10.0}]
+    res = _energy("E3", balance_rules.NO_DATA, note="流股没焓值")
+    rep = energy_rules.build(blocks, [], [], res)
+    row = rep["devices"][0]
+    check_eq("energy: 缺焓值 → 进口合计留空", row["h_in_kw"], None)
+    check_eq("energy: 缺焓值 → 状态沿用无法校验", row["state"], balance_rules.NO_DATA)
+
+    # ⑧ 分组按设备家族,顺序与 block_family 一致
+    blocks = [{"name": "T1", "type": "RadFrac"}, {"name": "E1", "type": "Heater"},
+              {"name": "M1", "type": "Mixer"}]
+    rep = energy_rules.build(blocks, [], [], {})
+    check_eq("energy: 分组顺序按家族表", [g["key"] for g in rep["groups"]],
+             ["column", "heat", "mix"])
 
 
 # ---------------------------------------------------------------- 报错波及范围
@@ -1709,7 +1830,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, fn in (("判定规则 judge()", test_judge),
                      ("空模型 mark_empty()", test_empty),
                      ("焓平衡 balance.compute()", test_balance),
-                     ("物料衡算 mass_balance.build()", test_mass_balance),
+                     ("物料衡算 mass_balance", test_mass_balance),
+                     ("能量衡算 energy_report", test_energy_report),
                      ("报错波及范围 impact.build()", test_impact),
                      ("管路选型 design.pipe", test_pipe),
                      ("选型校验 validate() V1–V9", test_pipe_checks),
