@@ -1104,14 +1104,15 @@ def build_workbook(conn, case_id: int) -> bytes:
         ws,
         ["设备", "类型", "状态", "热负荷 kW", "功率 kW", "换热面积 m²",
          "理论级数", "顶温 ℃", "底温 ℃", "ΔH kW", "参照 kW", "焓平衡", "平衡说明", "提示",
-         "进口 ℃", "出口 ℃", "出口汽化率"],
+         "进口 ℃", "出口 ℃", "出口汽化率", "冷凝器 kW", "再沸器 kW"],
         [(b["name"], b["type"], status_text.get(b["status"], ""), b["duty_kw"],
           b["power_kw"], b["area_m2"], b["nstage"], b["top_temp_c"],
           b["bottom_temp_c"], b["dh_kw"], b["ref_kw"],
           balance_text.get(b["balance_state"], ""), b["balance_note"],
-          b["message"], b["inlet_temp_c"], b["outlet_temp_c"], b["outlet_vap_frac"])
+          b["message"], b["inlet_temp_c"], b["outlet_temp_c"], b["outlet_vap_frac"],
+          b["cond_duty_kw"], b["reb_duty_kw"])
          for b in blocks],
-        [14, 12, 8, 14, 12, 14, 10, 12, 12, 14, 14, 10, 46, 60, 10, 10, 12],
+        [14, 12, 8, 14, 12, 14, 10, 12, 12, 14, 14, 10, 46, 60, 10, 10, 12, 14, 14],
     )
 
     # --- 泵参数(只有 Pump 块有值;老工况这些列是空的,不是 0)---

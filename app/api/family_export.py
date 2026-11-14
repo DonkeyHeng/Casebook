@@ -56,12 +56,14 @@ _COLS: dict[str, tuple[str, int, object]] = {
     "coldIn": ("冷侧进 ℃", 11, _num("cold_in_temp_c", 1)),
     "coldOut": ("冷侧出 ℃", 11, _num("cold_out_temp_c", 1)),
     "vapOut": ("出口汽化率", 11, _num("outlet_vap_frac", 3)),
+    "cond": ("冷凝器 kW", 12, _num("cond_duty_kw", 2)),
+    "reb": ("再沸器 kW", 12, _num("reb_duty_kw", 2)),
 }
 
 # 与 app.js 的 FAMILY_COLS 一致(顺序即列序)
 FAMILY_COLUMNS: dict[str, tuple[str, ...]] = {
-    "column": ("name", "status", "nstage", "top", "bottom", "message"),
-    "heat": ("name", "type", "status", "duty", "inT", "outT", "coldIn", "coldOut",
+    "column": ("name", "status", "nstage", "top", "bottom", "cond", "reb", "message"),
+    "heat": ("name", "type", "status", "duty", "area", "inT", "outT", "coldIn", "coldOut",
              "dh", "ref", "balance", "note", "message"),
     "flash": ("name", "type", "status", "duty", "outT", "vapOut",
               "dh", "ref", "balance", "message"),

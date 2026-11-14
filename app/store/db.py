@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS blocks (
     cold_in_temp_c    REAL,
     cold_out_temp_c   REAL,
     outlet_vap_frac   REAL,   -- 出口流股汽化率(分离页用)
+    cond_duty_kw      REAL,   -- 塔:冷凝器负荷 kW(COND_DUTY,放出为负)
+    reb_duty_kw       REAL,   -- 塔:再沸器负荷 kW(REB_DUTY)
     dh_kw         REAL,   -- 焓平衡:ΔH = Σ出 − Σ入(流股能量流)
     ref_kw        REAL,   -- 对照值:热负荷 / 轴功率 / 0(绝热)
     ref_kind      TEXT,   -- duty / power / zero / hx_cold
@@ -202,6 +204,9 @@ _BLOCK_ADDED_COLUMNS = (
     ("cold_in_temp_c", "REAL"),
     ("cold_out_temp_c", "REAL"),
     ("outlet_vap_frac", "REAL"),
+    # 塔的冷凝器 / 再沸器负荷:老库补列后 NULL,重读工况才有值
+    ("cond_duty_kw", "REAL"),
+    ("reb_duty_kw", "REAL"),
 )
 
 
@@ -336,9 +341,9 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                             head_m, flow_m3h, pump_eff, p_in_bar, p_out_bar, dp_bar,
                             rho_kgm3, pump_vap_frac, motor_kw, pv_bar, pv_source,
                             inlet_temp_c, outlet_temp_c, cold_in_temp_c, cold_out_temp_c,
-                            outlet_vap_frac,
+                            outlet_vap_frac, cond_duty_kw, reb_duty_kw,
                             dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -369,6 +374,8 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 b.get("cold_in_temp_c"),
                 b.get("cold_out_temp_c"),
                 b.get("outlet_vap_frac"),
+                b.get("cond_duty_kw"),
+                b.get("reb_duty_kw"),
                 (b.get("balance") or {}).get("dh_kw"),
                 (b.get("balance") or {}).get("ref_kw"),
                 (b.get("balance") or {}).get("ref_kind"),

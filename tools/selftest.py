@@ -960,8 +960,12 @@ def test_family_export() -> None:
                  "duty_kw": 12.5, "area_m2": 3.2, "top_temp_c": 80.0,
                  "dh_kw": 12.4, "ref_kw": 12.5, "balance_state": "ok",
                  "balance_note": "通过", "raw": {}, "balance": {}},
+                {"name": "T1", "type": "RadFrac", "status": 0, "message": "",
+                 "nstage": 20, "top_temp_c": 40.0, "bottom_temp_c": 120.0,
+                 "cond_duty_kw": -500.0, "reb_duty_kw": 700.0,
+                 "raw": {}, "balance": {}},
             ],
-            "stats": {"stream_count": 0, "block_count": 2, "column_count": 0,
+            "stats": {"stream_count": 0, "block_count": 3, "column_count": 0,
                       "connection_count": 0, "elapsed_sec": 0},
             "unit_gaps": {},
         }
@@ -984,7 +988,17 @@ def test_family_export() -> None:
         head = [c.value for c in ws[1]]
         check_eq("分类导出:换热页表名", label, "换热")
         check("分类导出:换热表头含热负荷与状态", "热负荷 kW" in head and "状态" in head, str(head))
+        check("分类导出:换热表头含面积与冷热侧温度",
+              "面积 m²" in head and "冷侧进 ℃" in head and "进口 ℃" in head, str(head))
         check_eq("分类导出:换热只导本分类(1 行)", ws.max_row, 2)
+
+        data, label, _ = family_export.build_family_workbook(conn, cid, "column")
+        ws = openpyxl.load_workbook(io.BytesIO(data)).active
+        head = [c.value for c in ws[1]]
+        check_eq("分类导出:塔页表名", label, "塔")
+        check("分类导出:塔表头含冷凝器/再沸器负荷",
+              "冷凝器 kW" in head and "再沸器 kW" in head, str(head))
+        check_eq("分类导出:塔只导本分类(1 行)", ws.max_row, 2)
 
         try:
             family_export.build_family_workbook(conn, cid, "nope")
@@ -1016,7 +1030,7 @@ def test_block_columns() -> None:
     need = {"head_m", "flow_m3h", "pump_eff", "p_in_bar", "p_out_bar",
             "rho_kgm3", "pump_vap_frac", "motor_kw", "pv_bar", "pv_source",
             "inlet_temp_c", "outlet_temp_c", "cold_in_temp_c", "cold_out_temp_c",
-            "outlet_vap_frac"}
+            "outlet_vap_frac", "cond_duty_kw", "reb_duty_kw"}
     # 不用 TemporaryDirectory:这台机器上沙箱化后的系统临时目录 chmod 会被拒,
     # 清理阶段会抛 PermissionError。库文件放项目内的 preview 目录(gitignore 覆盖)。
     scratch = Path("data/preview/_selftest-block-columns.db")

@@ -72,6 +72,9 @@ const BLOCK_COLS = {
   coldIn:  { key: "cold_in_temp_c", label: "冷侧进 ℃", num: true, digits: 1 },
   coldOut: { key: "cold_out_temp_c", label: "冷侧出 ℃", num: true, digits: 1 },
   vapOut:  { key: "outlet_vap_frac", label: "出口汽化率", num: true, digits: 3 },
+  // 塔的两块负荷:冷凝为负值(放出热量),原样显示
+  cond:    { key: "cond_duty_kw", label: "冷凝器 kW", num: true, digits: 2 },
+  reb:     { key: "reb_duty_kw", label: "再沸器 kW", num: true, digits: 2 },
   // 泵专用:tips 的内容来自 /api/pump-spec,不在这里写死
   flow:    { key: "flow_m3h", label: "流量 m³/h", num: true, digits: 2, scaled: true, unit: "m³/h" },
   head:    { key: "head_m", label: "扬程 m", num: true, digits: 2, scaled: true, unit: "m" },
@@ -85,9 +88,9 @@ const BLOCK_COLS = {
 /* 塔页保持原样(用户对塔页满意):只去掉"类型"和"功率"两个恒定/无关列 */
 const FAMILY_COLS = {
   // 塔:只有级数与顶/底温是逐塔独有的;热负荷(塔是冷凝+再沸两块)、面积、ΔH 在塔上是恒定空列
-  column: ["name", "status", "nstage", "top", "bottom", "message"],
-  // 换热:热/冷侧进出口温度来自连接流股;面积待探测后再加
-  heat:   ["name", "type", "status", "duty", "inT", "outT", "coldIn", "coldOut",
+  column: ["name", "status", "nstage", "top", "bottom", "cond", "reb", "message"],
+  // 换热:面积=HX_AREAC/AREAC2/AREAP;冷/热侧进出口温度来自连接流股
+  heat:   ["name", "type", "status", "duty", "area", "inT", "outT", "coldIn", "coldOut",
            "dh", "ref", "balance", "note", "message"],
   // 分离:出口温度 + 出口汽化率(Flash/Decanter 最该看的量)
   flash:  ["name", "type", "status", "duty", "outT", "vapOut", "dh", "ref", "balance", "message"],

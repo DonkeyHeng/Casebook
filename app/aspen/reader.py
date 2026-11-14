@@ -52,7 +52,9 @@ ENTHALPY_FIELDS = (
 # 设备上的标量结果字段(不同设备类型用不同字段)
 BLOCK_DUTY_FIELDS = ("QCALC", "QNET", "HX_DUTY")      # cal/sec
 BLOCK_POWER_FIELDS = ("BRAKE_POWER", "ELEC_POWER")     # kW
-BLOCK_AREA_FIELDS = ("HX_AREAC",)                      # sqm
+BLOCK_AREA_FIELDS = ("HX_AREAC", "HX_AREAC2", "HX_AREAP")  # sqm;实测前者常空,后两个有值
+# 塔的冷凝器 / 再沸器负荷(实测 2026-11-14:1 个塔一对,单位 cal/sec,冷凝为负)
+BLOCK_TOWER_DUTY_FIELDS = (("cond_duty_kw", ("COND_DUTY",)), ("reb_duty_kw", ("REB_DUTY",)))
 
 # 泵块上的标量结果(输出键, Aspen 字段, 量纲)。单位认不出来时 head_m / rho_kgm3
 # 会是 None —— 所以 unit_gaps 要拿这张表一起查,别让它静默变空。
@@ -510,6 +512,9 @@ def read_block(session, bid: str, node=None) -> dict:
     rec["duty_kw"] = _first_converted(session, base, BLOCK_DUTY_FIELDS, "power", rec["raw"])
     rec["power_kw"] = _first_converted(session, base, BLOCK_POWER_FIELDS, "power", rec["raw"])
     rec["area_m2"] = _first_converted(session, base, BLOCK_AREA_FIELDS, "area", rec["raw"])
+    # 塔没有单一 qcalc:冷凝器 / 再沸器各一块负荷(冷凝为负值,原样保留)
+    for key, fields in BLOCK_TOWER_DUTY_FIELDS:
+        rec[key] = _first_converted(session, base, fields, "power", rec["raw"])
 
     # 理论级数
     nstage, _ = fetch(session, rf"{base}\Input\NSTAGE")

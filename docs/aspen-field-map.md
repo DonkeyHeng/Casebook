@@ -166,7 +166,9 @@ node.AttributeValue(6)      # -> 'Heater'
 | --- | --- | --- | --- |
 | Heater / Flash2 / RStoic | `QCALC` / `QNET` | `\Data\Blocks\<设备>\Output\` | `cal/sec` |
 | HeatX(换热器) | `HX_DUTY` | 同上 | `cal/sec` |
-| HeatX | `HX_AREAC` | 同上 | `sqm` |
+| HeatX | 面积:`HX_AREAC2` / `HX_AREAP`(`HX_AREAC` 常为空) | 同上 | `sqm` |
+| HeatX | `HX_UA`(UA 值) | 同上 | `cal/sec-K` |
+| RadFrac(塔) | 冷凝器 / 再沸器:`COND_DUTY`(负) / `REB_DUTY`(正) | 同上 | `cal/sec` |
 | Pump | `BRAKE_POWER` / `ELEC_POWER` | 同上 | `kW` |
 | Pump | `CEFF` | 同上 | 无量纲 |
 | RadFrac / Absorber | `NSTAGE` | `\Data\Blocks\<塔>\Input\NSTAGE` | 个 |
@@ -191,12 +193,14 @@ node.AttributeValue(6)      # -> 'Heater'
 换热器的冷侧取 `side=cold` 的连接。这样不增加任何 Aspen 读取,老工况也能
 用 `python -m tools.repair_cases --apply` 离线补上。
 
-### 5.2.2 还没确认的字段
+### 5.2.2 塔负荷与换热面积(2026-11-14 探测确认)
 
-- 塔的**冷凝器 / 再沸器负荷**(候选 `COND_DUTY` / `REB_DUTY`):`Output` 下没有单一 `QCALC`,
-  需要探测确认节点名,探测脚本 `tools/probe_blocks.py`;
-- 换热器的**面积**能不能读:`HX_AREAC` 在现有模型上读空,可能是 `AREA` / `HX_AREA`,
-  或只在 `Input`(用户输入值)—— 同一个探测脚本会一起扫出来。
+- **塔没有单一热负荷**:`DUTY` 是逐级数组(子元素 = 级数),不是标量。
+  冷凝 / 再沸两块负荷在 `COND_DUTY`(负值,放热)与 `REB_DUTY`(正值);
+  这 15 台塔**逐台都有值**,换算用 `power` 量纲(cal/sec → kW)。
+- **换热面积**:`HX_AREAC` 在 Shortcut 模型上为空,真正的值在 `HX_AREAC2`,
+  `HX_AREAP` 与它同值;4 台 HeatX 全部有值(26.6 / 32.3 / 112.3 / 19.6 m²)。
+  `HX_UA`(cal/sec-K)也一起有值,需要时可直接展示。
 
 
 ### 5.3 不要用的字段

@@ -40,6 +40,8 @@ BLOCK_COLUMNS = [
     ("duty_kw", reader.BLOCK_DUTY_FIELDS, "power"),
     ("power_kw", reader.BLOCK_POWER_FIELDS, "power"),
     ("area_m2", reader.BLOCK_AREA_FIELDS, "area"),
+    ("cond_duty_kw", ("COND_DUTY",), "power"),
+    ("reb_duty_kw", ("REB_DUTY",), "power"),
 ]
 
 
@@ -193,6 +195,7 @@ def repair_case(conn, case, apply: bool) -> dict:
         )
         conn.executemany(
             "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?,"
+            " cond_duty_kw=?, reb_duty_kw=?,"
             " dh_kw=?, ref_kw=?, ref_kind=?, balance_state=?, balance_note=?,"
             " head_m=?, flow_m3h=?, pump_eff=?, p_in_bar=?, p_out_bar=?, dp_bar=?,"
             " rho_kgm3=?, pump_vap_frac=?, motor_kw=?,"
@@ -200,6 +203,7 @@ def repair_case(conn, case, apply: bool) -> dict:
             " outlet_vap_frac=?"
             " WHERE case_id=? AND name=?",
             [(b["duty_kw"], b["power_kw"], b["area_m2"],
+              b.get("cond_duty_kw"), b.get("reb_duty_kw"),
               (b.get("balance") or {}).get("dh_kw"),
               (b.get("balance") or {}).get("ref_kw"),
               (b.get("balance") or {}).get("ref_kind"),
