@@ -39,8 +39,8 @@ _BALANCE_STATE = energy_report.STATE_TEXT
 _SOURCE_TEXT = {"block": "块字段", "stage": "逐级剖面", "": "未采到"}
 
 # 表宽(cm),A4 页宽 21 − 左右各 2.5 = 16.0
-_W_ROW_6 = (2.2, 3.6, 3.0, 3.0, 2.1, 2.1)
-_W_ENERGY_8 = (2.4, 1.0, 2.5, 2.5, 1.9, 2.8, 1.4, 1.5)
+_W_ROW_6 = (2.0, 4.6, 2.9, 3.0, 1.8, 1.7)
+_W_ENERGY = (2.0, 0.9, 2.2, 2.2, 2.1, 1.6, 2.3, 1.3, 1.4)
 _W_SUMMARY_3 = (5.6, 4.2, 6.2)
 _W_TOWER_5 = (2.8, 2.4, 3.2, 3.2, 4.4)
 
@@ -227,7 +227,9 @@ def _three_line(doc, headers, rows, widths, caption=""):
     from docx.shared import Cm, Pt
 
     if caption:
-        _para(doc, caption, Pt(10), True, space_after=2)
+        cap = _para(doc, caption, Pt(10), True, space_after=2)
+        # 表题不能单独留在页底:后面紧跟的表格要跟着一起走
+        cap.paragraph_format.keep_with_next = True
 
     table = doc.add_table(rows=1 + len(rows), cols=len(headers))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -247,6 +249,13 @@ def _three_line(doc, headers, rows, widths, caption=""):
         borders.append(node)
     table._tbl.tblPr.append(borders)
 
+    def _row_flag(row, tag: str) -> None:
+        """给整行加一个 w:trPr 开关(tblHeader / cantSplit)。"""
+        tr_pr = row._tr.get_or_add_trPr()
+        node = OxmlElement(f"w:{tag}")
+        node.set(qn("w:val"), "true")
+        tr_pr.append(node)
+
     def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER):
         para = cell.paragraphs[0]
         para.alignment = align
@@ -255,6 +264,8 @@ def _three_line(doc, headers, rows, widths, caption=""):
 
     for index, head in enumerate(headers):
         fill(table.rows[0].cells[index], head, True)
+    # 表头跨页重复:表格被分页时,下一页顶部仍有列头(否则读者看不到单位)
+    _row_flag(table.rows[0], "tblHeader")
     # 表头下方的线(三线表的第二条)
     for cell in table.rows[0].cells:
         tc_pr = cell._tc.get_or_add_tcPr()
@@ -267,6 +278,7 @@ def _three_line(doc, headers, rows, widths, caption=""):
         tc_pr.append(borders_cell)
 
     for row_index, row in enumerate(rows, start=1):
+        _row_flag(table.rows[row_index], "cantSplit")
         cells = table.rows[row_index].cells
         cells_data, bold, fill_hex = (row if isinstance(row, tuple)
                                       else (row, False, None))
@@ -277,6 +289,8 @@ def _three_line(doc, headers, rows, widths, caption=""):
             if fill_hex:
                 _shade(cells[index], fill_hex)
 
+    for index, width in enumerate(widths):
+        table.columns[index].width = Cm(width)
     for row in table.rows:
         for index, width in enumerate(widths):
             row.cells[index].width = Cm(width)
@@ -349,7 +363,7 @@ def _summary_chapter(doc, data: dict, cap: "_Captions") -> None:
         ["工段界区衡算"] + [zone_sum[s] for s in states] + [zone_sum["total"]],
         ["逐设备质量守恒"] + [dev_sum[s] for s in states] + [dev_sum["total"]],
     ]
-    _three_line(doc, headers, rows, (3.6, 2.0, 2.0, 2.4, 2.0, 2.0),
+    _three_line(doc, headers, rows, (4.4, 1.8, 1.8, 2.2, 1.8, 1.8),
                 cap.next("质量守恒校验结果"))
 
     order = [energy_report.OK, energy_report.BAD, energy_report.NO_DATA,
@@ -384,10 +398,10 @@ def _stream_table(doc, rows_in, rows_out, mass_in, mass_out, mole_in, mole_out,
                   rel, state_text, caption) -> None:
     """一张衡算小表:进 → 进合计 → 出 → 出合计 → 相对误差。"""
     body = [["进", *r] for r in _row_triplet(rows_in)]
-    body.append(["合计", f"进料合计（{len(rows_in)} 股）", _num(mass_in, 2),
+    body.append(["合计", f"进料合计（{len(rows_in)}）", _num(mass_in, 2),
                  _num(mole_in, 2), "", ""])
     body += [["出", *r] for r in _row_triplet(rows_out)]
-    body.append(["合计", f"出料合计（{len(rows_out)} 股）", _num(mass_out, 2),
+    body.append(["合计", f"出料合计（{len(rows_out)}）", _num(mass_out, 2),
                  _num(mole_out, 2), "", ""])
     bad = state_text == mass_balance.STATE_TEXT[mass_balance.FAIL]
     body.append(["误差", f"相对误差 · {state_text}", _percent(rel), "", "", ""])
@@ -457,6 +471,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
     _para(doc, ("ΔH = Σ(出口流股能量流) − Σ(进口流股能量流)，单位 kW；"
                 "ΔH 与焓平衡状态直接取工况库里已有的结论，本报告不重算。"
                 "换热器只校验冷侧（整体 ΔH 恒约等于 0），故分冷、热两行；"
+                "「项别」列说明该行的对照值是热负荷（duty）还是轴功率（power），"
                 "塔与反应器按约定不校验。"), None, False, WD_ALIGN_PARAGRAPH.LEFT)
 
     _heading(doc, "2.1 逐设备能量衡算", 2)
@@ -470,17 +485,16 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
         for row in group["devices"]:
             state_text = energy_report.STATE_TEXT.get(row["state"], row["state"])
             bad = row["state"] == energy_report.BAD
-            label = f"{row['dev_kw']:,.2f}" if row["dev_kw"] is not None else ""
-            if label and row["dev_kind"]:
-                label += "（轴功率）" if row["dev_kind"] == "power" else "（热负荷）"
+            kind = {"duty": "热负荷", "power": "轴功率"}.get(row["dev_kind"], "")
             rows.append(([row["block"], row["side"] or "—",
                           _num(row["h_in_kw"], 2), _num(row["h_out_kw"], 2),
-                          _num(row["dh_kw"], 2), label,
+                          _num(row["dh_kw"], 2), kind,
+                          _num(row["dev_kw"], 2),
                           _num(row["delta_kw"], 2), state_text],
                          False, "FDE8E8" if bad else None))
         _three_line(doc, ["设备", "侧", "进口焓流 kW", "出口焓流 kW", "ΔH kW",
-                          "热负荷 / 轴功率 kW", "偏差 kW", "焓平衡"],
-                    rows, _W_ENERGY_8, cap.next(f"{group['label']} 能量衡算"))
+                          "项别", "数值 kW", "偏差 kW", "焓平衡"],
+                    rows, _W_ENERGY, cap.next(f"{group['label']} 能量衡算"))
 
     _heading(doc, "2.2 全流程能量汇总", 2)
     summary = energy["summary"]
