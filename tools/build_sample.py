@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -64,19 +65,100 @@ def renumber(conn, old: int, new: int) -> None:
         conn.execute("PRAGMA foreign_keys=ON")
 
 
+def build_from_db(src_path: str, src_case: int, out: Path, new_id: int) -> dict:
+    """从**已读工况**复制出示例库:`--from-db data/cases.db --case 38`。
+
+    不用 Aspen、不用重读:工况里已经有什么(组成、塔板、泵的 p_v)就复制什么,
+    再做同样的脱敏。适合"库里已经有一份刚读好的工况,只想更新示例库"。
+    """
+    out.unlink(missing_ok=True)
+    dst = db.open_db(str(out))
+    src = sqlite3.connect(src_path)
+    src.row_factory = sqlite3.Row
+    try:
+        case = src.execute("SELECT * FROM cases WHERE id=?", (src_case,)).fetchone()
+        if case is None:
+            raise SystemExit(f"{src_path} 里没有工况 #{src_case}")
+
+        cols = [c for c in case.keys() if c != "id"]
+        row = dict(case)
+        model = os.path.basename(str(row.get("model_path") or "").replace("/", "\\"))
+        row["model_path"] = model
+        row["model_name"] = model or row.get("model_name")
+        if row.get("run_user"):
+            row["run_user"] = "user"
+        dst.execute(
+            f"INSERT INTO cases (id, {', '.join(cols)}) "
+            f"VALUES (?, {', '.join('?' * len(cols))})",
+            [new_id] + [row[c] for c in cols],
+        )
+
+        for table in ("streams", "blocks", "connections", "stream_components", "column_stages"):
+            rows = src.execute(f"SELECT * FROM {table} WHERE case_id=?", (src_case,)).fetchall()
+            if not rows:
+                continue
+            fields = [c for c in rows[0].keys() if c != "case_id"]
+            dst.executemany(
+                f"INSERT INTO {table} (case_id, {', '.join(fields)}) "
+                f"VALUES (?, {', '.join('?' * len(fields))})",
+                [[new_id] + [r[f] for f in fields] for r in rows],
+            )
+        dst.commit()
+
+        def count(sql: str) -> int:
+            return dst.execute(sql).fetchone()[0]
+
+        stats = {
+            "streams": count("SELECT COUNT(*) FROM streams"),
+            "blocks": count("SELECT COUNT(*) FROM blocks"),
+            "connections": count("SELECT COUNT(*) FROM connections"),
+            "stages": count("SELECT COUNT(*) FROM column_stages"),
+            "components": count("SELECT COUNT(*) FROM stream_components"),
+            "pumps": count("SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump'"),
+            "pumps_pv": count("SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump' "
+                              "AND pv_bar IS NOT NULL"),
+        }
+    finally:
+        src.close()
+        dst.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        dst.close()
+    for suffix in ("-wal", "-shm"):
+        stray = Path(str(out) + suffix)
+        if stray.exists():
+            stray.unlink(missing_ok=True)
+    return stats
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="重读当前 Aspen 模型,生成脱敏示例库")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help=f"输出路径(默认 {DEFAULT_OUT})")
     ap.add_argument("--case-id", type=int, default=DEFAULT_CASE_ID, help="库里的工况 id")
+    ap.add_argument("--from-db", default="",
+                    help="从这个工况库复制(不连 Aspen);需同时给 --case")
+    ap.add_argument("--case", type=int, default=0, help="--from-db 时复制哪个工况 id")
     args = ap.parse_args()
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    if args.from_db:
+        if not args.case:
+            print("--from-db 需要同时给 --case <工况 id>")
+            return 2
+        stats = build_from_db(args.from_db, args.case, out, args.case_id)
+        print(f"已写出 {out}({out.stat().st_size:,} 字节),工况 #{args.case_id}"
+              f"(来自 {args.from_db} 的 #{args.case})")
+        print(f"  {stats['streams']} 流股 / {stats['blocks']} 模块 / "
+              f"{stats['connections']} 连接 / {stats['stages']} 塔板级 / "
+              f"{stats['components']} 组成")
+        print(f"  泵 {stats['pumps']} 台,p_v 有值 {stats['pumps_pv']} 台")
+        return 0
 
     session = connect.attach()
     print(f"已附着: {session.model_path}")
     case = reader.read_case(session, include_composition=True, include_profiles=True)
     sanitize(case)
 
-    out = Path(args.out)
-    out.parent.mkdir(parents=True, exist_ok=True)
     out.unlink(missing_ok=True)
     conn = db.open_db(str(out))
     try:
