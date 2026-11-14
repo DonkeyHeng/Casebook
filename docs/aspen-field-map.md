@@ -40,6 +40,7 @@ COM 路线成立。附着、流股表、设备表、收敛状态、塔板级剖�
 
 ```python
 import win32com.client
+
 doc = win32com.client.GetObject(r"D:\path\to\model.apw")
 tree = doc.Tree
 ```
@@ -144,7 +145,7 @@ DSH 的 shell 跑在隔离环境里时,ROT 是**空的**(连 `Shell.Application`
 
 ```python
 node = tree.FindNode(r"\Data\Blocks\E0401")
-node.AttributeValue(6)      # -> 'Heater'
+node.AttributeValue(6)  # -> 'Heater'
 ```
 
 实测同一批节点:

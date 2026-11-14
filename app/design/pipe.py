@@ -28,6 +28,7 @@ GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的文字层是乱码,只能看�
 这样:①现在就能写测试和验证算术;②数据回来只需填 `pipe_data.py` 的三个字典;
 ③不会出现"代码里偷偷写了个记不清的数"。
 """
+
 from __future__ import annotations
 
 import math
@@ -40,9 +41,9 @@ PHASE_EPS = 1e-4
 
 # 默认流速(m/s)。来源:§14.1 第 3 步用户定的口径。
 DEFAULT_VELOCITY = {
-    "liquid": 1.5,   # 1.0–2.5
-    "gas": 15.0,     # 10–25
-    "two": 8.0,      # 5–10
+    "liquid": 1.5,  # 1.0–2.5
+    "gas": 15.0,  # 10–25
+    "two": 8.0,  # 5–10
     "pump_inlet": 0.8,  # 0.5–1.0
 }
 
@@ -54,6 +55,7 @@ class TablesNotReady(RuntimeError):
 # --------------------------------------------------------------------------
 # 1–3. 相态 / 介质代号 / 流速
 # --------------------------------------------------------------------------
+
 
 def phase_of(vap_frac: float | None) -> str:
     """汽化率 → `liquid` / `gas` / `two`。
@@ -77,8 +79,9 @@ def medium_code(phase: str, extra: Mapping[str, str] | None = None) -> str:
     return {"liquid": "PL", "gas": "PG", "two": "PGL"}.get(phase, "PL")
 
 
-def velocity_for(phase: str, is_pump_inlet: bool = False,
-                 options: Mapping[str, Any] | None = None) -> float:
+def velocity_for(
+    phase: str, is_pump_inlet: bool = False, options: Mapping[str, Any] | None = None
+) -> float:
     """选流速(m/s)。泵入口单独一档,不能用管道的常规液速。"""
     opts = options or {}
     v = dict(DEFAULT_VELOCITY)
@@ -91,6 +94,7 @@ def velocity_for(phase: str, is_pump_inlet: bool = False,
 # --------------------------------------------------------------------------
 # 4. 内径与 DN
 # --------------------------------------------------------------------------
+
 
 def inner_diameter(vol_flow_m3h: float, velocity_ms: float) -> float:
     """连续性方程:D_i = √(4Q/(πv)),返回 mm。Q 用 m³/h、v 用 m/s。"""
@@ -116,9 +120,13 @@ def pick_dn(inner_d_mm: float, dn_to_od: Mapping[int, float]) -> tuple[int | Non
     return dn, float(dn_to_od[dn])
 
 
-def select_dn(inner_d_mm: float, dn_to_od: Mapping[int, float],
-              walls_by_od: Mapping[float, Sequence[float]],
-              wall_for, max_dn: int | None = None) -> dict[str, Any]:
+def select_dn(
+    inner_d_mm: float,
+    dn_to_od: Mapping[int, float],
+    walls_by_od: Mapping[float, Sequence[float]],
+    wall_for,
+    max_dn: int | None = None,
+) -> dict[str, Any]:
     """按**实际内径**选档:从小到大试 DN,直到 `外径 − 2×标准壁厚 ≥ 计算内径`。
 
     这一步是必须的:DN 只是公称直径,Φ273 的内径约 269 mm,若只按"DN ≥ 内径"选档,
@@ -152,8 +160,9 @@ VACUUM_DESIGN_MPA = 0.1
 ATMOSPHERIC_MARGIN_MPA = 0.01
 
 
-def design_pressure(press_bar_abs: float | None,
-                    options: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def design_pressure(
+    press_bar_abs: float | None, options: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """操作绝压(bar) → 设计压力(MPa 表压)。
 
     口径(§14.3):`P_design = (P_绝压 − 0.1013 MPa) × 1.1`,下限钳到 1.0 MPa;
@@ -167,21 +176,28 @@ def design_pressure(press_bar_abs: float | None,
     margin = float(opts.get("atmospheric_margin_mpa", ATMOSPHERIC_MARGIN_MPA))
 
     if press_bar_abs is None:
-        return {"design_mpa": None, "gauge_mpa": None, "vacuum": False,
-                "note": "缺操作压力"}
+        return {"design_mpa": None, "gauge_mpa": None, "vacuum": False, "note": "缺操作压力"}
 
     p_mpa_abs = press_bar_abs / 10.0
     gauge = p_mpa_abs - ATM_MPA
     if gauge < -margin:
-        return {"design_mpa": VACUUM_DESIGN_MPA, "gauge_mpa": gauge, "vacuum": True,
-                "note": "真空管道:内压按最小标准壁厚,按外压 0.1 MPa 校核(不做外压计算)"}
-    return {"design_mpa": max(gauge * factor, floor_mpa), "gauge_mpa": gauge,
-            "vacuum": False, "note": ""}
+        return {
+            "design_mpa": VACUUM_DESIGN_MPA,
+            "gauge_mpa": gauge,
+            "vacuum": True,
+            "note": "真空管道:内压按最小标准壁厚,按外压 0.1 MPa 校核(不做外压计算)",
+        }
+    return {
+        "design_mpa": max(gauge * factor, floor_mpa),
+        "gauge_mpa": gauge,
+        "vacuum": False,
+        "note": "",
+    }
 
 
-def design_temperature(temp_c: float | None,
-                       insulated: bool | None = None,
-                       options: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def design_temperature(
+    temp_c: float | None, insulated: bool | None = None, options: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """设计温度(℃)。
 
     §14.3 口径:保温(介质 ≥50 ℃ 自动判 `-H`)→ 直接取介质温度;
@@ -194,21 +210,25 @@ def design_temperature(temp_c: float | None,
     fold_ratio = float(opts.get("fold_ratio", 0.95))
 
     if temp_c is None:
-        return {"design_c": None, "insulated": False, "folded": False,
-                "note": "缺介质温度"}
+        return {"design_c": None, "insulated": False, "folded": False, "note": "缺介质温度"}
 
     if insulated is None:
         insulated = temp_c >= on_temp
     if insulated:
         return {"design_c": temp_c, "insulated": True, "folded": False, "note": ""}
     if fold_lo <= temp_c < fold_hi:
-        return {"design_c": temp_c * fold_ratio, "insulated": False, "folded": True,
-                "note": f"无保温且 {fold_lo:g}–{fold_hi:g} ℃,按 {fold_ratio:g} 折"}
+        return {
+            "design_c": temp_c * fold_ratio,
+            "insulated": False,
+            "folded": True,
+            "note": f"无保温且 {fold_lo:g}–{fold_hi:g} ℃,按 {fold_ratio:g} 折",
+        }
     return {"design_c": temp_c, "insulated": False, "folded": False, "note": ""}
 
 
-def allowable_stress(grade: str, design_c: float | None,
-                     stress_table: Mapping[str, Mapping[float, float]]) -> float | None:
+def allowable_stress(
+    grade: str, design_c: float | None, stress_table: Mapping[str, Mapping[float, float]]
+) -> float | None:
     """许用应力 [σ] MPa:按牌号 + 设计温度查表,缺温度线性内插,T<40 ℃ 取 40 ℃ 值。"""
     if design_c is None or not stress_table:
         return None
@@ -232,8 +252,10 @@ def allowable_stress(grade: str, design_c: float | None,
 # 8–9. 壁厚
 # --------------------------------------------------------------------------
 
-def calc_wall_thickness(p_mpa: float, od_mm: float, stress_mpa: float,
-                        y: float = pipe_data.Y_VALUE, phi_w: float = 1.0) -> dict[str, Any]:
+
+def calc_wall_thickness(
+    p_mpa: float, od_mm: float, stress_mpa: float, y: float = pipe_data.Y_VALUE, phi_w: float = 1.0
+) -> dict[str, Any]:
     """GB/T 20801.1-2025 6.2.1 直管内压:t = P·D_o / [2(S·Φw + P·Y)]。
 
     适用范围校验:`t < D_o/6`;超出说明公式不适用(要另按厚壁/外压算),只标记不硬算。
@@ -243,13 +265,20 @@ def calc_wall_thickness(p_mpa: float, od_mm: float, stress_mpa: float,
     denominator = 2.0 * (stress_mpa * phi_w + p_mpa * y)
     t = p_mpa * od_mm / denominator
     applicable = t < od_mm / 6.0
-    return {"t_calc_mm": t, "applicable": applicable,
-            "note": "" if applicable else f"t={t:.2f} ≥ D/6={od_mm / 6:.2f},公式不适用,需另行校核"}
+    return {
+        "t_calc_mm": t,
+        "applicable": applicable,
+        "note": "" if applicable else f"t={t:.2f} ≥ D/6={od_mm / 6:.2f},公式不适用,需另行校核",
+    }
 
 
-def round_up_wall(t_required_mm: float, walls: Sequence[float] | None,
-                  od_mm: float | None = None, grade: str | None = None,
-                  min_wall: float | None = None) -> dict[str, Any]:
+def round_up_wall(
+    t_required_mm: float,
+    walls: Sequence[float] | None,
+    od_mm: float | None = None,
+    grade: str | None = None,
+    min_wall: float | None = None,
+) -> dict[str, Any]:
     """向上圆整到标准壁厚。
 
     `od_mm` + `grade` 给了的话,会**把壁厚负偏差一起算进去**:
@@ -261,8 +290,12 @@ def round_up_wall(t_required_mm: float, walls: Sequence[float] | None,
     下限只抬高、不降低 —— 承压需要更厚时仍按承压;`floored` 说明这一档是不是下限定的。
     """
     if not walls:
-        return {"wall_mm": None, "note": "缺标准壁厚序列(T2 未录入)",
-                "min_wall_mm": min_wall, "floored": False}
+        return {
+            "wall_mm": None,
+            "note": "缺标准壁厚序列(T2 未录入)",
+            "min_wall_mm": min_wall,
+            "floored": False,
+        }
     usable = sorted(walls)
     floor = float(t_required_mm)
     floored = False
@@ -276,17 +309,20 @@ def round_up_wall(t_required_mm: float, walls: Sequence[float] | None,
             c1 = pipe_data.negative_deviation(od_mm, s, grade)
             if s - c1 < t_required_mm - 1e-9:
                 continue
-        return {"wall_mm": float(s), "note": "",
-                "min_wall_mm": min_wall, "floored": floored}
-    return {"wall_mm": None,
-            "note": f"所需 {floor:.2f} mm 超过该外径最大标准壁厚 "
-                    f"{max(usable):g} mm(含壁厚下限),需并联或专项设计",
-            "min_wall_mm": min_wall, "floored": floored}
+        return {"wall_mm": float(s), "note": "", "min_wall_mm": min_wall, "floored": floored}
+    return {
+        "wall_mm": None,
+        "note": f"所需 {floor:.2f} mm 超过该外径最大标准壁厚 "
+        f"{max(usable):g} mm(含壁厚下限),需并联或专项设计",
+        "min_wall_mm": min_wall,
+        "floored": floored,
+    }
 
 
 # --------------------------------------------------------------------------
 # 10. 等级号
 # --------------------------------------------------------------------------
+
 
 def pn_code_for(design_mpa: float) -> str | None:
     """设计压力 → 压力等级代号(取不小于设计压力的最小 PN)。"""
@@ -296,10 +332,13 @@ def pn_code_for(design_mpa: float) -> str | None:
     return min(fits)[1]
 
 
-def grade_code(design_mpa: float, material_code: str,
-               design_c: float | None = None,
-               insulation: str = "",
-               options: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def grade_code(
+    design_mpa: float,
+    material_code: str,
+    design_c: float | None = None,
+    insulation: str = "",
+    options: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """管道等级号 = 压力代号 + 顺序号(默认 1) + 材质代号,绝热代号接在后面。"""
     opts = options or {}
     seq = str(opts.get("sequence_no", 1))
@@ -320,6 +359,7 @@ def grade_code(design_mpa: float, material_code: str,
 # 校验规则(V1–V9,见 docs/pipe-selection-plan.md §6)
 # --------------------------------------------------------------------------
 
+
 def actual_velocity(vol_flow_m3h: float, inner_d_mm: float) -> float | None:
     """按实际内径反算流速 m/s(内径 = 外径 − 2×壁厚)。"""
     if not inner_d_mm or inner_d_mm <= 0:
@@ -337,8 +377,9 @@ VELOCITY_RANGE = {
 }
 
 
-def validate(rows: Iterable[Mapping[str, Any]],
-             options: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def validate(
+    rows: Iterable[Mapping[str, Any]], options: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """对选型结果跑 §6 的 V1–V9,只陈述事实,不给"该怎么改模型"的建议。
 
     返回 `{"findings": [...], "summary": {"error": n, "warn": n}}`,
@@ -356,8 +397,9 @@ def validate(rows: Iterable[Mapping[str, Any]],
     findings: list[dict[str, Any]] = []
 
     def add(stream: str, code: str, level: str, message: str, field: str) -> None:
-        findings.append({"stream": stream, "code": code, "level": level,
-                         "message": message, "field": field})
+        findings.append(
+            {"stream": stream, "code": code, "level": level, "message": message, "field": field}
+        )
 
     for r in rows:
         name = r.get("stream")
@@ -372,8 +414,7 @@ def validate(rows: Iterable[Mapping[str, Any]],
         if pipe_no:
             tail = str(pipe_no).split("-")[-1]
             if tail.isdigit() and dn is not None and int(tail) != int(dn):
-                add(name, "V1", "error",
-                    f"管道编号里的口径 {tail} 与选出的 DN{dn} 不一致", "dn")
+                add(name, "V1", "error", f"管道编号里的口径 {tail} 与选出的 DN{dn} 不一致", "dn")
 
         # V5 气液共存但按单相流速选型(先判,好在 V2 里避免同一个问题报两次)
         v5_hit = False
@@ -381,9 +422,13 @@ def validate(rows: Iterable[Mapping[str, Any]],
             lo2, hi2 = VELOCITY_RANGE["two"]
             if not (lo2 - 1e-9 <= v_used <= hi2 + 1e-9):
                 v5_hit = True
-                add(name, "V5", "warn",
+                add(
+                    name,
+                    "V5",
+                    "warn",
                     f"两相流按 {v_used:g} m/s(单相口径)选型,超出两相 {lo2:g}–{hi2:g} m/s",
-                    "velocity")
+                    "velocity",
+                )
 
         # V2 实际流速超出推荐区间(两相已由 V5 覆盖,不重复报)
         id_mm = (od - 2.0 * wall) if (od and wall) else None
@@ -394,41 +439,58 @@ def validate(rows: Iterable[Mapping[str, Any]],
         key = "pump_inlet" if r.get("pump_inlet") else phase
         lo, hi = VELOCITY_RANGE.get(key, (0.0, float("inf")))
         if v_act is not None and not v5_hit and not (lo - 1e-9 <= v_act <= hi + 1e-9):
-            add(name, "V2", "warn",
+            add(
+                name,
+                "V2",
+                "warn",
                 f"实际流速 {v_act:.2f} m/s 超出 {phase} 推荐区间 {lo:g}–{hi:g} m/s"
-                + ("(泵入口)" if r.get("pump_inlet") else ""), "velocity")
+                + ("(泵入口)" if r.get("pump_inlet") else ""),
+                "velocity",
+            )
 
         # V3 计算壁厚 + 附加量 > 所选标准壁厚
         need = r.get("t_required_mm")
         if need is not None and wall is not None and need > wall + 1e-9:
-            add(name, "V3", "error",
-                f"所需壁厚 {need:.2f} mm 超过所选标准壁厚 {wall:g} mm", "wall_mm")
+            add(
+                name,
+                "V3",
+                "error",
+                f"所需壁厚 {need:.2f} mm 超过所选标准壁厚 {wall:g} mm",
+                "wall_mm",
+            )
 
         # V4 等级号的压力代号 < 设计压力
         code = r.get("grade_code") or ""
         if code and r.get("design_pressure_mpa") is not None:
             pn = pipe_data.PN_CODES.get(code[:1])
             if pn is None:
-                add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里",
-                    "grade_code")
+                add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里", "grade_code")
             elif pn < float(r["design_pressure_mpa"]) - 1e-9:
-                add(name, "V4", "error",
+                add(
+                    name,
+                    "V4",
+                    "error",
                     f"等级号 {code} 的公称压力 {pn:g} MPa 低于设计压力 "
-                    f"{float(r['design_pressure_mpa']):.2f} MPa", "grade_code")
+                    f"{float(r['design_pressure_mpa']):.2f} MPa",
+                    "grade_code",
+                )
 
         # V5 已在前面先判(与 V2 互斥,避免同一个问题报两次)
 
         # V6 真空流股
         if r.get("vacuum"):
-            add(name, "V6", "warn", "真空流股:按外压 0.1 MPa 另行校核",
-                "design_pressure_mpa")
+            add(name, "V6", "warn", "真空流股:按外压 0.1 MPa 另行校核", "design_pressure_mpa")
 
         # V7 超出材料使用温度
         dt = r.get("design_temp_c")
         if dt is not None and (dt < low_c or dt > high_c):
-            add(name, "V7", "warn",
+            add(
+                name,
+                "V7",
+                "warn",
                 f"设计温度 {dt:g} ℃ 超出材料常规使用区间 {low_c:g}–{high_c:g} ℃",
-                "design_temp_c")
+                "design_temp_c",
+            )
 
         # V8 泵出口流股用了泵入口流速
         if r.get("pump_outlet") and r.get("pump_inlet"):
@@ -436,9 +498,13 @@ def validate(rows: Iterable[Mapping[str, Any]],
 
         # V9 高温但没加保温代号
         if dt is not None and dt >= hot_c and not r.get("insulation"):
-            add(name, "V9", "warn",
+            add(
+                name,
+                "V9",
+                "warn",
                 f"设计温度 {dt:g} ℃ ≥ {hot_c:g} ℃,等级号却未加保温代号 -H",
-                "grade_code")
+                "grade_code",
+            )
 
     return {
         "findings": findings,
@@ -453,8 +519,10 @@ def validate(rows: Iterable[Mapping[str, Any]],
 # 批量:一张表(§14.5 主表 + 工作表 2「计算书」)
 # --------------------------------------------------------------------------
 
-def _pump_streams(connections: Iterable[Mapping[str, Any]],
-                  blocks: Iterable[Mapping[str, Any]]) -> tuple[set[str], set[str]]:
+
+def _pump_streams(
+    connections: Iterable[Mapping[str, Any]], blocks: Iterable[Mapping[str, Any]]
+) -> tuple[set[str], set[str]]:
     """分出"泵入口流股"与"泵出口流股"。
 
     `connections` 的行是 (block, direction, stream):`direction="in"` 表示
@@ -474,12 +542,13 @@ def _pump_streams(connections: Iterable[Mapping[str, Any]],
     return inlets, outlets
 
 
-def build(streams: Iterable[Mapping[str, Any]],
-          blocks: Iterable[Mapping[str, Any]] | None = None,
-          connections: Iterable[Mapping[str, Any]] | None = None,
-          options: Mapping[str, Any] | None = None,
-          tables: Mapping[str, Any] | None = None,
-          ) -> dict[str, Any]:
+def build(
+    streams: Iterable[Mapping[str, Any]],
+    blocks: Iterable[Mapping[str, Any]] | None = None,
+    connections: Iterable[Mapping[str, Any]] | None = None,
+    options: Mapping[str, Any] | None = None,
+    tables: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     """把一批流股算成管表。
 
     参数
@@ -500,8 +569,9 @@ def build(streams: Iterable[Mapping[str, Any]],
     stress = tbl.get("stress", snap.stress)
 
     if not dn_to_od or not stress:
-        empty = [label for label, tbl in (("DN→外径(T1)", dn_to_od),
-                                          ("许用应力(T3)", stress)) if not tbl]
+        empty = [
+            label for label, tbl in (("DN→外径(T1)", dn_to_od), ("许用应力(T3)", stress)) if not tbl
+        ]
         raise TablesNotReady(
             "标准表未录入:" + "、".join(empty) + " 为空。"
             "把 GB/T 17395-2024 表 1/表 4 与 GB/T 20801.1-2025 表 B.1 整理成 CSV,"
@@ -552,13 +622,18 @@ def build(streams: Iterable[Mapping[str, Any]],
         # 材质来源优先级:人工指定 > 管道等级表 > 全局默认
         # 工具**不判断介质是否腐蚀**,只按用户定义的表套用(见 pipe_data 第 5 节)
         cls = pipe_data.resolve_piping_class(
-            name, medium,
-            rules=opts.get("piping_rules"), default=opts.get("piping_default"))
+            name, medium, rules=opts.get("piping_rules"), default=opts.get("piping_default")
+        )
         override = (opts.get("material_for_stream") or {}).get(name)
         material = str(override or cls["grade"] or default_material)
-        if not override and cls["source"] == "none" and (opts.get("piping_rules")
-                                                        or pipe_data.PIPING_CLASS_RULES):
-            warnings.append(f"介质 {medium} 未在管道等级表里定义材质,按默认 {default_material} 暂算")
+        if (
+            not override
+            and cls["source"] == "none"
+            and (opts.get("piping_rules") or pipe_data.PIPING_CLASS_RULES)
+        ):
+            warnings.append(
+                f"介质 {medium} 未在管道等级表里定义材质,按默认 {default_material} 暂算"
+            )
         if cls["corrosion_mm"] is not None:
             corrosion_c2 = float(cls["corrosion_mm"])
         elif global_c2 is not None:
@@ -586,12 +661,14 @@ def build(streams: Iterable[Mapping[str, Any]],
         dn, od = sel["dn"], sel["od_mm"]
         if dn is None:
             od_max = max(dn_to_od.values()) if dn_to_od else None
-            missing.append({
-                "stream": name,
-                "reason": f"计算内径 {d_i:.1f} mm 超出可选档位"
-                          + (f"(最大 Φ{od_max:g} = DN{max(dn_to_od)})" if od_max else "")
-                          + ",需并联或专项设计",
-            })
+            missing.append(
+                {
+                    "stream": name,
+                    "reason": f"计算内径 {d_i:.1f} mm 超出可选档位"
+                    + (f"(最大 Φ{od_max:g} = DN{max(dn_to_od)})" if od_max else "")
+                    + ",需并联或专项设计",
+                }
+            )
             continue
         if dn > max_dn:
             warnings.append(f"DN{dn} 超出本期上限 DN{max_dn},需专项确认")
@@ -611,11 +688,13 @@ def build(streams: Iterable[Mapping[str, Any]],
             c1 = pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade)
             v_act = actual_velocity(float(q), od - 2.0 * wall["wall_mm"])
             if v_act is not None:
-                lo, hi = VELOCITY_RANGE.get("pump_inlet" if is_pump_in else phase,
-                                            (0.0, float("inf")))
+                lo, hi = VELOCITY_RANGE.get(
+                    "pump_inlet" if is_pump_in else phase, (0.0, float("inf"))
+                )
                 if not (lo - 1e-9 <= v_act <= hi + 1e-9):
                     warnings.append(
-                        f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)")
+                        f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)"
+                    )
         mcode = pipe_data.MATERIAL_CODE_BY_GRADE.get(material)
         if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
             mcode = "E"
@@ -626,37 +705,39 @@ def build(streams: Iterable[Mapping[str, Any]],
         if phase == "two":
             warnings.append("气液共存:按两相流速选型,需专项核算")
 
-        rows.append({
-            "stream": name,
-            "phase": phase,
-            "medium_code": medium,
-            "material_grade": material,
-            "piping_class_note": cls["note"],
-            "piping_class_source": cls["source"],
-            "velocity_ms": v,
-            "pump_inlet": is_pump_in,
-            "pump_outlet": name in pump_out,
-            "inner_d_mm": d_i,
-            "dn": dn,
-            "od_mm": od,
-            "vol_flow_m3h": float(q),
-            "design_pressure_mpa": pd["design_mpa"],
-            "gauge_pressure_mpa": pd["gauge_mpa"],
-            "vacuum": pd["vacuum"],
-            "design_temp_c": td["design_c"],
-            "insulated": td["insulated"],
-            "material": material,
-            "stress_mpa": sigma,
-            "t_calc_mm": w["t_calc_mm"],
-            "c2_mm": corrosion_c2,
-            "t_required_mm": t_req,
-            "min_wall_mm": min_wall_mm,
-            "wall_mm": wall["wall_mm"],
-            "wall_floored": bool(wall.get("floored")),
-            "grade_code": gc["code"],
-            "insulation": gc.get("insulation", ""),
-            "warnings": warnings,
-        })
+        rows.append(
+            {
+                "stream": name,
+                "phase": phase,
+                "medium_code": medium,
+                "material_grade": material,
+                "piping_class_note": cls["note"],
+                "piping_class_source": cls["source"],
+                "velocity_ms": v,
+                "pump_inlet": is_pump_in,
+                "pump_outlet": name in pump_out,
+                "inner_d_mm": d_i,
+                "dn": dn,
+                "od_mm": od,
+                "vol_flow_m3h": float(q),
+                "design_pressure_mpa": pd["design_mpa"],
+                "gauge_pressure_mpa": pd["gauge_mpa"],
+                "vacuum": pd["vacuum"],
+                "design_temp_c": td["design_c"],
+                "insulated": td["insulated"],
+                "material": material,
+                "stress_mpa": sigma,
+                "t_calc_mm": w["t_calc_mm"],
+                "c2_mm": corrosion_c2,
+                "t_required_mm": t_req,
+                "min_wall_mm": min_wall_mm,
+                "wall_mm": wall["wall_mm"],
+                "wall_floored": bool(wall.get("floored")),
+                "grade_code": gc["code"],
+                "insulation": gc.get("insulation", ""),
+                "warnings": warnings,
+            }
+        )
 
     return {
         "rows": rows,

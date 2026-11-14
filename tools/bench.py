@@ -8,6 +8,7 @@
   * 决定"懒加载粒度"(一次性全读 vs 先读名字再按需读字段)
   * 估算 200–1000 流股时的耗时
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,7 +61,9 @@ def main() -> int:
     c_blocks = calls["n"]
 
     calls["n"] = 0
-    _, t_comp1 = timed("read_composition(第一条)", lambda: reader.read_composition(session, streams[0]["name"]))
+    _, t_comp1 = timed(
+        "read_composition(第一条)", lambda: reader.read_composition(session, streams[0]["name"])
+    )
     c_comp1 = calls["n"]
 
     print("\n3) 全量读取(含/不含组成)")
@@ -98,8 +101,9 @@ def main() -> int:
     base = t_case
     for n in (200, 500, 1000):
         factor = n / max(1, n_streams)
-        print(f"  {n:>4} 流股 ≈ {base * factor:5.1f} s(不含组成)"
-              f" / {t_case_c * factor:5.1f} s(含组成)")
+        print(
+            f"  {n:>4} 流股 ≈ {base * factor:5.1f} s(不含组成) / {t_case_c * factor:5.1f} s(含组成)"
+        )
 
     return 0
 

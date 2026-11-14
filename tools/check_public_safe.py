@@ -21,6 +21,7 @@
     ban: 某某大学              # 额外禁词
     allow: 某段正则            # 额外放行(命中的内容不再报)
 """
+
 import argparse
 import re
 import subprocess
@@ -28,39 +29,76 @@ import sys
 import tempfile
 from pathlib import Path
 
-MAX_BYTES = 2_000_000          # 超过就跳过(多半是模型 / 图片 / 数据库)
+MAX_BYTES = 2_000_000  # 超过就跳过(多半是模型 / 图片 / 数据库)
 SELF = "tools/check_public_safe.py"
 
 # ---- 规则表:(级别, 类别, 名称, 正则) --------------------------------------
 RULES = [
     ("高", "密钥", "私钥文件头", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
     ("高", "密钥", "云厂商 AccessKey", re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")),
-    ("高", "密钥", "GitHub Token", re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")),
+    (
+        "高",
+        "密钥",
+        "GitHub Token",
+        re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b"),
+    ),
     ("高", "密钥", "OpenAI 风格 Key", re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b")),
     ("高", "密钥", "Slack Token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}")),
-    ("高", "账户", "硬编码口令",
-     re.compile(r"""(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?key)\b\s*[:=]\s*['"][^'"\s]{4,}['"]""")),
-    ("高", "连接串", "带凭据的数据库 URL",
-     re.compile(r"(?i)\b(?:mongodb|postgres(?:ql)?|mysql|redis|amqp)://[^\s:/@]+:[^\s/@]+@")),
-
+    (
+        "高",
+        "账户",
+        "硬编码口令",
+        re.compile(
+            r"""(?i)\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?key)\b\s*[:=]\s*['"][^'"\s]{4,}['"]"""
+        ),
+    ),
+    (
+        "高",
+        "连接串",
+        "带凭据的数据库 URL",
+        re.compile(r"(?i)\b(?:mongodb|postgres(?:ql)?|mysql|redis|amqp)://[^\s:/@]+:[^\s/@]+@"),
+    ),
     ("中", "隐私", "中国大陆手机号", re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")),
     ("中", "隐私", "身份证号", re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)")),
     ("中", "隐私", "邮箱地址", re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
-
-    ("中", "本机路径", "Windows 用户目录",
-     re.compile(r"(?i)\b[A-Za-z]:[\\/]+Users[\\/]+(?!\.{2})[^\\/\s\"')]+")),
-    ("中", "本机路径", "Unix 家目录", re.compile(r"(?<![\w/.])/(?:home|Users)/(?!\.{2})[A-Za-z0-9._-]+")),
-    ("中", "本机路径", "Windows 应用数据目录", re.compile(r"(?i)\bAppData[\\/]+(?:Local|Roaming)\b")),
-
-    ("中", "内网", "私有网段 IP",
-     re.compile(r"\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b")),
-    ("中", "内网", "内部域名",
-     re.compile(r"(?i)(?<![.\w-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:local|corp|internal|lan|intranet)\b(?!\.)")),
+    (
+        "中",
+        "本机路径",
+        "Windows 用户目录",
+        re.compile(r"(?i)\b[A-Za-z]:[\\/]+Users[\\/]+(?!\.{2})[^\\/\s\"')]+"),
+    ),
+    (
+        "中",
+        "本机路径",
+        "Unix 家目录",
+        re.compile(r"(?<![\w/.])/(?:home|Users)/(?!\.{2})[A-Za-z0-9._-]+"),
+    ),
+    (
+        "中",
+        "本机路径",
+        "Windows 应用数据目录",
+        re.compile(r"(?i)\bAppData[\\/]+(?:Local|Roaming)\b"),
+    ),
+    (
+        "中",
+        "内网",
+        "私有网段 IP",
+        re.compile(r"\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b"),
+    ),
+    (
+        "中",
+        "内网",
+        "内部域名",
+        re.compile(
+            r"(?i)(?<![.\w-])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:local|corp|internal|lan|intranet)\b(?!\.)"
+        ),
+    ),
 ]
 
 # 邮箱里这些域名是公开占位,不必报
 EMAIL_ALLOW = re.compile(
-    r"(?i)@(?:users\.noreply\.github\.com|noreply\.github\.com|example\.(?:com|org|invalid))$")
+    r"(?i)@(?:users\.noreply\.github\.com|noreply\.github\.com|example\.(?:com|org|invalid))$"
+)
 
 LEVEL_ORDER = {"高": 0, "中": 1, "低": 2}
 
@@ -75,8 +113,9 @@ def sh(*args, **kw):
     以前这里不看返回码:仓库读不到、对象损坏或 git 执行异常时 stdout 是空的,
     扫描结果会变成"未发现敏感内容" —— 公开前的门禁等于失效。
     """
-    proc = subprocess.run(["git", *args], capture_output=True, text=True,
-                          encoding="utf-8", errors="replace", **kw)
+    proc = subprocess.run(
+        ["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", **kw
+    )
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().replace("\n", " ")[:200]
         raise ScanError(f"git {' '.join(args)} 失败(返回码 {proc.returncode}):{detail}")
@@ -196,8 +235,9 @@ def iter_history():
     with tempfile.TemporaryFile() as sha_file:
         sha_file.write(payload)
         sha_file.seek(0)
-        proc = subprocess.Popen(["git", "cat-file", "--batch"],
-                                stdin=sha_file, stdout=subprocess.PIPE)
+        proc = subprocess.Popen(
+            ["git", "cat-file", "--batch"], stdin=sha_file, stdout=subprocess.PIPE
+        )
         stdout = proc.stdout
         if stdout is None:
             raise ScanError("git cat-file 的管道没建起来")
@@ -217,7 +257,7 @@ def iter_history():
                 data = stdout.read(size)
                 if len(data) != size:
                     raise ScanError(f"cat-file 读到一半断了(sha {sha[:7]})")
-                stdout.read(1)                    # 每个对象后面跟着一个换行
+                stdout.read(1)  # 每个对象后面跟着一个换行
                 if kind != "blob":
                     continue
                 yield (f"{sha2path.get(sha, sha[:8])} @ 历史 {sha[:7]}", data)
@@ -234,8 +274,16 @@ def check_repo_level(hits):
     text = ig.read_text(encoding="utf-8", errors="ignore") if ig.exists() else ""
     for pat in ("*-wal", "*-shm", "*-journal"):
         if pat not in text:
-            hits.append(("低", "忽略规则", f".gitignore 缺 {pat}", ".gitignore", 0,
-                         "SQLite 附属文件可能含完整数据页"))
+            hits.append(
+                (
+                    "低",
+                    "忽略规则",
+                    f".gitignore 缺 {pat}",
+                    ".gitignore",
+                    0,
+                    "SQLite 附属文件可能含完整数据页",
+                )
+            )
 
     tracked = sh("ls-files", "-z").stdout.split("\0")
     for p in tracked:

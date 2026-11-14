@@ -20,6 +20,7 @@
 不满足会立刻中止并把原因打出来;单条流股没有组分(纯能量流)只跳过,不算失败。
 全部只读 Aspen,只写本地库。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -75,8 +76,9 @@ def main() -> int:
         if i % 20 == 0:
             print(f"  {i}/{len(streams)}  成功 {ok},跳过 {skipped}", flush=True)
 
-    print(f"\n完成:{ok} 条写入,{skipped} 条跳过(无组分/纯能量流),"
-          f"用时 {time.time() - started:.1f} s")
+    print(
+        f"\n完成:{ok} 条写入,{skipped} 条跳过(无组分/纯能量流),用时 {time.time() - started:.1f} s"
+    )
     return 0 if ok else 2
 
 

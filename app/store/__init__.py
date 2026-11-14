@@ -1,4 +1,5 @@
 """工况库(SQLite)。"""
+
 from .db import (
     delete_case,
     get_case,

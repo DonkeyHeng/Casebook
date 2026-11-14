@@ -23,6 +23,7 @@
 
 焓平衡只在有 `connections` 的工况上重算(2026-11-01 之前读的工况没有拓扑数据)。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -116,7 +117,9 @@ def repair_case(conn, case, apply: bool) -> dict:
         inlet = outlet = None
         if connections:
             inlet = next((by_stream[s] for s in inflow.get(b["name"], []) if s in by_stream), None)
-            outlet = next((by_stream[s] for s in outflow.get(b["name"], []) if s in by_stream), None)
+            outlet = next(
+                (by_stream[s] for s in outflow.get(b["name"], []) if s in by_stream), None
+            )
 
         values = {
             "head_m": conv("HEAD_CAL", "length"),
@@ -130,9 +133,11 @@ def repair_case(conn, case, apply: bool) -> dict:
             mass, vol = inlet.get("mass_flow_kgh"), inlet.get("vol_flow_m3h")
             if mass and vol:
                 rho_from_flow = float(mass) / float(vol)
-        values["rho_kgm3"] = (rho_from_flow if rho_from_flow is not None
-                              else pump_rules.mass_density_kgm3(
-                                  conv("RHO_LIQ", "molar_density"), mw))
+        values["rho_kgm3"] = (
+            rho_from_flow
+            if rho_from_flow is not None
+            else pump_rules.mass_density_kgm3(conv("RHO_LIQ", "molar_density"), mw)
+        )
         values["pump_eff"] = (raw.get("CEFF") or {}).get("value")
         if connections:
             values["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
@@ -147,9 +152,12 @@ def repair_case(conn, case, apply: bool) -> dict:
     # ---- 2) 重算判定
     codes = _json(case["status_json"], {})
     tears = _json(case["tear_json"], [])
-    verdict = reader.judge(codes, case["errtxt"], tears,
-                           [{"name": b["name"], "status": b["status"],
-                             "message": b["message"]} for b in blocks])
+    verdict = reader.judge(
+        codes,
+        case["errtxt"],
+        tears,
+        [{"name": b["name"], "status": b["status"], "message": b["message"]} for b in blocks],
+    )
     # 没 Run 过的模型单独一档(和 read_case 里同一套规则)
     reader.mark_empty(verdict, reader.value_coverage(streams), case["run_id"])
 
@@ -169,8 +177,9 @@ def repair_case(conn, case, apply: bool) -> dict:
         results = balance.compute(streams, blocks, connections, stages=stages)
         for b in blocks:
             new = results.get(b["name"]) or {}
-            if (b.get("balance_state") != new.get("balance_state")
-                    or b.get("dh_kw") != new.get("dh_kw")):
+            if b.get("balance_state") != new.get("balance_state") or b.get("dh_kw") != new.get(
+                "dh_kw"
+            ):
                 balance_changed += 1
             b["balance"] = new
 
@@ -196,9 +205,19 @@ def repair_case(conn, case, apply: bool) -> dict:
         conn.executemany(
             "UPDATE streams SET temperature_c=?, pressure_bar=?, mass_flow_kgh=?,"
             " mole_flow_kmolh=?, vap_frac=?, vol_flow_m3h=? WHERE case_id=? AND name=?",
-            [(s["temperature_c"], s["pressure_bar"], s["mass_flow_kgh"],
-              s["mole_flow_kmolh"], s["vap_frac"], s["vol_flow_m3h"], cid, s["name"])
-             for s in streams],
+            [
+                (
+                    s["temperature_c"],
+                    s["pressure_bar"],
+                    s["mass_flow_kgh"],
+                    s["mole_flow_kmolh"],
+                    s["vap_frac"],
+                    s["vol_flow_m3h"],
+                    cid,
+                    s["name"],
+                )
+                for s in streams
+            ],
         )
         conn.executemany(
             "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?,"
@@ -209,26 +228,49 @@ def repair_case(conn, case, apply: bool) -> dict:
             " inlet_temp_c=?, outlet_temp_c=?, cold_in_temp_c=?, cold_out_temp_c=?,"
             " outlet_vap_frac=?"
             " WHERE case_id=? AND name=?",
-            [(b["duty_kw"], b["power_kw"], b["area_m2"],
-              b.get("cond_duty_kw"), b.get("reb_duty_kw"),
-              (b.get("balance") or {}).get("dh_kw"),
-              (b.get("balance") or {}).get("ref_kw"),
-              (b.get("balance") or {}).get("ref_kind"),
-              (b.get("balance") or {}).get("balance_state"),
-              (b.get("balance") or {}).get("balance_note"),
-              b.get("head_m"), b.get("flow_m3h"), b.get("pump_eff"),
-              b.get("p_in_bar"), b.get("p_out_bar"), b.get("dp_bar"),
-              b.get("rho_kgm3"), b.get("pump_vap_frac"), b.get("motor_kw"),
-              b.get("inlet_temp_c"), b.get("outlet_temp_c"),
-              b.get("cold_in_temp_c"), b.get("cold_out_temp_c"), b.get("outlet_vap_frac"),
-              cid, b["name"]) for b in blocks],
+            [
+                (
+                    b["duty_kw"],
+                    b["power_kw"],
+                    b["area_m2"],
+                    b.get("cond_duty_kw"),
+                    b.get("reb_duty_kw"),
+                    (b.get("balance") or {}).get("dh_kw"),
+                    (b.get("balance") or {}).get("ref_kw"),
+                    (b.get("balance") or {}).get("ref_kind"),
+                    (b.get("balance") or {}).get("balance_state"),
+                    (b.get("balance") or {}).get("balance_note"),
+                    b.get("head_m"),
+                    b.get("flow_m3h"),
+                    b.get("pump_eff"),
+                    b.get("p_in_bar"),
+                    b.get("p_out_bar"),
+                    b.get("dp_bar"),
+                    b.get("rho_kgm3"),
+                    b.get("pump_vap_frac"),
+                    b.get("motor_kw"),
+                    b.get("inlet_temp_c"),
+                    b.get("outlet_temp_c"),
+                    b.get("cold_in_temp_c"),
+                    b.get("cold_out_temp_c"),
+                    b.get("outlet_vap_frac"),
+                    cid,
+                    b["name"],
+                )
+                for b in blocks
+            ],
         )
         conn.execute(
             "UPDATE cases SET severity=?, converged=?, reasons_json=?,"
             " unit_gaps=?, unit_gaps_json=? WHERE id=?",
-            (verdict["severity"], 1 if verdict["converged"] else 0,
-             json.dumps(verdict["reasons"], ensure_ascii=False),
-             gaps["count"], json.dumps(gaps, ensure_ascii=False), cid),
+            (
+                verdict["severity"],
+                1 if verdict["converged"] else 0,
+                json.dumps(verdict["reasons"], ensure_ascii=False),
+                gaps["count"],
+                json.dumps(gaps, ensure_ascii=False),
+                cid,
+            ),
         )
         conn.commit()
 

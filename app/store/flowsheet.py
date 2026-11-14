@@ -12,6 +12,7 @@
 为什么要聚合:183 条连接里很多是"(E0101 → E0102) 的进出流股"成对出现,
 画成两条重叠曲线既看不清也没意义;聚合成一条边、把流股名放在边里,悬停再看。
 """
+
 from __future__ import annotations
 
 
@@ -52,26 +53,30 @@ def build(connections, blocks) -> dict:
 
     links = []
     for item in grouped.values():
-        links.append({
-            "from": item["from"],
-            "to": item["to"],
-            "streams": item["streams"],
-            "sides": sorted(set(item["sides"])),
-        })
+        links.append(
+            {
+                "from": item["from"],
+                "to": item["to"],
+                "streams": item["streams"],
+                "sides": sorted(set(item["sides"])),
+            }
+        )
 
     nodes = []
     for name, block in block_map.items():
-        nodes.append({
-            "name": name,
-            "type": block.get("type") or "",
-            "state": block.get("balance_state") or "",
-            "dh_kw": block.get("dh_kw"),
-            "ref_kw": block.get("ref_kw"),
-            "duty_kw": block.get("duty_kw"),
-            "power_kw": block.get("power_kw"),
-            "nstage": block.get("nstage"),
-            "status": block.get("status"),
-        })
+        nodes.append(
+            {
+                "name": name,
+                "type": block.get("type") or "",
+                "state": block.get("balance_state") or "",
+                "dh_kw": block.get("dh_kw"),
+                "ref_kw": block.get("ref_kw"),
+                "duty_kw": block.get("duty_kw"),
+                "power_kw": block.get("power_kw"),
+                "nstage": block.get("nstage"),
+                "status": block.get("status"),
+            }
+        )
 
     connected = {link["from"] for link in links} | {link["to"] for link in links}
     connected |= {f["to"] for f in feeds}

@@ -18,6 +18,7 @@
 
 只读:不调用 Run / Reinit / Save。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,7 +35,7 @@ from app.aspen import connect, reader  # noqa: E402
 from app.store import db  # noqa: E402
 
 DEFAULT_OUT = ROOT / "samples" / "case-23-error.db"
-DEFAULT_CASE_ID = 23      # 文件名里是 23,库里也让它一致
+DEFAULT_CASE_ID = 23  # 文件名里是 23,库里也让它一致
 
 
 def sanitize(case: dict) -> None:
@@ -88,8 +89,7 @@ def build_from_db(src_path: str, src_case: int, out: Path, new_id: int) -> dict:
         if row.get("run_user"):
             row["run_user"] = "user"
         dst.execute(
-            f"INSERT INTO cases (id, {', '.join(cols)}) "
-            f"VALUES (?, {', '.join('?' * len(cols))})",
+            f"INSERT INTO cases (id, {', '.join(cols)}) VALUES (?, {', '.join('?' * len(cols))})",
             [new_id] + [row[c] for c in cols],
         )
 
@@ -115,8 +115,10 @@ def build_from_db(src_path: str, src_case: int, out: Path, new_id: int) -> dict:
             "stages": count("SELECT COUNT(*) FROM column_stages"),
             "components": count("SELECT COUNT(*) FROM stream_components"),
             "pumps": count("SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump'"),
-            "pumps_pv": count("SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump' "
-                              "AND pv_bar IS NOT NULL"),
+            "pumps_pv": count(
+                "SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump' "
+                "AND pv_bar IS NOT NULL"
+            ),
         }
     finally:
         src.close()
@@ -133,8 +135,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="重读当前 Aspen 模型,生成脱敏示例库")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help=f"输出路径(默认 {DEFAULT_OUT})")
     ap.add_argument("--case-id", type=int, default=DEFAULT_CASE_ID, help="库里的工况 id")
-    ap.add_argument("--from-db", default="",
-                    help="从这个工况库复制(不连 Aspen);需同时给 --case")
+    ap.add_argument("--from-db", default="", help="从这个工况库复制(不连 Aspen);需同时给 --case")
     ap.add_argument("--case", type=int, default=0, help="--from-db 时复制哪个工况 id")
     args = ap.parse_args()
 
@@ -146,11 +147,15 @@ def main() -> int:
             print("--from-db 需要同时给 --case <工况 id>")
             return 2
         stats = build_from_db(args.from_db, args.case, out, args.case_id)
-        print(f"已写出 {out}({out.stat().st_size:,} 字节),工况 #{args.case_id}"
-              f"(来自 {args.from_db} 的 #{args.case})")
-        print(f"  {stats['streams']} 流股 / {stats['blocks']} 模块 / "
-              f"{stats['connections']} 连接 / {stats['stages']} 塔板级 / "
-              f"{stats['components']} 组成")
+        print(
+            f"已写出 {out}({out.stat().st_size:,} 字节),工况 #{args.case_id}"
+            f"(来自 {args.from_db} 的 #{args.case})"
+        )
+        print(
+            f"  {stats['streams']} 流股 / {stats['blocks']} 模块 / "
+            f"{stats['connections']} 连接 / {stats['stages']} 塔板级 / "
+            f"{stats['components']} 组成"
+        )
         print(f"  泵 {stats['pumps']} 台,p_v 有值 {stats['pumps_pv']} 台")
         return 0
 
@@ -176,8 +181,10 @@ def main() -> int:
         stages = count("SELECT COUNT(*) FROM column_stages")
         comps = count("SELECT COUNT(*) FROM stream_components")
         pumps = count("SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump'")
-        heads = count("SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump' "
-                      "AND head_m IS NOT NULL")
+        heads = count(
+            "SELECT COUNT(*) FROM blocks WHERE lower(coalesce(type,''))='pump' "
+            "AND head_m IS NOT NULL"
+        )
         sev = conn.execute("SELECT severity, block_errors FROM cases").fetchone()
     finally:
         conn.close()

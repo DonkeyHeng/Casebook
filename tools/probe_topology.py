@@ -39,6 +39,7 @@
 * 沙箱里 ROT 可能为空(见 docs/aspen-field-map.md 第 1 节),所以建议在桌面双击跑。
 * 任一环节失败都不中断:异常写进报告,继续探下一段。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -69,9 +70,20 @@ UTIL_ROOT = r"\Data\Utilities"
 
 # 焓候选名:先按名字挑,再用"把 Output 子节点全列出来"兜底。
 ENTHALPY_CANDIDATES = (
-    "HMX_FLOW", "HMX", "HMX_MASS", "H",
-    "H_OUT", "H_IN", "HMASS", "HMOLE", "MHX",
-    "RES_ENTHALPY", "ENTHALPY", "ENTH", "ENTH_OUT", "ENTHALPY_MASS",
+    "HMX_FLOW",
+    "HMX",
+    "HMX_MASS",
+    "H",
+    "H_OUT",
+    "H_IN",
+    "HMASS",
+    "HMOLE",
+    "MHX",
+    "RES_ENTHALPY",
+    "ENTHALPY",
+    "ENTH",
+    "ENTH_OUT",
+    "ENTHALPY_MASS",
 )
 
 # 端口类字段:热侧 / 冷侧 / 壳程 / 管程 / 进料 ……
@@ -81,7 +93,7 @@ UTIL_HINT = re.compile(r"util|utl", re.I)
 # 焓 → 项目固定单位 kJ/kg(或 kJ/kmol)。Aspen 的 cal 是 IT 卡 4.1868 J(字段地图 8.1)。
 MASS_H_TO_KJKG = {
     "kj/kg": 1.0,
-    "j/kg": 0.001,   # 有的模型 HMX_MASS 直接用 J/kg(实测出现过)
+    "j/kg": 0.001,  # 有的模型 HMX_MASS 直接用 J/kg(实测出现过)
     "j/g": 1.0,
     "j/gm": 1.0,
     "cal/g": 4.1868,
@@ -93,7 +105,7 @@ MASS_H_TO_KJKG = {
 }
 MOLAR_H_TO_KJKMOL = {
     "kj/kmol": 1.0,
-    "j/kmol": 0.001,   # 实测模型 HMX 就是 J/kmol
+    "j/kmol": 0.001,  # 实测模型 HMX 就是 J/kmol
     "kj/mol": 1000.0,
     "j/mol": 1.0,
     "kcal/kmol": 4.1868,
@@ -118,8 +130,8 @@ ENERGY_FLOW_KW = {
     "btu/hr": 0.0002930711,
 }
 
-SAMPLE_STREAMS = 6   # 枚举多少条样流的 Output 全字段(枚举一次约 0.4 s)
-SAMPLE_DUMPS = 3     # 报告里完整打印几条样流
+SAMPLE_STREAMS = 6  # 枚举多少条样流的 Output 全字段(枚举一次约 0.4 s)
+SAMPLE_DUMPS = 3  # 报告里完整打印几条样流
 FORMAT_WIDTH = 78
 CHECK_TYPES = {"Heater", "Pump", "Mixer", "Splitter", "Valve", "Flash2", "Compr", "MCompr"}
 
@@ -386,9 +398,9 @@ def str_array(session, path: str, stream_lower: dict | None = None):
                 picked = stream_lower[name.lower()]
         if picked is None:
             if text and not _is_index(text):
-                picked = text            # Value 是流股名
+                picked = text  # Value 是流股名
             elif name and not _is_index(name):
-                picked = name            # Name 是流股名
+                picked = name  # Name 是流股名
         if picked is None:
             skipped += 1
         elif picked not in out:
@@ -558,10 +570,18 @@ def probe_streams(session) -> dict:
     取 6 条样流就够看清"有没有焓字段";确定字段后再逐流股只读那几个叶子。
     """
     data = {
-        "names": [], "sampled": [], "samples": [], "union": {},
-        "no_result": [], "massflow": {}, "moleflow": {},
-        "source": {}, "dest": {}, "candidates": {},
-        "enthalpy": {"fields": [], "primary": None}, "errors": [],
+        "names": [],
+        "sampled": [],
+        "samples": [],
+        "union": {},
+        "no_result": [],
+        "massflow": {},
+        "moleflow": {},
+        "source": {},
+        "dest": {},
+        "candidates": {},
+        "enthalpy": {"fields": [], "primary": None},
+        "errors": [],
     }
     root = session.find(STREAM_ROOT)
     if root is None:
@@ -609,7 +629,9 @@ def probe_streams(session) -> dict:
             data["union"][child] = data["union"].get(child, 0) + 1
 
     # ---- 4) 焓字段:先解析到叶子,再对所有流股逐条取值(评分最高的 3 个)
-    base_sample = data["sampled"][0] if data["sampled"] else (data["names"][0] if data["names"] else "")
+    base_sample = (
+        data["sampled"][0] if data["sampled"] else (data["names"][0] if data["names"] else "")
+    )
     resolved = []
     for name in sorted(data["union"], key=lambda n: -data["union"][n]):
         if not looks_like_enthalpy(name):
@@ -617,20 +639,26 @@ def probe_streams(session) -> dict:
         leaf = resolve_enthalpy_leaf(session, f"{STREAM_ROOT}\\{base_sample}\\Output\\{name}")
         if leaf is None:
             continue
-        resolved.append({
-            "name": name,
-            "leaf": leaf["path"],
-            "unit": leaf["unit"],
-            "probe": leaf["value"],
-            "kind": enthalpy_kind(leaf["unit"]),
-            "score": enthalpy_score(name, leaf["unit"]),
-            "values": {},
-        })
+        resolved.append(
+            {
+                "name": name,
+                "leaf": leaf["path"],
+                "unit": leaf["unit"],
+                "probe": leaf["value"],
+                "kind": enthalpy_kind(leaf["unit"]),
+                "score": enthalpy_score(name, leaf["unit"]),
+                "values": {},
+            }
+        )
     resolved.sort(key=lambda item: (-item["score"], item["name"]))
     base_prefix = f"{STREAM_ROOT}\\{base_sample}\\Output\\"
     for field in resolved[:3]:
         # 叶子相对 Output 的后缀(如 "\\MIXED"),逐流股直接拼路径,省掉重复解析
-        suffix = field["leaf"][len(base_prefix):] if field["leaf"].startswith(base_prefix) else field["name"]
+        suffix = (
+            field["leaf"][len(base_prefix) :]
+            if field["leaf"].startswith(base_prefix)
+            else field["name"]
+        )
         field["suffix"] = suffix
         for i, name in enumerate(data["names"]):
             progress(i, len(data["names"]), "H " + name)
@@ -661,9 +689,13 @@ def probe_streams(session) -> dict:
             info = describe(session, f"{STREAM_ROOT}\\{name}\\Output\\{cand}")
             if info is not None:
                 leaf = resolve_enthalpy_leaf(session, info["path"])
-                data["candidates"].setdefault(cand, []).append({
-                    "stream": name, "leaf": leaf or {}, "info": info,
-                })
+                data["candidates"].setdefault(cand, []).append(
+                    {
+                        "stream": name,
+                        "leaf": leaf or {},
+                        "info": info,
+                    }
+                )
     return data
 
 
@@ -684,11 +716,25 @@ def probe_locations(session) -> dict:
 # ---------------------------------------------------------------- 探测:设备
 
 
-DISCOVERY_PER_TYPE = 2   # 每种类型枚举几台设备的 Input/Output 子节点(枚举大设备很贵:T0101 有 1266 个)
+DISCOVERY_PER_TYPE = (
+    2  # 每种类型枚举几台设备的 Input/Output 子节点(枚举大设备很贵:T0101 有 1266 个)
+)
 KNOWN_CONN_FIELDS = (
-    "FCOLD", "FHOT", "COLDIN", "COLDOUT", "HOTIN", "HOTOUT",
-    "FEED_STAGE", "PROD_STAGE",
-    "UTILITY_ID", "UTILID", "UTIL", "COND_UTIL", "REB_UTIL", "COLD_UTIL", "HOT_UTIL",
+    "FCOLD",
+    "FHOT",
+    "COLDIN",
+    "COLDOUT",
+    "HOTIN",
+    "HOTOUT",
+    "FEED_STAGE",
+    "PROD_STAGE",
+    "UTILITY_ID",
+    "UTILID",
+    "UTIL",
+    "COND_UTIL",
+    "REB_UTIL",
+    "COLD_UTIL",
+    "HOT_UTIL",
 )
 
 
@@ -748,10 +794,22 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
     实测:逐台全枚举 67 台要 ~165 s;这样 ~15 s,信息量几乎一样。
     """
     data = {
-        "names": [], "rows": [], "errors": [], "in_union": {}, "out_union": {},
-        "dangling": [], "unreferenced": [], "port_hits": [], "connected": [],
-        "util_hits": [], "type_samples": {}, "type_counts": {}, "feeds": {},
-        "fields_by_type": {}, "discovery": {}, "learned": {},
+        "names": [],
+        "rows": [],
+        "errors": [],
+        "in_union": {},
+        "out_union": {},
+        "dangling": [],
+        "unreferenced": [],
+        "port_hits": [],
+        "connected": [],
+        "util_hits": [],
+        "type_samples": {},
+        "type_counts": {},
+        "feeds": {},
+        "fields_by_type": {},
+        "discovery": {},
+        "learned": {},
     }
     root = session.find(BLOCK_ROOT)
     if root is None:
@@ -794,7 +852,10 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
                     bucket[name] = bucket.get(name, 0) + 1
             if btype not in data["type_samples"]:
                 data["type_samples"][btype] = {
-                    "block": block, "inputs": [], "outputs": [], "bpath": bpath,
+                    "block": block,
+                    "inputs": [],
+                    "outputs": [],
+                    "bpath": bpath,
                 }
         data["fields_by_type"][btype] = {side: sorted(names) for side, names in sides.items()}
         sample = data["type_samples"].get(btype)
@@ -806,7 +867,8 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
         candidates = set(KNOWN_CONN_FIELDS)
         for side in ("Input", "Output"):
             candidates |= {
-                n for n in data["fields_by_type"][btype][side]
+                n
+                for n in data["fields_by_type"][btype][side]
                 if PORT_HINT.search(n) or UTIL_HINT.search(n)
             }
         learned = set()
@@ -852,25 +914,32 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
         except Exception:
             n_stages = None
 
-        data["rows"].append({
-            "name": block, "type": btype,
-            "ins": ins or [], "outs": outs or [],
-            "in_state": state_of(ins), "out_state": state_of(outs),
-            "in_skipped": in_skipped, "out_skipped": out_skipped,
-            "n_inputs": ich_count, "n_outputs": och_count,
-            "n_stages": n_stages,
-            "sampled": block in data["discovery"].get(key_type, []),
-        })
+        data["rows"].append(
+            {
+                "name": block,
+                "type": btype,
+                "ins": ins or [],
+                "outs": outs or [],
+                "in_state": state_of(ins),
+                "out_state": state_of(outs),
+                "in_skipped": in_skipped,
+                "out_skipped": out_skipped,
+                "n_inputs": ich_count,
+                "n_outputs": och_count,
+                "n_stages": n_stages,
+                "sampled": block in data["discovery"].get(key_type, []),
+            }
+        )
 
         conn_fields = data["learned"].get(key_type, [])
-        util_fields = sorted({n for n in (list(conn_fields) + list(KNOWN_CONN_FIELDS))
-                              if UTIL_HINT.search(n)})
+        util_fields = sorted(
+            {n for n in (list(conn_fields) + list(KNOWN_CONN_FIELDS)) if UTIL_HINT.search(n)}
+        )
         for name in conn_fields:
             for side in ("Input", "Output"):
                 refs = probe_refs(session, bpath + "\\" + side + "\\" + name, stream_lower)
                 if refs:
-                    hit = {"block": block, "type": btype, "side": side,
-                           "name": name, "refs": refs}
+                    hit = {"block": block, "type": btype, "side": side, "name": name, "refs": refs}
                     data["port_hits"].append(hit)
                     data["connected"].append(hit)
         for name in util_fields:
@@ -885,8 +954,15 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
                     continue
                 if value in (None, ""):
                     continue
-                data["util_hits"].append({"block": block, "type": btype, "side": side,
-                                          "name": name, "value": as_text(value)})
+                data["util_hits"].append(
+                    {
+                        "block": block,
+                        "type": btype,
+                        "side": side,
+                        "name": name,
+                        "value": as_text(value),
+                    }
+                )
     progress_done()
 
     data["dangling"] = sorted(
@@ -902,9 +978,17 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
 
 
 UTIL_KEY_FIELDS = (
-    "UTIL_TYPE", "UTL_TCOST", "UTL_TRATE", "UTL_PPRICE",
-    "UTL_IN_TEMP", "UTL_OUT_TEMP", "UTL_ENTH_IN", "UTL_ENTH_OUT",
-    "UTL_B_TEMP", "UTL_EPOWER", "UTL_HCOOL",
+    "UTIL_TYPE",
+    "UTL_TCOST",
+    "UTL_TRATE",
+    "UTL_PPRICE",
+    "UTL_IN_TEMP",
+    "UTL_OUT_TEMP",
+    "UTL_ENTH_IN",
+    "UTL_ENTH_OUT",
+    "UTL_B_TEMP",
+    "UTL_EPOWER",
+    "UTL_HCOOL",
 )
 UTIL_ARRAY_FIELDS = ("BLK_ID", "BLK_TYPE", "UTL_DUTY", "UTL_USAGE")
 
@@ -967,7 +1051,9 @@ def render_streams_summary(rep: Report, streams: dict) -> None:
             rep.say("  结论:【样流里没找到可用的焓字段】Output 联合字段清单见下面明细。")
         if streams["no_result"]:
             shown = ", ".join(streams["no_result"][:10])
-            rep.say(f"    另有 {len(streams['no_result'])} 条流股没有 RES_TEMP(能量流或没 Run):{shown}")
+            rep.say(
+                f"    另有 {len(streams['no_result'])} 条流股没有 RES_TEMP(能量流或没 Run):{shown}"
+            )
         return
 
     rep.say(f"  结论:【有】认出 {len(fields)} 个焓相关名字,其中 {len(usable)} 个可用:")
@@ -992,7 +1078,9 @@ def render_streams_summary(rep: Report, streams: dict) -> None:
     if aux:
         rep.say("    这些名字像焓、但不是主流股焓(自定义 / 分相 / 统计量),别用来做平衡:")
         for field in aux[:8]:
-            rep.say(f"      {field['name']}:单位 {field['unit'] or '(空)'},样例值 {fmt(field['probe'])}")
+            rep.say(
+                f"      {field['name']}:单位 {field['unit'] or '(空)'},样例值 {fmt(field['probe'])}"
+            )
 
     primary = next((f for f in usable if f["kind"] == "energy_flow"), usable[0])
     rep.say(f"    样例(主字段 {primary['name']},只用于校验单位):")
@@ -1036,8 +1124,10 @@ def render_blocks_summary(rep: Report, blocks: dict, streams: dict) -> None:
         kinds = Counter(r["type"] for r in rows if r["in_state"] == "ok")
         rep.say(
             "    → 有 IN_STRMID 的只有:"
-            + ", ".join(have[:12]) + (" …" if len(have) > 12 else "")
-            + ";按类型:" + ", ".join(f"{k}×{v}" for k, v in kinds.items())
+            + ", ".join(have[:12])
+            + (" …" if len(have) > 12 else "")
+            + ";按类型:"
+            + ", ".join(f"{k}×{v}" for k, v in kinds.items())
         )
     skipped = sum(r.get("in_skipped", 0) + r.get("out_skipped", 0) for r in rows)
     if skipped:
@@ -1063,7 +1153,9 @@ def render_blocks_summary(rep: Report, blocks: dict, streams: dict) -> None:
             rep.say(f"        {stream:<10}{up} → {down}")
 
     if blocks["feeds"]:
-        rep.say("    进料与进料板号(Input\\FEED_STAGE:Name=流股名、Value=板号;塔的 IN_STRMID 与它互校):")
+        rep.say(
+            "    进料与进料板号(Input\\FEED_STAGE:Name=流股名、Value=板号;塔的 IN_STRMID 与它互校):"
+        )
         for block, feeds in list(blocks["feeds"].items())[:8]:
             text = ", ".join(f"{s}→第{st}板" for s, st in feeds)
             rep.say(f"      {block}:{text}")
@@ -1106,8 +1198,15 @@ def render_utilities_summary(rep: Report, util: dict, blocks: dict) -> None:
         entry = util["members"].get(name) or {}
         keys = entry.get("key") or {}
         parts = []
-        for field in ("UTL_TCOST", "UTL_TRATE", "UTL_PPRICE", "UTL_IN_TEMP", "UTL_OUT_TEMP",
-                      "UTL_ENTH_IN", "UTL_ENTH_OUT"):
+        for field in (
+            "UTL_TCOST",
+            "UTL_TRATE",
+            "UTL_PPRICE",
+            "UTL_IN_TEMP",
+            "UTL_OUT_TEMP",
+            "UTL_ENTH_IN",
+            "UTL_ENTH_OUT",
+        ):
             if field in keys:
                 value, unit = keys[field]
                 parts.append(f"{field}={fmt(value)} {unit}".strip())
@@ -1120,13 +1219,14 @@ def render_utilities_summary(rep: Report, util: dict, blocks: dict) -> None:
                 users = names
                 break
         if users:
-            rep.say(f"      使用设备({len(users)}):{', '.join(users[:12])}"
-                    + (" …" if len(users) > 12 else ""))
+            rep.say(
+                f"      使用设备({len(users)}):{', '.join(users[:12])}"
+                + (" …" if len(users) > 12 else "")
+            )
         else:
             rep.say("      使用设备:该成员的数组字段为空(可能没被引用)")
     users_total = sum(
-        len((entry.get("arrays") or {}).get("UTL_DUTY") or [])
-        for entry in util["members"].values()
+        len((entry.get("arrays") or {}).get("UTL_DUTY") or []) for entry in util["members"].values()
     )
     rep.say(f"  设备引用:Utilities 侧 UTL_DUTY 数组合计 {users_total} 条引用;")
     hits = blocks.get("util_hits") or []
@@ -1134,7 +1234,9 @@ def render_utilities_summary(rep: Report, util: dict, blocks: dict) -> None:
         names = sorted({hit["name"] for hit in hits})
         rep.say(f"    设备侧字段:{len(hits)} 处,字段名 {', '.join(names[:10])}")
         for hit in hits[:8]:
-            rep.say(f"      {hit['block']:<12}{hit['side']}\\{hit['name']:<14}{hit.get('value', '')}")
+            rep.say(
+                f"      {hit['block']:<12}{hit['side']}\\{hit['name']:<14}{hit.get('value', '')}"
+            )
     else:
         rep.say("    设备侧字段:没找到(以 Utilities 侧 UTL_DUTY 数组为准)")
 
@@ -1151,14 +1253,16 @@ def render_stream_details(rep: Report, streams: dict) -> None:
         f"Output 联合字段 {len(union)} 个(数字=出现在多少条样流上):"
     )
     for start in range(0, len(union), 3):
-        chunk = union[start:start + 3]
+        chunk = union[start : start + 3]
         rep.say("    " + "  ".join(f"{_pad(name, 24)}{count:>4}" for name, count in chunk))
     if not union:
         rep.say("    (样流 Output 全部为空)")
     if streams["no_result"]:
         shown = ", ".join(streams["no_result"][:20])
-        rep.say(f"  没有 RES_TEMP 的流股 {len(streams['no_result'])} 条:{shown}"
-                + (" …" if len(streams["no_result"]) > 20 else ""))
+        rep.say(
+            f"  没有 RES_TEMP 的流股 {len(streams['no_result'])} 条:{shown}"
+            + (" …" if len(streams["no_result"]) > 20 else "")
+        )
 
     for sample in streams["samples"][:SAMPLE_DUMPS]:
         rep.say("")
@@ -1185,7 +1289,9 @@ def render_stream_details(rep: Report, streams: dict) -> None:
             rows = []
             for stream, value in field["values"].items():
                 kw, _why = enthalpy_flow_kw(
-                    value, field["unit"], streams["massflow"].get(stream),
+                    value,
+                    field["unit"],
+                    streams["massflow"].get(stream),
                     streams["moleflow"].get(stream),
                 )
                 rows.append((stream, fmt(value), field["unit"], kw))
@@ -1193,7 +1299,8 @@ def render_stream_details(rep: Report, streams: dict) -> None:
             picks = list(dict.fromkeys([r[0] for r in rows[:8]] + [r[0] for r in ranked[:4]]))
             table_rows = [
                 [r[0], r[1], r[2], "-" if r[3] is None else f"{r[3]:,.1f}"]
-                for r in rows if r[0] in picks
+                for r in rows
+                if r[0] in picks
             ]
             rep.table(["流股", "值", "单位", "换算后 kW"], table_rows, indent=4)
             if len(rows) > len(picks):
@@ -1227,23 +1334,37 @@ def render_block_details(rep: Report, blocks: dict) -> None:
             [
                 btype,
                 count,
-                sum(1 for r in blocks["rows"]
-                    if (r["type"] or "(未知)") == btype and r["in_state"] == "ok"),
-                sum(1 for r in blocks["rows"]
-                    if (r["type"] or "(未知)") == btype and r["out_state"] == "ok"),
-                sum(1 for r in blocks["rows"]
-                    if (r["type"] or "(未知)") == btype and r["name"] in blocks["feeds"]),
+                sum(
+                    1
+                    for r in blocks["rows"]
+                    if (r["type"] or "(未知)") == btype and r["in_state"] == "ok"
+                ),
+                sum(
+                    1
+                    for r in blocks["rows"]
+                    if (r["type"] or "(未知)") == btype and r["out_state"] == "ok"
+                ),
+                sum(
+                    1
+                    for r in blocks["rows"]
+                    if (r["type"] or "(未知)") == btype and r["name"] in blocks["feeds"]
+                ),
             ]
-            for btype, count in sorted(blocks["type_counts"].items(), key=lambda kv: (-kv[1], kv[0]))
+            for btype, count in sorted(
+                blocks["type_counts"].items(), key=lambda kv: (-kv[1], kv[0])
+            )
         ],
     )
     rep.say("")
-    rep.say("  2) 逐台设备(入/出 = IN_STRMID / OUT_STRMID 读到的流股数;- = 节点缺失,空 = 有节点无内容):")
+    rep.say(
+        "  2) 逐台设备(入/出 = IN_STRMID / OUT_STRMID 读到的流股数;- = 节点缺失,空 = 有节点无内容):"
+    )
     rep.table(
         ["设备", "类型", "入", "出", "Input 字段", "Output 字段", "级数", "抽样"],
         [
             [
-                r["name"], r["type"] or "(未知)",
+                r["name"],
+                r["type"] or "(未知)",
                 _count_cell(r["in_state"], len(r["ins"])),
                 _count_cell(r["out_state"], len(r["outs"])),
                 "-" if r.get("n_inputs") is None else r["n_inputs"],
@@ -1259,11 +1380,15 @@ def render_block_details(rep: Report, blocks: dict) -> None:
         rep.say("  3) 值或元素名等于流股名的字段(= 设备端口,可直接建边):")
         for hit in blocks["connected"][:60]:
             refs = ", ".join(hit["refs"][:6]) + (" …" if len(hit["refs"]) > 6 else "")
-            rep.say(f"    {hit['block']:<12}{hit['type'] or '?':<10}{hit['side']}\\{hit['name']:<14}{refs}")
+            rep.say(
+                f"    {hit['block']:<12}{hit['type'] or '?':<10}{hit['side']}\\{hit['name']:<14}{refs}"
+            )
     if blocks["dangling"]:
         shown = ", ".join(blocks["dangling"][:12]) + (" …" if len(blocks["dangling"]) > 12 else "")
         rep.say("")
-        rep.say(f"  ⚠ 悬空引用 {len(blocks['dangling'])} 条(被设备引用但 \\Data\\Streams 里没有):{shown}")
+        rep.say(
+            f"  ⚠ 悬空引用 {len(blocks['dangling'])} 条(被设备引用但 \\Data\\Streams 里没有):{shown}"
+        )
 
 
 ENERGY_HINT = re.compile(r"^(Q|DUTY|HX_|BRAKE|ELEC|WORK|NET|NSTAGE|ENTH|HMX)", re.I)
@@ -1299,8 +1424,10 @@ def render_type_samples(rep: Report, blocks: dict) -> None:
         rep.say(f"    ── {btype}(样例 {sample['block']})")
         for sides_key, side in (("inputs", "Input"), ("outputs", "Output")):
             names = sample.get(sides_key) or []
-            rep.say(f"      {side}({len(names)} 个):"
-                    + (_wrap(", ".join(names[:40]), 130, "        ") if names else "(空)"))
+            rep.say(
+                f"      {side}({len(names)} 个):"
+                + (_wrap(", ".join(names[:40]), 130, "        ") if names else "(空)")
+            )
             rows, _ = _dump_rows(rep, sample, sides_key)
             for name, info in rows:
                 if info is None:
@@ -1320,13 +1447,17 @@ def render_utility_details(rep: Report, util: dict) -> None:
     for name in util["names"]:
         entry = util["members"].get(name) or {}
         rep.say("")
-        rep.say(f"  ── {name}(Input {entry.get('n_inputs', 0)} 个 / Output {entry.get('n_outputs', 0)} 个)")
+        rep.say(
+            f"  ── {name}(Input {entry.get('n_inputs', 0)} 个 / Output {entry.get('n_outputs', 0)} 个)"
+        )
         for field, (value, unit) in sorted((entry.get("key") or {}).items()):
             rep.say(f"      {field} = {fmt(value)}  [{unit}]")
         for field, pairs in sorted((entry.get("arrays") or {}).items()):
             names = [p[0] for p in pairs if p[0]]
             if names:
-                rep.say(f"      {field} -> {', '.join(names[:10])}" + (" …" if len(names) > 10 else ""))
+                rep.say(
+                    f"      {field} -> {', '.join(names[:10])}" + (" …" if len(names) > 10 else "")
+                )
 
 
 def _count_cell(state: str, n: int) -> str:
@@ -1367,7 +1498,9 @@ def render_model(rep: Report, model_path: str, data: dict) -> None:
     rep.head("四、结论之后:下一步怎么用这份数据", ch="-")
     rep.say("  1) 流股焓 → `streams` 表新列;按报告的 UnitString 换算,别假设单位集。")
     rep.say("  2) 连接关系 → 新表 `connections`(block, side, stream, seq):")
-    rep.say("     优先用流股侧 SOURCE/DESTINATION 生成;设备 IN/OUT_STRMID 与换热器分侧字段做交叉校验。")
+    rep.say(
+        "     优先用流股侧 SOURCE/DESTINATION 生成;设备 IN/OUT_STRMID 与换热器分侧字段做交叉校验。"
+    )
     rep.say("  3) 公用工程只做结构记录(成员 / 单价 / 用量 / 使用设备),不做成本判断(已拍板)。")
     rep.say("  4) 焓平衡用流股 HMX_FLOW(能量流)算 ΔH,与设备 duty 对照;RadFrac / 反应器不校验。")
 
@@ -1411,23 +1544,42 @@ def render_balance_check(rep: Report, blocks: dict, streams: dict) -> None:
         if duty is not None and abs(duty * 1000.0 - 1.0) < 1e-6 and abs(delta) > 0.005:
             duty_note += "(值≈1 kW,疑似标志位)"
         if duty is None:
-            rows.append([block, row["type"], f"{len(in_streams)}/{len(out_streams)}",
-                         f"{delta:,.3f}", "-", "-", duty_note])
+            rows.append(
+                [
+                    block,
+                    row["type"],
+                    f"{len(in_streams)}/{len(out_streams)}",
+                    f"{delta:,.3f}",
+                    "-",
+                    "-",
+                    duty_note,
+                ]
+            )
             continue
         diff = delta - duty
         pct = (diff / duty * 100.0) if duty else float("nan")
-        rows.append([
-            block, row["type"], f"{len(in_streams)}/{len(out_streams)}",
-            f"{delta:,.3f}", f"{duty:,.3f}", f"{pct:+.2f}%",
-            f"{duty_note} diff {diff:+,.3f} MW",
-        ])
+        rows.append(
+            [
+                block,
+                row["type"],
+                f"{len(in_streams)}/{len(out_streams)}",
+                f"{delta:,.3f}",
+                f"{duty:,.3f}",
+                f"{pct:+.2f}%",
+                f"{duty_note} diff {diff:+,.3f} MW",
+            ]
+        )
         if len(rows) >= 12:
             break
-    rep.say(f"  ΔH = Σ出 − Σ入(流股 {energy['name']},MW);duty 取设备自己的热负荷/功率字段(已换算成 MW)")
+    rep.say(
+        f"  ΔH = Σ出 − Σ入(流股 {energy['name']},MW);duty 取设备自己的热负荷/功率字段(已换算成 MW)"
+    )
     rep.table(["设备", "类型", "入/出", "ΔH MW", "duty MW", "相对差", "备注"], rows)
     if skipped:
         rep.say(f"  另有 {skipped} 台同类设备因流股侧边不全没对照(闸阀/混合器常见)。")
-    rep.say("  说明:符号以 Aspen 为准(加热为正);Pump 的 ΔH 只含流体得到的那部分,和 BRAKE_POWER 天然不等。")
+    rep.say(
+        "  说明:符号以 Aspen 为准(加热为正);Pump 的 ΔH 只含流体得到的那部分,和 BRAKE_POWER 天然不等。"
+    )
 
 
 def _duty_fields(btype: str) -> tuple[str, ...]:
@@ -1475,11 +1627,13 @@ def parse_args(argv=None):
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "--model", default=None,
+        "--model",
+        default=None,
         help="只探这个模型(路径子串匹配,如 <关键字>);默认探 ROT 里所有已打开的模型",
     )
     parser.add_argument(
-        "--out", default=None,
+        "--out",
+        default=None,
         help="报告输出路径,默认 <项目>/data/probe_topology.txt",
     )
     return parser.parse_args(argv)
@@ -1489,16 +1643,34 @@ def _defaults() -> dict:
     """各段探测的兜底结构:某一段失败时,渲染仍然跑得完并说明情况。"""
     return {
         "streams": {
-            "names": [], "sampled": [], "samples": [], "union": {},
-            "no_result": [], "massflow": {}, "moleflow": {},
-            "source": {}, "dest": {}, "candidates": {},
-            "enthalpy": {"fields": [], "primary": None}, "errors": [],
+            "names": [],
+            "sampled": [],
+            "samples": [],
+            "union": {},
+            "no_result": [],
+            "massflow": {},
+            "moleflow": {},
+            "source": {},
+            "dest": {},
+            "candidates": {},
+            "enthalpy": {"fields": [], "primary": None},
+            "errors": [],
         },
         "locations": {"data_children": [], "stream_sum": {}},
         "blocks": {
-            "names": [], "rows": [], "errors": [], "in_union": {}, "out_union": {},
-            "dangling": [], "unreferenced": [], "port_hits": [], "connected": [],
-            "util_hits": [], "type_samples": {}, "type_counts": {}, "feeds": {},
+            "names": [],
+            "rows": [],
+            "errors": [],
+            "in_union": {},
+            "out_union": {},
+            "dangling": [],
+            "unreferenced": [],
+            "port_hits": [],
+            "connected": [],
+            "util_hits": [],
+            "type_samples": {},
+            "type_counts": {},
+            "feeds": {},
         },
         "utilities": {"names": [], "members": {}, "in_union": {}, "out_union": {}, "errors": []},
         "errors": [],
@@ -1550,7 +1722,9 @@ def main(argv=None) -> int:
         rep.say("【失败】读不到 Aspen 的 ROT(运行中对象表),因此无法附着任何模型。")
         rep.say(f"  原始错误:{exc}")
         rep.say("  常见原因:")
-        rep.say("    1. 跑在 DSH / 沙箱进程里 —— 沙箱内 ROT 可能为空,必须在真实桌面会话跑(双击 .bat)")
+        rep.say(
+            "    1. 跑在 DSH / 沙箱进程里 —— 沙箱内 ROT 可能为空,必须在真实桌面会话跑(双击 .bat)"
+        )
         rep.say("    2. Aspen 没打开,或没有加载 .apw")
         rep.say("    3. Aspen 以管理员身份运行,而本脚本是普通权限")
         rep.save(out_path)
@@ -1587,14 +1761,18 @@ def main(argv=None) -> int:
             continue
         rep._session = session
         phases = (
-            ("streams", "读流股(每条的温度/流量/上下游 + 样流全字段)",
-             lambda: probe_streams(session)),
-            ("locations", "扫 Data 顶层与 Stream-Sum",
-             lambda: probe_locations(session)),
-            ("blocks", "读设备连接(IN/OUT_STRMID + 端口字段)",
-             lambda: probe_blocks(session, data["streams"]["names"])),
-            ("utilities", "读公用工程 Utilities",
-             lambda: probe_utilities(session)),
+            (
+                "streams",
+                "读流股(每条的温度/流量/上下游 + 样流全字段)",
+                lambda: probe_streams(session),
+            ),
+            ("locations", "扫 Data 顶层与 Stream-Sum", lambda: probe_locations(session)),
+            (
+                "blocks",
+                "读设备连接(IN/OUT_STRMID + 端口字段)",
+                lambda: probe_blocks(session, data["streams"]["names"]),
+            ),
+            ("utilities", "读公用工程 Utilities", lambda: probe_utilities(session)),
         )
         for key, label, fn in phases:
             result, err = run_phase(label, fn)

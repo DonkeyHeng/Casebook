@@ -22,6 +22,7 @@ case.json            机器可读的同一份元数据(给程序解析用)
 2. **换算可追溯**:数值已归一到固定单位,同时保留原始值与原始单位。
 3. **只陈述事实**:本包不写任何"该怎么改模型"的建议。
 """
+
 from __future__ import annotations
 
 import csv
@@ -59,10 +60,11 @@ UNITS = {
     "vap_frac": "无量纲 0–1",
 }
 
-PACK_VERSION = 2   # 2:新增 pumps.csv(泵参数);读包的脚本按 pack_version 判文件是否存在
+PACK_VERSION = 2  # 2:新增 pumps.csv(泵参数);读包的脚本按 pack_version 判文件是否存在
 
 
 # ---------------------------------------------------------------- 小工具
+
 
 def _csv_bytes(header: list[str], rows: list[list]) -> bytes:
     """UTF-8 带 BOM:Excel 双击打开不乱码,AI 工具也能正常读。"""
@@ -114,8 +116,10 @@ def _cell(text) -> str:
 
 # ---------------------------------------------------------------- 各文件
 
-def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
-                  composition) -> list[list]:
+
+def _metrics_rows(
+    case, columns, stage_counts, reasons, codes, tears, blocks, composition
+) -> list[list]:
     rows: list[list] = []
 
     def add(category, item, value="", unit="", note=""):
@@ -134,12 +138,27 @@ def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
     add("概览", "塔数", len(columns), "座", "有逐板剖面的 RadFrac/Absorber")
     add("概览", "读取耗时", _num(case["elapsed_sec"]), "s", "本程序从 Aspen 读一遍的耗时")
     add("概览", "撕裂流条数", len(tears), "条", "闭环回路的撕裂流,误差见下")
-    add("概览", "已读组成的流股数", len(composition["streams"]), "条",
-        "组成按需读,不是全量;见 composition.csv")
-    add("概览", "收敛判定", SEVERITY_TEXT.get(severity, severity), "",
-        "ok=收敛 / warning=有告警 / error=有错误")
-    add("概览", "能否用于统计对比", "是" if case["converged"] else "否", "",
-        "只有无报错的工况才建议做定量对比或优化判断")
+    add(
+        "概览",
+        "已读组成的流股数",
+        len(composition["streams"]),
+        "条",
+        "组成按需读,不是全量;见 composition.csv",
+    )
+    add(
+        "概览",
+        "收敛判定",
+        SEVERITY_TEXT.get(severity, severity),
+        "",
+        "ok=收敛 / warning=有告警 / error=有错误",
+    )
+    add(
+        "概览",
+        "能否用于统计对比",
+        "是" if case["converged"] else "否",
+        "",
+        "只有无报错的工况才建议做定量对比或优化判断",
+    )
 
     for key, note in CODE_NOTES.items():
         if key in codes:
@@ -155,37 +174,67 @@ def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
         if state in counts:
             counts[state] += 1
     checked = counts["ok"] + counts["bad"]
-    add("焓平衡", "参与校验台数", checked, "台",
-        "塔 / 反应器按约定不校验;缺数据 / 缺参照值的记「无法校验」")
+    add(
+        "焓平衡",
+        "参与校验台数",
+        checked,
+        "台",
+        "塔 / 反应器按约定不校验;缺数据 / 缺参照值的记「无法校验」",
+    )
     add("焓平衡", "通过", counts["ok"], "台", "|ΔH − 参照| 在容差内(热负荷 1% 或 0.5 kW 取大)")
     add("焓平衡", "超差", counts["bad"], "台", "超出容差,明细见 blocks.csv 的「平衡说明」列")
     add("焓平衡", "无法校验", counts["no_data"], "台", "有流股没有焓值,或缺热负荷 / 轴功率字段")
-    add("焓平衡", "不校验", counts["skip"], "台",
-        "目前为空:塔按冷凝 + 再沸、反应器按 QCALC 也参与校验了")
-    worst = sorted((b for b in blocks if b["balance_state"] == "bad"),
-                   key=lambda b: -abs((b["dh_kw"] or 0) - (b["ref_kw"] or 0)))[:5]
+    add(
+        "焓平衡",
+        "不校验",
+        counts["skip"],
+        "台",
+        "目前为空:塔按冷凝 + 再沸、反应器按 QCALC 也参与校验了",
+    )
+    worst = sorted(
+        (b for b in blocks if b["balance_state"] == "bad"),
+        key=lambda b: -abs((b["dh_kw"] or 0) - (b["ref_kw"] or 0)),
+    )[:5]
     for b in worst:
-        add("焓平衡-超差", b["name"], f"ΔH {b['dh_kw']:.2f} kW", "kW",
-            b["balance_note"] or "")
+        add("焓平衡-超差", b["name"], f"ΔH {b['dh_kw']:.2f} kW", "kW", b["balance_note"] or "")
 
     # 报错/告警模块逐条列原文(Aspen 的 BLKMSG 是唯一可得的准确原因)
     for b in blocks:
         status = b["status"]
         if status in (1, 2):
-            add("异常模块", b["name"], STATUS_TEXT.get(status, status), "",
-                f"{b['type'] or '-'} · BLKMSG = {b['message'] or '(空)'}")
+            add(
+                "异常模块",
+                b["name"],
+                STATUS_TEXT.get(status, status),
+                "",
+                f"{b['type'] or '-'} · BLKMSG = {b['message'] or '(空)'}",
+            )
 
     for tear in tears:
-        add("撕裂流", tear.get("stream") or "", _num(tear.get("error")), "",
-            f"{tear.get('variable') or ''} · 容差 {tear.get('tolerance')}")
+        add(
+            "撕裂流",
+            tear.get("stream") or "",
+            _num(tear.get("error")),
+            "",
+            f"{tear.get('variable') or ''} · 容差 {tear.get('tolerance')}",
+        )
 
     gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case.keys() else {}
-    add("数据质量", "单位不认识而留空的字段数", gaps.get("count") or 0, "个",
-        "这些字段是换算表没覆盖,不是模型没结果:"
-        + ("、".join(gaps.get("units") or []) or "无"))
+    add(
+        "数据质量",
+        "单位不认识而留空的字段数",
+        gaps.get("count") or 0,
+        "个",
+        "这些字段是换算表没覆盖,不是模型没结果:" + ("、".join(gaps.get("units") or []) or "无"),
+    )
 
-    add("数据规模", "塔剖面级数合计", sum(stage_counts), "级",
-        "、".join(f"{c['block']}({c['stage_count']})" for c in columns) or "无")
+    add(
+        "数据规模",
+        "塔剖面级数合计",
+        sum(stage_counts),
+        "级",
+        "、".join(f"{c['block']}({c['stage_count']})" for c in columns) or "无",
+    )
     return rows
 
 
@@ -193,23 +242,35 @@ def _streams_csv(streams) -> bytes:
     rows = []
     for s in streams:
         raw = _json(s["raw_json"], {})
-        rows.append([
-            s["name"],
-            _num(s["temperature_c"]),
-            _num(s["pressure_bar"]),
-            _num(s["mass_flow_kgh"]),
-            _num(s["mole_flow_kmolh"]),
-            _num(s["vap_frac"]),
-            _num(s["vol_flow_m3h"]),
-            _num(s["enthalpy_kjkg"]),
-            _num(s["enthalpy_kjkmol"]),
-            _num(s["enthalpy_flow_kw"]),
-            _compact(raw),
-        ])
+        rows.append(
+            [
+                s["name"],
+                _num(s["temperature_c"]),
+                _num(s["pressure_bar"]),
+                _num(s["mass_flow_kgh"]),
+                _num(s["mole_flow_kmolh"]),
+                _num(s["vap_frac"]),
+                _num(s["vol_flow_m3h"]),
+                _num(s["enthalpy_kjkg"]),
+                _num(s["enthalpy_kjkmol"]),
+                _num(s["enthalpy_flow_kw"]),
+                _compact(raw),
+            ]
+        )
     return _csv_bytes(
-        ["流股", "温度℃", "压力bar", "质量流量kg/h", "摩尔流量kmol/h",
-         "汽化率", "体积流量m³/h", "质量焓kJ/kg", "摩尔焓kJ/kmol", "能量流kW",
-         "原始数据(JSON:字段→值+单位)"],
+        [
+            "流股",
+            "温度℃",
+            "压力bar",
+            "质量流量kg/h",
+            "摩尔流量kmol/h",
+            "汽化率",
+            "体积流量m³/h",
+            "质量焓kJ/kg",
+            "摩尔焓kJ/kmol",
+            "能量流kW",
+            "原始数据(JSON:字段→值+单位)",
+        ],
         rows,
     )
 
@@ -217,15 +278,17 @@ def _streams_csv(streams) -> bytes:
 def _connections_csv(connections) -> bytes:
     rows = []
     for c in connections:
-        rows.append([
-            c["block"],
-            "进" if c["direction"] == "in" else "出",
-            c["stream"],
-            c["side"] or "",
-            c["port"] or "",
-            _num(c["stage"]),
-            c["source"] or "",
-        ])
+        rows.append(
+            [
+                c["block"],
+                "进" if c["direction"] == "in" else "出",
+                c["stream"],
+                c["side"] or "",
+                c["port"] or "",
+                _num(c["stage"]),
+                c["source"] or "",
+            ]
+        )
     return _csv_bytes(
         ["设备", "方向", "流股", "分侧", "端口", "进料板", "来源"],
         rows,
@@ -236,28 +299,45 @@ def _blocks_csv(blocks) -> bytes:
     rows = []
     for b in blocks:
         raw = _json(b["raw_json"], {})
-        rows.append([
-            b["name"],
-            b["type"] or "",
-            _num(b["status"]),
-            STATUS_TEXT.get(b["status"], ""),
-            _num(b["duty_kw"]),
-            _num(b["power_kw"]),
-            _num(b["area_m2"]),
-            _num(b["nstage"]),
-            _num(b["top_temp_c"]),
-            _num(b["bottom_temp_c"]),
-            _num(b["dh_kw"]),
-            _num(b["ref_kw"]),
-            BALANCE_TEXT.get(b["balance_state"], ""),
-            b["balance_note"] or "",
-            b["message"] or "",
-            _compact(raw),
-        ])
+        rows.append(
+            [
+                b["name"],
+                b["type"] or "",
+                _num(b["status"]),
+                STATUS_TEXT.get(b["status"], ""),
+                _num(b["duty_kw"]),
+                _num(b["power_kw"]),
+                _num(b["area_m2"]),
+                _num(b["nstage"]),
+                _num(b["top_temp_c"]),
+                _num(b["bottom_temp_c"]),
+                _num(b["dh_kw"]),
+                _num(b["ref_kw"]),
+                BALANCE_TEXT.get(b["balance_state"], ""),
+                b["balance_note"] or "",
+                b["message"] or "",
+                _compact(raw),
+            ]
+        )
     return _csv_bytes(
-        ["设备", "类型", "状态码", "状态", "热负荷kW", "功率kW", "换热面积m²",
-         "理论级数", "顶温℃", "底温℃", "ΔH kW", "参照kW", "焓平衡", "平衡说明",
-         "提示原文(BLKMSG)", "原始数据(JSON)"],
+        [
+            "设备",
+            "类型",
+            "状态码",
+            "状态",
+            "热负荷kW",
+            "功率kW",
+            "换热面积m²",
+            "理论级数",
+            "顶温℃",
+            "底温℃",
+            "ΔH kW",
+            "参照kW",
+            "焓平衡",
+            "平衡说明",
+            "提示原文(BLKMSG)",
+            "原始数据(JSON)",
+        ],
         rows,
     )
 
@@ -266,15 +346,17 @@ def _profiles_csv(stages_by_block) -> bytes:
     rows = []
     for block, stages in stages_by_block.items():
         for st in stages:
-            rows.append([
-                block,
-                st["stage"],
-                _num(st["temperature_c"]),
-                _num(st["pressure_bar"]),
-                _num(st["liq_flow"]),
-                _num(st["vap_flow"]),
-                _num(st["duty_kw"]),
-            ])
+            rows.append(
+                [
+                    block,
+                    st["stage"],
+                    _num(st["temperature_c"]),
+                    _num(st["pressure_bar"]),
+                    _num(st["liq_flow"]),
+                    _num(st["vap_flow"]),
+                    _num(st["duty_kw"]),
+                ]
+            )
     return _csv_bytes(
         ["塔", "级", "温度℃", "压力bar", "液流量(模型单位)", "气流量(模型单位)", "热负荷kW"],
         rows,
@@ -300,9 +382,23 @@ def has_pumps(blocks) -> bool:
     return bool(_pump_blocks(blocks))
 
 
-PUMP_HEADERS = ["设备", "状态", "流量m³/h", "扬程m", "效率%", "轴功率kW", "建议电机kW",
-                "进口压力bar", "出口压力bar", "压升bar", "密度kg/m³", "进口汽化率",
-                "p_v bar", "NPSHa m", "提示原文"]
+PUMP_HEADERS = [
+    "设备",
+    "状态",
+    "流量m³/h",
+    "扬程m",
+    "效率%",
+    "轴功率kW",
+    "建议电机kW",
+    "进口压力bar",
+    "出口压力bar",
+    "压升bar",
+    "密度kg/m³",
+    "进口汽化率",
+    "p_v bar",
+    "NPSHa m",
+    "提示原文",
+]
 
 
 def _pumps_csv(pumps) -> bytes:
@@ -318,28 +414,40 @@ def _pumps_csv(pumps) -> bytes:
     rows = []
     for b in pumps:
         npsh = pump_rules.npsh_available_m(b["p_in_bar"], b["pv_bar"], b["rho_kgm3"])
-        rows.append([
-            b["name"],
-            STATUS_TEXT.get(b["status"], ""),
-            _num(b["flow_m3h"]),
-            _num(b["head_m"]),
-            _num(None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1)),
-            _num(b["power_kw"]),
-            _num(b["motor_kw"]),
-            _num(b["p_in_bar"]),
-            _num(b["p_out_bar"]),
-            _num(b["dp_bar"]),
-            _num(b["rho_kgm3"]),
-            _num(b["pump_vap_frac"]),
-            _num(b["pv_bar"]),
-            _num(npsh),
-            b["message"] or "",
-        ])
+        rows.append(
+            [
+                b["name"],
+                STATUS_TEXT.get(b["status"], ""),
+                _num(b["flow_m3h"]),
+                _num(b["head_m"]),
+                _num(None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1)),
+                _num(b["power_kw"]),
+                _num(b["motor_kw"]),
+                _num(b["p_in_bar"]),
+                _num(b["p_out_bar"]),
+                _num(b["dp_bar"]),
+                _num(b["rho_kgm3"]),
+                _num(b["pump_vap_frac"]),
+                _num(b["pv_bar"]),
+                _num(npsh),
+                b["message"] or "",
+            ]
+        )
     return _csv_bytes(PUMP_HEADERS, rows)
 
 
-def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
-               composition, connections, has_pipe: bool = False) -> bytes:
+def _case_json(
+    case,
+    columns,
+    stage_counts,
+    reasons,
+    codes,
+    tears,
+    blocks,
+    composition,
+    connections,
+    has_pipe: bool = False,
+) -> bytes:
     files = {
         "README.md": "说明书 + 数据字典(先读这个)",
         "metrics.csv": "精简指标:概览 / 状态码 / 异常清单",
@@ -376,8 +484,10 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
             "stream_count": case["stream_count"],
             "block_count": case["block_count"],
             "connection_count": len(connections),
-            "balance": {state: sum(1 for b in blocks if b["balance_state"] == state)
-                        for state in ("ok", "bad", "no_data", "skip")},
+            "balance": {
+                state: sum(1 for b in blocks if b["balance_state"] == state)
+                for state in ("ok", "bad", "no_data", "skip")
+            },
             "elapsed_sec": case["elapsed_sec"],
         },
         "convergence": {
@@ -393,10 +503,7 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
             "block_warnings": [b["name"] for b in blocks if b["status"] == 2],
             "errtxt": case["errtxt"] or "",
         },
-        "columns": [
-            {"block": c["block"], "stage_count": c["stage_count"]}
-            for c in columns
-        ],
+        "columns": [{"block": c["block"], "stage_count": c["stage_count"]} for c in columns],
         "composition": {
             "streams": composition["streams"],
             "components": composition["components"],
@@ -412,8 +519,18 @@ def _case_json(case, columns, stage_counts, reasons, codes, tears, blocks,
     return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
-            composition, connections, metrics_count: int) -> str:
+def _readme(
+    case,
+    columns,
+    stage_counts,
+    reasons,
+    codes,
+    tears,
+    blocks,
+    composition,
+    connections,
+    metrics_count: int,
+) -> str:
     severity = case["severity"] or ""
     severity_text = SEVERITY_TEXT.get(severity, severity or "未知")
     converged = bool(case["converged"])
@@ -434,7 +551,9 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w(f"| 模型 | `{_cell(case['model_name'] or case['model_path'])}` |")
     w(f"| 工况编号 | #{case['id']}(本机工况库) |")
     w(f"| 采集时间 | {_cell(case['read_at'])} |")
-    w(f"| 规模 | {case['stream_count']} 条流股 / {case['block_count']} 个设备 / {len(columns)} 座塔 |")
+    w(
+        f"| 规模 | {case['stream_count']} 条流股 / {case['block_count']} 个设备 / {len(columns)} 座塔 |"
+    )
     w(f"| 收敛判定 | **{severity_text}**(converged = {'true' if converged else 'false'}) |")
     w(f"| 分析包生成 | {generated} |")
     w("")
@@ -549,8 +668,10 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("| 理论级数 | 塔的 `NSTAGE`(输入) |")
     w("| 顶温℃ / 底温℃ | 塔的第一级 / 最后一级温度 |")
     w("| ΔH kW | 焓平衡:ΔH = Σ出 − Σ入(流股 `能量流kW`)。正=放热/失焓,负=吸热/得焓 |")
-    w("| 参照kW | 对照值:`热负荷kW`(Heater/Flash2)、`功率kW`(泵/压缩机)、`0`(绝热设备)、"
-      "换热器按冷侧 `HX_DUTY` |")
+    w(
+        "| 参照kW | 对照值:`热负荷kW`(Heater/Flash2)、`功率kW`(泵/压缩机)、`0`(绝热设备)、"
+        "换热器按冷侧 `HX_DUTY` |"
+    )
     w("| 焓平衡 | `通过` / `超差` / `无法校验`(缺流股焓值或参照值)/ `不校验`(塔、反应器) |")
     w("| 平衡说明 | 差值、容差、比值等人话;超差时先看这一列 |")
     w("| 提示原文 | Aspen 的 `BLKMSG` 原文(英文),空=没报错 |")
@@ -582,7 +703,9 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
         w("| 轴功率kW | `BRAKE_POWER`,Aspen 原值(反向工况为负) |")
         w("| 建议电机kW | **算的**:轴功率 ÷ 0.95 × 1.10 后向上取标准档位;功率 ≤ 0 时留空 |")
         w("| 进口压力bar / 出口压力bar | 取自泵的**进口 / 出口流股**,不是泵块的 `IN_PRES` |")
-        w("| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |")
+        w(
+            "| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |"
+        )
         w("| 密度kg/m³ | `RHO_LIQ`(摩尔密度)× `MW_LIQ` |")
         w("| 进口汽化率 | 进口流股的汽化率;> 0 视为两相,不给 NPSHa |")
         w("| p_v bar | 进口流股的泡点压力(读取工况时取 Aspen 值);读不到时可由用户手填 |")
@@ -609,8 +732,10 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
         w("| 分侧 | `cold` / `hot`(换热器冷/热侧),其余为空 |")
         w("| 端口 | 塔的进料端口号(来自 `IN_STRMID` 的元素名),其余为空 |")
         w("| 进料板 | 塔的进料位置(来自 `Input` 的 `FEED_STAGE`) |")
-        w("| 来源 | `stream`=流股侧 SOURCE/DESTINATION;`strmid`=设备 IN/OUT_STRMID;"
-          "`hx`=换热器分侧字段;`feed_stage`=进料板映射 |")
+        w(
+            "| 来源 | `stream`=流股侧 SOURCE/DESTINATION;`strmid`=设备 IN/OUT_STRMID;"
+            "`hx`=换热器分侧字段;`feed_stage`=进料板映射 |"
+        )
         w("")
         w("> 主流股的连接来自流股侧的 `SOURCE` / `DESTINATION`(值是模块名):")
         w("> 实测设备侧 `IN_STRMID` 只有塔上有,其余设备没有这个字段。")
@@ -626,8 +751,11 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
         w("| 液相摩尔分数x | 该组分在液相中的摩尔分数,同一流股内合计 ≈ 1 |")
         w("| 气相摩尔分数y | 该组分在气相中的摩尔分数,同一流股内合计 ≈ 1 |")
         w("")
-        w(f"本包覆盖 **{len(composition['streams'])} 条流股**:"
-          + "、".join(f"`{s}`" for s in composition["streams"]) + "。")
+        w(
+            f"本包覆盖 **{len(composition['streams'])} 条流股**:"
+            + "、".join(f"`{s}`" for s in composition["streams"])
+            + "。"
+        )
         w("")
         w("> 组成是**按需读**的:只有在网页上点开过的流股才在这里,")
         w("> 不是全部流股。纯液相流股的 y 列可能整列为 0 或空,不代表缺数据。")
@@ -652,8 +780,10 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
         w("| 模块 | 类型 | 状态 | Aspen 原文(BLKMSG) |")
         w("| --- | --- | --- | --- |")
         for b in problem_blocks:
-            w(f"| {_cell(b['name'])} | {_cell(b['type'] or '-')} | "
-              f"{STATUS_TEXT.get(b['status'], '')} | {_cell(b['message'] or '')} |")
+            w(
+                f"| {_cell(b['name'])} | {_cell(b['type'] or '-')} | "
+                f"{STATUS_TEXT.get(b['status'], '')} | {_cell(b['message'] or '')} |"
+            )
     else:
         w("无(所有模块 `BLKSTAT` 都是 0)。")
     w("")
@@ -673,8 +803,10 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
         for t in tears:
             err, tol = t.get("error"), t.get("tolerance")
             over = isinstance(err, (int, float)) and tol and err > tol
-            w(f"| {_cell(t.get('stream'))} | {_cell(t.get('variable'))} | "
-              f"{_cell(err)} | {_cell(tol)} | {'**是**' if over else '否'} |")
+            w(
+                f"| {_cell(t.get('stream'))} | {_cell(t.get('variable'))} | "
+                f"{_cell(err)} | {_cell(tol)} | {'**是**' if over else '否'} |"
+            )
         w("")
         w("> 注意:**撕裂流误差小 ≠ 流程可用**。实测见过撕裂流全在 1e-14~1e-6,")
         w("> 但塔仍然报「干涸」「组分平衡方程不收敛」。判定必须两条腿走路。")
@@ -689,8 +821,10 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     w("  表示「这个模型没有这个字段」或「该字段不可读」,不要当 0 参与计算。")
     unit_gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case.keys() else {}
     if unit_gaps.get("count"):
-        w(f"- **本次有 {unit_gaps['count']} 个字段因为单位不认识被留空**"
-          f"(原始单位:{'、'.join(f'`{u}`' for u in unit_gaps.get('units') or []) or '空'})。")
+        w(
+            f"- **本次有 {unit_gaps['count']} 个字段因为单位不认识被留空**"
+            f"(原始单位:{'、'.join(f'`{u}`' for u in unit_gaps.get('units') or []) or '空'})。"
+        )
         w("  这类空值不是模型的问题,是工具的换算表没覆盖 —— 用的时候请换回原始数据列自己算。")
     w("- **组成(各组分摩尔分数)是按需读的**。18 组分 × 2 相 × 每条流股的调用量是")
     w("  基础字段的 6 倍(121 条流股从 9 s 变成 41 s),所以默认不读。")
@@ -723,16 +857,18 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
 
 # ---------------------------------------------------------------- 总入口
 
+
 def _pipe_result(streams, blocks, connections):
     """管路选型结果;标准表没录全时返回 (None, None),不硬造数据。"""
     from app.design import pipe as pipe_calc
 
     try:
-        res = pipe_calc.build([dict(s) for s in streams], [dict(b) for b in blocks],
-                              [dict(c) for c in connections])
+        res = pipe_calc.build(
+            [dict(s) for s in streams], [dict(b) for b in blocks], [dict(c) for c in connections]
+        )
     except pipe_calc.TablesNotReady:
         return None, None
-    except Exception:            # 选型出问题不该拖垮整个分析包
+    except Exception:  # 选型出问题不该拖垮整个分析包
         return None, None
     return res, pipe_calc.validate(res["rows"])
 
@@ -742,21 +878,52 @@ def _pipe_csv(rows, checks) -> bytes:
     hit: dict[str, list[str]] = {}
     for f in checks["findings"]:
         hit.setdefault(f["stream"], []).append(f["code"])
-    header = ["流股", "相态", "介质代号", "体积流量_m3h", "公称直径", "外径_mm", "壁厚_mm",
-              "管材", "等级号", "设计压力_MPa", "设计温度_C", "许用应力_MPa",
-              "计算壁厚_mm", "所需壁厚_mm", "最小壁厚_mm", "壁厚按下限",
-              "实际流速_ms", "校验码", "备注"]
+    header = [
+        "流股",
+        "相态",
+        "介质代号",
+        "体积流量_m3h",
+        "公称直径",
+        "外径_mm",
+        "壁厚_mm",
+        "管材",
+        "等级号",
+        "设计压力_MPa",
+        "设计温度_C",
+        "许用应力_MPa",
+        "计算壁厚_mm",
+        "所需壁厚_mm",
+        "最小壁厚_mm",
+        "壁厚按下限",
+        "实际流速_ms",
+        "校验码",
+        "备注",
+    ]
     body = []
     for r in rows:
-        body.append([
-            r["stream"], r["phase"], r["medium_code"], _num(r["vol_flow_m3h"]),
-            r["dn"], _num(r["od_mm"]), _num(r["wall_mm"]), r["material"], r["grade_code"],
-            _num(r["design_pressure_mpa"]), _num(r["design_temp_c"]), _num(r["stress_mpa"]),
-            _num(r["t_calc_mm"]), _num(r["t_required_mm"]), _num(r.get("min_wall_mm")),
-            "是" if r.get("wall_floored") else "",
-            _num(r["velocity_ms"]),
-            " ".join(hit.get(r["stream"], [])), "; ".join(r["warnings"]),
-        ])
+        body.append(
+            [
+                r["stream"],
+                r["phase"],
+                r["medium_code"],
+                _num(r["vol_flow_m3h"]),
+                r["dn"],
+                _num(r["od_mm"]),
+                _num(r["wall_mm"]),
+                r["material"],
+                r["grade_code"],
+                _num(r["design_pressure_mpa"]),
+                _num(r["design_temp_c"]),
+                _num(r["stress_mpa"]),
+                _num(r["t_calc_mm"]),
+                _num(r["t_required_mm"]),
+                _num(r.get("min_wall_mm")),
+                "是" if r.get("wall_floored") else "",
+                _num(r["velocity_ms"]),
+                " ".join(hit.get(r["stream"], [])),
+                "; ".join(r["warnings"]),
+            ]
+        )
     return _csv_bytes(header, body)
 
 
@@ -790,10 +957,21 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     codes = _json(case["status_json"], {})
     tears = _json(case["tear_json"], [])
 
-    metrics_rows = _metrics_rows(case, columns, stage_counts, reasons, codes,
-                                 tears, blocks, composition)
-    readme = _readme(case, columns, stage_counts, reasons, codes, tears,
-                     blocks, composition, connections, len(metrics_rows))
+    metrics_rows = _metrics_rows(
+        case, columns, stage_counts, reasons, codes, tears, blocks, composition
+    )
+    readme = _readme(
+        case,
+        columns,
+        stage_counts,
+        reasons,
+        codes,
+        tears,
+        blocks,
+        composition,
+        connections,
+        len(metrics_rows),
+    )
     files: list[tuple[str, bytes]] = [
         ("README.md", _md_bytes(readme)),
         ("metrics.csv", _csv_bytes(["类别", "项目", "值", "单位", "说明"], metrics_rows)),
@@ -812,9 +990,23 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     pipe_res, pipe_checks = _pipe_result(streams, blocks, connections)
     if pipe_res:
         files.append(("pipe_schedule.csv", _pipe_csv(pipe_res["rows"], pipe_checks)))
-    files.append(("case.json", _case_json(case, columns, stage_counts, reasons,
-                                          codes, tears, blocks, composition,
-                                          connections, has_pipe=bool(pipe_res))))
+    files.append(
+        (
+            "case.json",
+            _case_json(
+                case,
+                columns,
+                stage_counts,
+                reasons,
+                codes,
+                tears,
+                blocks,
+                composition,
+                connections,
+                has_pipe=bool(pipe_res),
+            ),
+        )
+    )
 
     bio = io.BytesIO()
     with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:

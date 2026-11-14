@@ -14,6 +14,7 @@ PyInstaller 单文件模式启动时会把 `app/` 解到临时目录(`sys._MEIPA
 
 源码运行时两者都是仓库根,行为与以前完全一致。
 """
+
 from __future__ import annotations
 
 import sys

@@ -14,6 +14,7 @@ Aspen 的块类型远不止十种(balance.py 里就分了 SKIP/ZERO/POWER/DUTY �
 
 默认家族:有塔就落塔;没有塔就落第一个非空的;一台都没有返回「塔」,由前端显示空态。
 """
+
 from __future__ import annotations
 
 # (key, 显示名, 覆盖的 Aspen 类型)。顺序 = 页签顺序。
@@ -33,9 +34,7 @@ FAMILIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
 FAMILY_LABELS: dict[str, str] = {key: label for key, label, _types in FAMILIES}
 DEFAULT_FAMILY = "column"
 
-_LOOKUP: dict[str, str] = {
-    btype.lower(): key for key, _label, types in FAMILIES for btype in types
-}
+_LOOKUP: dict[str, str] = {btype.lower(): key for key, _label, types in FAMILIES for btype in types}
 
 
 def family_of(btype) -> str:
@@ -47,8 +46,7 @@ def family_of(btype) -> str:
 
 def describe() -> list[dict]:
     """给前端/导出用的家族表(顺序即页签顺序)。"""
-    return [{"key": key, "label": label, "types": list(types)}
-            for key, label, types in FAMILIES]
+    return [{"key": key, "label": label, "types": list(types)} for key, label, types in FAMILIES]
 
 
 def counts(blocks) -> dict[str, int]:

@@ -33,6 +33,7 @@
 `summary.reaction_net_kw` 里供报告附注说明。实测 case 30 有 7 337.97 kW 属于
 `R0501`(RPlug),正是这一类。
 """
+
 from __future__ import annotations
 
 from app.design import block_family
@@ -85,16 +86,17 @@ def tower_duties(blocks, stages) -> dict:
 
         rows = sorted(stages.get(name) or [], key=lambda r: r.get("stage") or 0)
         if rows:
-            out[name] = {"cond_kw": rows[0].get("duty_kw"),
-                         "reb_kw": rows[-1].get("duty_kw"),
-                         "source": "stage"}
+            out[name] = {
+                "cond_kw": rows[0].get("duty_kw"),
+                "reb_kw": rows[-1].get("duty_kw"),
+                "source": "stage",
+            }
         else:
             out[name] = {"cond_kw": None, "reb_kw": None, "source": ""}
     return out
 
 
-def _device_row(block, in_streams, out_streams, hmap, balance, side="",
-                tower=None) -> dict:
+def _device_row(block, in_streams, out_streams, hmap, balance, side="", tower=None) -> dict:
     """一台设备(或换热器的一侧)→ 能量表的一行。"""
     result = balance or {}
     state = result.get("balance_state") or NO_DATA
@@ -106,11 +108,17 @@ def _device_row(block, in_streams, out_streams, hmap, balance, side="",
     if side == "hot":
         # 热侧不参与校验:ΔH 留空,状态照写不校验
         return {
-            "block": block["name"], "type": btype, "side": "热",
+            "block": block["name"],
+            "type": btype,
+            "side": "热",
             "h_in_kw": _row_sum(in_streams, hmap),
             "h_out_kw": _row_sum(out_streams, hmap),
-            "dh_kw": None, "dev_kw": None, "dev_kind": "",
-            "delta_kw": None, "state": SKIP, "note": _HOT_NOTE,
+            "dh_kw": None,
+            "dev_kw": None,
+            "dev_kind": "",
+            "delta_kw": None,
+            "state": SKIP,
+            "note": _HOT_NOTE,
             "tower": tower,
         }
 
@@ -133,11 +141,16 @@ def _device_row(block, in_streams, out_streams, hmap, balance, side="",
         delta = round(dh - ref, 3)
 
     return {
-        "block": block["name"], "type": btype, "side": "冷" if side == "cold" else "",
+        "block": block["name"],
+        "type": btype,
+        "side": "冷" if side == "cold" else "",
         "h_in_kw": _row_sum(in_streams, hmap),
         "h_out_kw": _row_sum(out_streams, hmap),
-        "dh_kw": dh, "dev_kw": dev_kw, "dev_kind": dev_kind,
-        "delta_kw": delta, "state": state,
+        "dh_kw": dh,
+        "dev_kw": dev_kw,
+        "dev_kind": dev_kind,
+        "delta_kw": delta,
+        "state": state,
         "note": result.get("balance_note") or "",
         "tower": tower,
     }
@@ -184,12 +197,20 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
         tower_info = tower_map.get(name)
 
         if family == "column":
-            rows = tower_info or {"cond_kw": block.get("cond_duty_kw"),
-                                  "reb_kw": block.get("reb_duty_kw"), "source": ""}
-            towers.append({"block": name, "type": btype,
-                           "cond_kw": rows.get("cond_kw"),
-                           "reb_kw": rows.get("reb_kw"),
-                           "source": rows.get("source") or ""})
+            rows = tower_info or {
+                "cond_kw": block.get("cond_duty_kw"),
+                "reb_kw": block.get("reb_duty_kw"),
+                "source": "",
+            }
+            towers.append(
+                {
+                    "block": name,
+                    "type": btype,
+                    "cond_kw": rows.get("cond_kw"),
+                    "reb_kw": rows.get("reb_kw"),
+                    "source": rows.get("source") or "",
+                }
+            )
 
         if btype == "HeatX" or (family == "heat" and _has_sides(in_rows, out_rows)):
             cold_in = [r["stream"] for r in in_rows if r.get("side") == "cold"]
@@ -197,18 +218,39 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
             hot_in = [r["stream"] for r in in_rows if r.get("side") == "hot"]
             hot_out = [r["stream"] for r in out_rows if r.get("side") == "hot"]
             if cold_in or cold_out:
-                devices.append(_device_row(block, cold_in, cold_out, hmap,
-                                           balance_results.get(name), "cold", tower_info))
+                devices.append(
+                    _device_row(
+                        block,
+                        cold_in,
+                        cold_out,
+                        hmap,
+                        balance_results.get(name),
+                        "cold",
+                        tower_info,
+                    )
+                )
             if hot_in or hot_out:
-                devices.append(_device_row(block, hot_in, hot_out, hmap,
-                                           balance_results.get(name), "hot", tower_info))
+                devices.append(
+                    _device_row(
+                        block, hot_in, hot_out, hmap, balance_results.get(name), "hot", tower_info
+                    )
+                )
             if not (cold_in or cold_out or hot_in or hot_out):
-                devices.append(_device_row(block, [], [], hmap,
-                                           balance_results.get(name), "", tower_info))
+                devices.append(
+                    _device_row(block, [], [], hmap, balance_results.get(name), "", tower_info)
+                )
         else:
-            devices.append(_device_row(
-                block, [r["stream"] for r in in_rows], [r["stream"] for r in out_rows],
-                hmap, balance_results.get(name), "", tower_info))
+            devices.append(
+                _device_row(
+                    block,
+                    [r["stream"] for r in in_rows],
+                    [r["stream"] for r in out_rows],
+                    hmap,
+                    balance_results.get(name),
+                    "",
+                    tower_info,
+                )
+            )
 
         # ---- 汇总:塔以外的设备按热负荷正负与轴功率累加
         # 塔与反应器的热负荷不进「换热设备」的正负 duty 合计:
@@ -228,8 +270,11 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
                     shaft += float(power)
 
     # 反应热:按家族统计,不再依赖「不校验」状态(2026-11-14 起反应器也参与校验)
-    reaction = sum(float(b.get("duty_kw") or 0.0) for b in blocks or []
-                   if block_family.family_of(b.get("type")) == "react")
+    reaction = sum(
+        float(b.get("duty_kw") or 0.0)
+        for b in blocks or []
+        if block_family.family_of(b.get("type")) == "react"
+    )
     tower_reb = sum(t["reb_kw"] for t in towers if t["reb_kw"] is not None)
     tower_cond = sum(t["cond_kw"] for t in towers if t["cond_kw"] is not None)
 
@@ -245,9 +290,11 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
 
     return {
         "devices": devices,
-        "groups": [{"key": key, "label": block_family.FAMILY_LABELS[key],
-                    "devices": groups[key]}
-                   for key in order if key in groups],
+        "groups": [
+            {"key": key, "label": block_family.FAMILY_LABELS[key], "devices": groups[key]}
+            for key in order
+            if key in groups
+        ],
         "summary": {
             "heat_pos_kw": round(heat_pos, 3),
             "tower_reb_kw": round(tower_reb, 3),

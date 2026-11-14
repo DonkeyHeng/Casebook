@@ -10,6 +10,7 @@
 另外:DSH 之类的沙箱里 ROT 是空的(连 Shell.Application 都拿不到),
 本模块必须在**真实桌面会话**运行,否则会误报"没有打开的模型"。
 """
+
 from __future__ import annotations
 
 import pythoncom
@@ -117,17 +118,13 @@ def attach(model_path: str | None = None) -> AspenSession:
         match = [m for m in models if m.replace("/", "\\").lower() == norm]
         if not match:
             available = "\n".join(f"  - {m}" for m in models)
-            raise AspenNotRunning(
-                f"没有找到已打开的模型:{model_path}\n当前打开的是:\n{available}"
-            )
+            raise AspenNotRunning(f"没有找到已打开的模型:{model_path}\n当前打开的是:\n{available}")
         chosen = match[0]
 
     try:
         doc = win32com.client.GetObject(chosen)
     except Exception as exc:
-        raise AspenNotRunning(
-            f"附着失败({chosen}):{exc}\n\n{_NOT_RUNNING_HINT}"
-        ) from exc
+        raise AspenNotRunning(f"附着失败({chosen}):{exc}\n\n{_NOT_RUNNING_HINT}") from exc
 
     try:
         tree = doc.Tree

@@ -16,6 +16,7 @@ python -m tools.build_exe --check    # 只检查 PyInstaller 装没装
 * 静态文件(`app/web`)、图标(`assets`)、示例工况库(`samples/`)都塞进包里;
   运行时 `app/paths.py` 会把只读资源指到解包目录,把 `data/` 指到 exe 旁边。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -42,8 +43,12 @@ sys.exit(main())
 
 def _pyinstaller_ok() -> bool:
     try:
-        out = subprocess.run([sys.executable, "-m", "PyInstaller", "--version"],
-                             capture_output=True, text=True, timeout=120)
+        out = subprocess.run(
+            [sys.executable, "-m", "PyInstaller", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
     except Exception:
         return False
     if out.returncode != 0:
@@ -66,20 +71,33 @@ def main(argv: list[str] | None = None) -> int:
     entry = BUILD / "entry.py"
     entry.write_text(ENTRY, encoding="utf-8")
 
-    sep = os.pathsep   # Windows 上是 ';'
+    sep = os.pathsep  # Windows 上是 ';'
     args = [
-        sys.executable, "-m", "PyInstaller",
-        "--noconfirm", "--clean",
-        "--onefile", "--console",
-        "--name", EXE_NAME,
-        "--icon", str(ROOT / "assets" / "app-icon.ico"),
-        "--add-data", f"{ROOT / 'app' / 'web'}{sep}app/web",
-        "--add-data", f"{ROOT / 'assets'}{sep}assets",
-        "--add-data", f"{ROOT / 'samples' / 'case-23-error.db'}{sep}samples",
-        "--paths", str(ROOT),
-        "--distpath", str(DIST),
-        "--workpath", str(BUILD),
-        "--specpath", str(BUILD),
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--noconfirm",
+        "--clean",
+        "--onefile",
+        "--console",
+        "--name",
+        EXE_NAME,
+        "--icon",
+        str(ROOT / "assets" / "app-icon.ico"),
+        "--add-data",
+        f"{ROOT / 'app' / 'web'}{sep}app/web",
+        "--add-data",
+        f"{ROOT / 'assets'}{sep}assets",
+        "--add-data",
+        f"{ROOT / 'samples' / 'case-23-error.db'}{sep}samples",
+        "--paths",
+        str(ROOT),
+        "--distpath",
+        str(DIST),
+        "--workpath",
+        str(BUILD),
+        "--specpath",
+        str(BUILD),
         str(entry),
     ]
     print("打包中(第一次要 1–3 分钟)…")

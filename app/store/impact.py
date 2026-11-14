@@ -11,6 +11,7 @@
   * 设备 `BLKSTAT=2`(告警)→ 标 **warning**(数据仍可用,引用时注明)
   * 同一条流股被多台设备碰:报错优先于告警;逐台设备都记下来(便于解释)
 """
+
 from __future__ import annotations
 
 ERROR = "error"
@@ -43,7 +44,7 @@ def build(connections, blocks) -> dict:
         severity = ERROR if status == 1 else WARNING
         stream = row["stream"]
         key = (block, row.get("direction") or "", stream)
-        if key in seen:                      # 同一台设备的两条重复记录,别写两遍
+        if key in seen:  # 同一台设备的两条重复记录,别写两遍
             continue
         seen.add(key)
 
@@ -51,11 +52,13 @@ def build(connections, blocks) -> dict:
         # 报错优先:先标 error 的不会被后到的 warning 降级
         if _RANK[severity] < _RANK[item["severity"]]:
             item["severity"] = severity
-        item["blocks"].append({
-            "block": block,
-            "direction": row.get("direction") or "",
-            "severity": severity,
-        })
+        item["blocks"].append(
+            {
+                "block": block,
+                "direction": row.get("direction") or "",
+                "severity": severity,
+            }
+        )
 
     rows = sorted(streams.values(), key=lambda s: (_RANK[s["severity"]], s["stream"]))
     for item in rows:

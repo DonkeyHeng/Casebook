@@ -15,19 +15,44 @@
 
 ⚠️ 功率档位表是**工程常用序列**,不是标准原文;要引用标准请另附出处。
 """
+
 from __future__ import annotations
 
 import math
 
-G = 9.80665              # m/s²
-MOTOR_EFF = 0.95         # 电机效率(默认值,可被调用方覆盖)
-DEFAULT_MARGIN = 1.10    # 电机裕量
+G = 9.80665  # m/s²
+MOTOR_EFF = 0.95  # 电机效率(默认值,可被调用方覆盖)
+DEFAULT_MARGIN = 1.10  # 电机裕量
 
 # 常用低压/高压电机功率档(kW)。来源是工程常用序列,不是某个标准的原文。
 MOTOR_KW: tuple[float, ...] = (
-    0.55, 0.75, 1.1, 1.5, 2.2, 3.0, 4.0, 5.5, 7.5, 11.0, 15.0, 18.5, 22.0,
-    30.0, 37.0, 45.0, 55.0, 75.0, 90.0, 110.0, 132.0, 160.0, 200.0, 250.0,
-    315.0, 355.0, 400.0,
+    0.55,
+    0.75,
+    1.1,
+    1.5,
+    2.2,
+    3.0,
+    4.0,
+    5.5,
+    7.5,
+    11.0,
+    15.0,
+    18.5,
+    22.0,
+    30.0,
+    37.0,
+    45.0,
+    55.0,
+    75.0,
+    90.0,
+    110.0,
+    132.0,
+    160.0,
+    200.0,
+    250.0,
+    315.0,
+    355.0,
+    400.0,
 )
 
 MOTOR_RULE = "建议电机 = 轴功率 ÷ 电机效率(0.95) × 裕量(1.10),向上取标准档位"
@@ -106,8 +131,9 @@ def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3) -> float | None:
     return 0.0 if abs(value) < 0.005 else value
 
 
-def pick_motor(shaft_kw, margin: float = DEFAULT_MARGIN,
-               motor_eff: float = MOTOR_EFF) -> tuple[float | None, str]:
+def pick_motor(
+    shaft_kw, margin: float = DEFAULT_MARGIN, motor_eff: float = MOTOR_EFF
+) -> tuple[float | None, str]:
     """轴功率 → 建议电机功率 + 一句可展示的推导。
 
     返回 (档位 kW 或 None, 说明)。功率 ≤ 0 视为反向工况,不选电机。
@@ -126,6 +152,5 @@ def pick_motor(shaft_kw, margin: float = DEFAULT_MARGIN,
         return None, "电机效率或裕量不合法"
     for kw in MOTOR_KW:
         if need <= kw:
-            return kw, (f"{power:.2f} ÷ {motor_eff} × {margin} = {need:.2f} kW "
-                        f"→ 取 {kw} kW 档")
+            return kw, (f"{power:.2f} ÷ {motor_eff} × {margin} = {need:.2f} kW → 取 {kw} kW 档")
     return None, f"需 {need:.1f} kW,超出档位表上限({MOTOR_KW[-1]} kW)"

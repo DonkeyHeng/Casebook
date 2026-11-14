@@ -16,6 +16,7 @@ taskkill /F,同端口上别的 Python 程序会被误杀;而且不检查 taskkil
   * 没有 PID 文件时按端口找进程,再核验完整命令行里带 app.api / casebook;
   * taskkill 返回码非 0 → 报失败;返回 0 也要等端口真的没人监听才算成功。
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -131,8 +132,13 @@ def process_cmdline(pid: str) -> str:
     """
     if not pid.isdigit():
         return ""
-    ps = ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-          f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine"]
+    ps = [
+        "powershell",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine",
+    ]
     out, rc = _run_rc(ps)
     if rc == 0 and out.strip():
         return out.strip()
@@ -205,8 +211,10 @@ def _pick_target() -> tuple[str | None, str]:
         if looks_like_casebook(pid):
             return pid, ""
     detail = ", ".join(f"{p} ({process_name(p) or '未知'})" for p in sorted(owners))
-    return None, (f"端口 {PORT} 被别的进程占用,看着不像 Casebook,未处理:{detail}\n"
-                  "确认真的是残留的 Casebook 后再手动结束它。")
+    return None, (
+        f"端口 {PORT} 被别的进程占用,看着不像 Casebook,未处理:{detail}\n"
+        "确认真的是残留的 Casebook 后再手动结束它。"
+    )
 
 
 def main() -> int:
@@ -219,16 +227,25 @@ def main() -> int:
     out, rc = _run_rc(["taskkill", "/PID", target, "/F"])
     _log(f"taskkill {target} → 返回码 {rc};{out.strip()}")
     if rc != 0:
-        _msg(f"结束进程 {target} 失败(taskkill 返回 {rc})。\n"
-             f"{out.strip()}\n\n可能是权限不足:试试右键「以管理员身份运行」。", 0x10)
+        _msg(
+            f"结束进程 {target} 失败(taskkill 返回 {rc})。\n"
+            f"{out.strip()}\n\n可能是权限不足:试试右键「以管理员身份运行」。",
+            0x10,
+        )
         return 1
     if process_alive(target):
-        _msg(f"taskkill 报告成功,但进程 {target} 还在。\n"
-             "可能还有另一个实例:稍等再点一次,或看 data\\stop.log。", 0x30)
+        _msg(
+            f"taskkill 报告成功,但进程 {target} 还在。\n"
+            "可能还有另一个实例:稍等再点一次,或看 data\\stop.log。",
+            0x30,
+        )
         return 1
     if not port_released(PORT):
-        _msg(f"已结束进程 {target},但端口 {PORT} 仍在监听。\n"
-             "可能还有另一个实例:稍等再点一次,或看 data\\stop.log。", 0x30)
+        _msg(
+            f"已结束进程 {target},但端口 {PORT} 仍在监听。\n"
+            "可能还有另一个实例:稍等再点一次,或看 data\\stop.log。",
+            0x30,
+        )
         return 1
     try:
         os.unlink(PID_PATH)

@@ -16,6 +16,7 @@ python -m tools.make_release     # 再打两个包(会打印大小与 SHA-256)
 
 上传与 Release 说明由发布流程负责(见 `docs/install.md`),本脚本只管出包。
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -50,8 +51,7 @@ def _txt_bytes() -> bytes:
 def _add_file(zip_path: Path, arcname: str, content: bytes) -> None:
     """往已有 zip 里加一个文件(git archive 不支持指定目标路径,只能改写一遍)。"""
     tmp = zip_path.with_name(zip_path.name + ".tmp")
-    with zipfile.ZipFile(zip_path) as zin, \
-            zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
+    with zipfile.ZipFile(zip_path) as zin, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
             zout.writestr(item, zin.read(item.filename))
         zout.writestr(arcname, content)
@@ -61,8 +61,11 @@ def _add_file(zip_path: Path, arcname: str, content: bytes) -> None:
 def build_source_zip() -> Path:
     out = DIST / f"{PREFIX}-{VERSION}.zip"
     out.unlink(missing_ok=True)
-    subprocess.run(["git", "archive", "--format=zip", f"--prefix={PREFIX}/",
-                    "-o", str(out), "HEAD"], cwd=str(ROOT), check=True)
+    subprocess.run(
+        ["git", "archive", "--format=zip", f"--prefix={PREFIX}/", "-o", str(out), "HEAD"],
+        cwd=str(ROOT),
+        check=True,
+    )
     _add_file(out, f"{PREFIX}/{TXT_NAME}", _txt_bytes())
     return out
 
@@ -85,8 +88,7 @@ def main() -> int:
     DIST.mkdir(parents=True, exist_ok=True)
     for path in (build_source_zip(), build_exe_zip()):
         size = path.stat().st_size
-        print(f"{path.name}:{size:,} 字节(约 {size / 1024 / 1024:.2f} MB),"
-              f"SHA-256 {_sha256(path)}")
+        print(f"{path.name}:{size:,} 字节(约 {size / 1024 / 1024:.2f} MB),SHA-256 {_sha256(path)}")
         with zipfile.ZipFile(path) as z:
             names = [n for n in z.namelist() if not n.endswith("/")]
         roots = sorted({n.split("/")[1] for n in names if n.count("/") >= 1})

@@ -23,6 +23,7 @@ COM 是**按线程**初始化的:服务主线程初始化过,不代表新线程�
 ----
 整个过程只调 `FindNode` / `.Value`,不调 `Run2` / `Reinit` —— 不会碰用户的模型。
 """
+
 from __future__ import annotations
 
 import threading
@@ -32,15 +33,15 @@ import traceback
 _lock = threading.Lock()
 
 _IDLE: dict = {
-    "state": "idle",        # idle / running / done / error
-    "phase": "",            # 现在在干什么(人话)
-    "done": 0,              # 当前阶段已处理条数
-    "total": 0,             # 当前阶段总条数(0 = 算不出比例)
-    "label": "",            # 当前处理的对象名(流股名 / 设备名)
-    "error": "",            # state=error 时的完整人话提示
-    "case_id": None,        # state=done 时新工况的 id
-    "started_at": None,     # 开始时间(时间戳)
-    "started_text": "",     # 开始时间(可读)
+    "state": "idle",  # idle / running / done / error
+    "phase": "",  # 现在在干什么(人话)
+    "done": 0,  # 当前阶段已处理条数
+    "total": 0,  # 当前阶段总条数(0 = 算不出比例)
+    "label": "",  # 当前处理的对象名(流股名 / 设备名)
+    "error": "",  # state=error 时的完整人话提示
+    "case_id": None,  # state=done 时新工况的 id
+    "started_at": None,  # 开始时间(时间戳)
+    "started_text": "",  # 开始时间(可读)
     "finished_at": None,
     "elapsed_sec": 0.0,
     "model_path": "",
@@ -49,14 +50,15 @@ _IDLE: dict = {
     "block_count": None,
     "severity": "",
     "converged": None,
-    "unit_gaps": 0,          # 有原始值但单位不认识、被迫留空的字段数
-    "unit_units": [],        # 上面那些字段涉及的原始单位
+    "unit_gaps": 0,  # 有原始值但单位不认识、被迫留空的字段数
+    "unit_units": [],  # 上面那些字段涉及的原始单位
 }
 
 _state: dict = dict(_IDLE)
 
 
 # ---------------------------------------------------------------- 状态读写
+
 
 def snapshot() -> dict:
     """当前任务状态的一份拷贝(前端直接吃这个 JSON)。"""
@@ -79,11 +81,11 @@ def _phase(name: str) -> None:
 
 
 def _fail(message: str) -> None:
-    _update(state="error", phase="", error=message,
-            finished_at=time.time(), label="")
+    _update(state="error", phase="", error=message, finished_at=time.time(), label="")
 
 
 # ---------------------------------------------------------------- 启动
+
 
 def start(db_path: str, include_composition: bool = False) -> tuple[dict, bool]:
     """开始一次读取。
@@ -99,21 +101,25 @@ def start(db_path: str, include_composition: bool = False) -> tuple[dict, bool]:
             return dict(_state), False
         _state.clear()
         _state.update(dict(_IDLE))
-        _state.update({
-            "state": "running",
-            "phase": "连接 Aspen",
-            "started_at": time.time(),
-            "started_text": time.strftime("%H:%M:%S"),
-            "with_composition": bool(include_composition),
-        })
+        _state.update(
+            {
+                "state": "running",
+                "phase": "连接 Aspen",
+                "started_at": time.time(),
+                "started_text": time.strftime("%H:%M:%S"),
+                "with_composition": bool(include_composition),
+            }
+        )
 
-    thread = threading.Thread(target=_run, args=(db_path, bool(include_composition)),
-                              name="aspen-read", daemon=True)
+    thread = threading.Thread(
+        target=_run, args=(db_path, bool(include_composition)), name="aspen-read", daemon=True
+    )
     thread.start()
     return snapshot(), True
 
 
 # ---------------------------------------------------------------- 工作线程
+
 
 def _run(db_path: str, include_composition: bool = False) -> None:
     # 延迟导入:没装 pywin32 的机器上服务本身还能起来,只在点按钮时给提示
@@ -121,8 +127,10 @@ def _run(db_path: str, include_composition: bool = False) -> None:
         from app.aspen import connect, reader
         from app.store import db
     except Exception as exc:  # pragma: no cover - 只有环境坏掉才会进来
-        _fail(f"缺少依赖:{type(exc).__name__}: {exc}\n\n"
-              "读取 Aspen 需要 pywin32,请先执行:pip install pywin32")
+        _fail(
+            f"缺少依赖:{type(exc).__name__}: {exc}\n\n"
+            "读取 Aspen 需要 pywin32,请先执行:pip install pywin32"
+        )
         return
 
     try:
@@ -142,8 +150,12 @@ def _run(db_path: str, include_composition: bool = False) -> None:
             # 勾了「顺带读组成」时,流股阶段会慢很多,阶段名里说清楚
             _phase(f"{name}(含组成)" if include_composition and name == "读取流股" else name)
 
-        case = reader.read_case(session, include_composition=include_composition,
-                                progress=on_progress, on_phase=on_phase)
+        case = reader.read_case(
+            session,
+            include_composition=include_composition,
+            progress=on_progress,
+            on_phase=on_phase,
+        )
 
         _phase("写入工况库")
         conn = db.open_db(db_path)

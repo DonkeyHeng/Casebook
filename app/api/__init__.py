@@ -2,6 +2,7 @@
 
 零依赖,只用标准库(方便以后打包 exe)。
 """
+
 from .server import serve
 
 __all__ = ["serve"]

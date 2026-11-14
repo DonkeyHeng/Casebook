@@ -25,13 +25,14 @@
   净 ΔH 会被伴流抵消,判「无法校验」而不是判超差。
 * 有流股缺焓值(没 Run 过、或能量流 —— 实测天大模型的 0136)→ 记「无法校验」,不是失败。
 """
+
 from __future__ import annotations
 
 # 判定状态
-OK = "ok"            # 通过
-BAD = "bad"          # 超差
+OK = "ok"  # 通过
+BAD = "bad"  # 超差
 NO_DATA = "no_data"  # 无法校验(缺数据)
-SKIP = "skip"        # 按约定不校验
+SKIP = "skip"  # 按约定不校验
 
 STATE_TEXT = {
     OK: "通过",
@@ -40,10 +41,10 @@ STATE_TEXT = {
     SKIP: "不校验",
 }
 
-TOL_REL = 0.01        # 热负荷类:相对 1%
-TOL_ABS = 0.5         # 热负荷类:绝对 0.5 kW
+TOL_REL = 0.01  # 热负荷类:相对 1%
+TOL_ABS = 0.5  # 热负荷类:绝对 0.5 kW
 ZERO_TOL_REL = 0.005  # 绝热类:相对最大焓流的 0.5%
-POWER_LO, POWER_HI = 0.85, 1.05   # 机械功:ΔH/功率 的合理区间(差的是效率)
+POWER_LO, POWER_HI = 0.85, 1.05  # 机械功:ΔH/功率 的合理区间(差的是效率)
 
 # 塔与反应器以前整类跳过,现在都纳入校验(2026-11-14)。SKIP 只留给「将来可能
 # 出现、但目前没有」的类型,保留常量是为了不破坏调用方与既有文档。
@@ -57,8 +58,13 @@ DUTY_TYPES = {"Heater", "Flash2", "Flash3", "HeaterX"}
 
 
 def _result(state: str, dh=None, ref=None, ref_kind: str = "", note: str = "") -> dict:
-    return {"dh_kw": dh, "ref_kw": ref, "ref_kind": ref_kind,
-            "balance_state": state, "balance_note": note}
+    return {
+        "dh_kw": dh,
+        "ref_kw": ref,
+        "ref_kind": ref_kind,
+        "balance_state": state,
+        "balance_note": note,
+    }
 
 
 def compute(streams, blocks, connections, stages=None) -> dict[str, dict]:
@@ -104,12 +110,16 @@ def compute(streams, blocks, connections, stages=None) -> dict[str, dict]:
             out[name] = _heatx(block, in_rows, out_rows, h)
             continue
         if btype in COLUMN_TYPES:
-            out[name] = _column(block, dh=sum(h[s] for s in d_out) - sum(h[s] for s in d_in),
-                                stages=(stages or {}).get(name))
+            out[name] = _column(
+                block,
+                dh=sum(h[s] for s in d_out) - sum(h[s] for s in d_in),
+                stages=(stages or {}).get(name),
+            )
             continue
         if btype in REACT_TYPES:
-            out[name] = _reactor(block, d_in, d_out, h,
-                                 dh=sum(h[s] for s in d_out) - sum(h[s] for s in d_in))
+            out[name] = _reactor(
+                block, d_in, d_out, h, dh=sum(h[s] for s in d_out) - sum(h[s] for s in d_in)
+            )
             continue
 
         dh = sum(h[s] for s in d_out) - sum(h[s] for s in d_in)
@@ -123,8 +133,9 @@ def compute(streams, blocks, connections, stages=None) -> dict[str, dict]:
         duty = block.get("duty_kw")
         if duty is None:
             if btype in DUTY_TYPES:
-                out[name] = _result(NO_DATA, dh=round(dh, 3),
-                                    note="没有热负荷字段(QCALC / QNET 都读不到)")
+                out[name] = _result(
+                    NO_DATA, dh=round(dh, 3), note="没有热负荷字段(QCALC / QNET 都读不到)"
+                )
                 continue
             out[name] = _zero(block, dh, d_in, d_out, h, auto=True)
             continue
@@ -135,10 +146,14 @@ def compute(streams, blocks, connections, stages=None) -> dict[str, dict]:
         diff = dh - duty
         tol = max(abs(duty) * TOL_REL, TOL_ABS)
         ok = abs(diff) <= tol
-        note = (f"ΔH 与 duty 差 {diff:+.2f} kW(容差 {tol:.2f})"
-                if not ok else f"ΔH 与 duty 一致(差 {diff:+.2f} kW)")
-        out[name] = _result(OK if ok else BAD, dh=round(dh, 3),
-                            ref=round(duty, 3), ref_kind="duty", note=note)
+        note = (
+            f"ΔH 与 duty 差 {diff:+.2f} kW(容差 {tol:.2f})"
+            if not ok
+            else f"ΔH 与 duty 一致(差 {diff:+.2f} kW)"
+        )
+        out[name] = _result(
+            OK if ok else BAD, dh=round(dh, 3), ref=round(duty, 3), ref_kind="duty", note=note
+        )
     return out
 
 
@@ -155,10 +170,14 @@ def _heatx(block, in_rows, out_rows, h) -> dict:
     diff = dh - duty
     tol = max(abs(duty) * TOL_REL, TOL_ABS)
     ok = abs(diff) <= tol
-    note = (f"冷侧 ΔH 与 HX_DUTY 差 {diff:+.2f} kW(容差 {tol:.2f})"
-            if not ok else f"冷侧 ΔH 与 HX_DUTY 一致(差 {diff:+.2f} kW)")
-    return _result(OK if ok else BAD, dh=round(dh, 3), ref=round(duty, 3),
-                   ref_kind="hx_cold", note=note)
+    note = (
+        f"冷侧 ΔH 与 HX_DUTY 差 {diff:+.2f} kW(容差 {tol:.2f})"
+        if not ok
+        else f"冷侧 ΔH 与 HX_DUTY 一致(差 {diff:+.2f} kW)"
+    )
+    return _result(
+        OK if ok else BAD, dh=round(dh, 3), ref=round(duty, 3), ref_kind="hx_cold", note=note
+    )
 
 
 def _stage_ends(rows) -> tuple[float | None, float | None]:
@@ -188,8 +207,9 @@ def _column(block, dh: float, stages=None) -> dict:
         cond = block.get("cond_duty_kw")
         reb = block.get("reb_duty_kw")
         if cond is None and reb is None:
-            return _result(NO_DATA, dh=round(dh, 3),
-                           note="没有逐级 duty 也没有冷凝器 / 再沸器负荷,无法校验")
+            return _result(
+                NO_DATA, dh=round(dh, 3), note="没有逐级 duty 也没有冷凝器 / 再沸器负荷,无法校验"
+            )
         ref = (cond or 0.0) + (reb or 0.0)
         first, last = cond, reb
         source = "块字段"
@@ -197,10 +217,13 @@ def _column(block, dh: float, stages=None) -> dict:
     tol = max(abs(ref) * TOL_REL, TOL_ABS)
     diff = dh - ref
     ok = abs(diff) <= tol
-    note = (f"{source}:首级 {_fmt(first)} + 末级 {_fmt(last)} = {ref:.2f} kW,"
-            f"ΔH 与净热负荷差 {diff:+.2f} kW(容差 {tol:.2f})")
-    return _result(OK if ok else BAD, dh=round(dh, 3), ref=round(ref, 3),
-                   ref_kind="stage", note=note)
+    note = (
+        f"{source}:首级 {_fmt(first)} + 末级 {_fmt(last)} = {ref:.2f} kW,"
+        f"ΔH 与净热负荷差 {diff:+.2f} kW(容差 {tol:.2f})"
+    )
+    return _result(
+        OK if ok else BAD, dh=round(dh, 3), ref=round(ref, 3), ref_kind="stage", note=note
+    )
 
 
 def _reactor(block, d_in, d_out, h, dh: float) -> dict:
@@ -223,8 +246,9 @@ def _reactor(block, d_in, d_out, h, dh: float) -> dict:
         tol = max(abs(ref) * TOL_REL, TOL_ABS)
         ok = abs(diff) <= tol
         note = f"{how}:ΔH 与 QCALC 差 {diff:+.2f} kW(容差 {tol:.2f})"
-        return _result(OK if ok else BAD, dh=round(dh, 3), ref=round(ref, 3),
-                       ref_kind="duty", note=note)
+        return _result(
+            OK if ok else BAD, dh=round(dh, 3), ref=round(ref, 3), ref_kind="duty", note=note
+        )
 
     # ① 总焓差够用就直接下结论(绝大多数反应器走这条)
     tol = max(abs(duty) * TOL_REL, TOL_ABS)
@@ -236,10 +260,14 @@ def _reactor(block, d_in, d_out, h, dh: float) -> dict:
         for sout in d_out:
             pair = h[sout] - h[sin]
             if abs(pair - duty) <= tol:
-                return _result(OK, dh=round(dh, 3), ref=round(duty, 3),
-                               ref_kind="duty",
-                               note=f"含换热伴流:{sin} → {sout} 的焓差 "
-                                    f"{pair:+.2f} kW 等于 QCALC,反应热由过程股承担")
+                return _result(
+                    OK,
+                    dh=round(dh, 3),
+                    ref=round(duty, 3),
+                    ref_kind="duty",
+                    note=f"含换热伴流:{sin} → {sout} 的焓差 "
+                    f"{pair:+.2f} kW 等于 QCALC,反应热由过程股承担",
+                )
     return verdict(duty, "总焓差")
 
 
@@ -256,10 +284,14 @@ def _power(block, dh: float) -> dict:
     if ratio is None:
         return _result(NO_DATA, dh=round(dh, 3), note="轴功率为 0,比值无意义")
     ok = POWER_LO <= ratio <= POWER_HI
-    note = (f"ΔH / 功率 = {ratio:.3f}(机械功,差的部分是效率)"
-            if ok else f"ΔH / 功率 = {ratio:.3f},超出 {POWER_LO}–{POWER_HI} 区间")
-    return _result(OK if ok else BAD, dh=round(dh, 3), ref=round(power, 3),
-                   ref_kind="power", note=note)
+    note = (
+        f"ΔH / 功率 = {ratio:.3f}(机械功,差的部分是效率)"
+        if ok
+        else f"ΔH / 功率 = {ratio:.3f},超出 {POWER_LO}–{POWER_HI} 区间"
+    )
+    return _result(
+        OK if ok else BAD, dh=round(dh, 3), ref=round(power, 3), ref_kind="power", note=note
+    )
 
 
 def _zero(block, dh: float, d_in, d_out, h, auto: bool = False) -> dict:
@@ -268,7 +300,7 @@ def _zero(block, dh: float, d_in, d_out, h, auto: bool = False) -> dict:
     tol = max(scale * ZERO_TOL_REL, TOL_ABS)
     ok = abs(dh) <= tol
     prefix = "无热负荷字段,按绝热校验" if auto else "绝热设备"
-    note = (f"{prefix}:ΔH = {dh:+.3f} kW(容差 {tol:.2f} = 最大焓流 {scale:,.0f} kW 的 {ZERO_TOL_REL:.1%})")
+    note = f"{prefix}:ΔH = {dh:+.3f} kW(容差 {tol:.2f} = 最大焓流 {scale:,.0f} kW 的 {ZERO_TOL_REL:.1%})"
     return _result(OK if ok else BAD, dh=round(dh, 3), ref=0.0, ref_kind="zero", note=note)
 
 

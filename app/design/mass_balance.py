@@ -34,13 +34,14 @@
 只给相对误差,不写「守恒失败」这种超出证据的话。误差大 = 疑似漏流股,
 需要人判断;实测数据里没有真漏流股的样本,「标红」路径只由自测夹具验证。
 """
+
 from __future__ import annotations
 
 from app.design import sections as section_rules
 
-PASS = "pass"            # 通过
-FAIL = "fail"            # 超差
-NO_DATA = "no_data"      # 无法校验(缺流股 / 缺流量)
+PASS = "pass"  # 通过
+FAIL = "fail"  # 超差
+NO_DATA = "no_data"  # 无法校验(缺流股 / 缺流量)
 TOO_SMALL = "too_small"  # 流量过小,相对误差无意义
 
 STATE_TEXT = {
@@ -52,8 +53,8 @@ STATE_TEXT = {
 # 报告里标红的只有 FAIL
 BAD_STATES = (FAIL,)
 
-TOL_REL = 0.005                      # 相对容差 0.5%
-MIN_FLOW_KGH = 1.0                   # 小流量豁免线:进、出都低于它就不判定
+TOL_REL = 0.005  # 相对容差 0.5%
+MIN_FLOW_KGH = 1.0  # 小流量豁免线:进、出都低于它就不判定
 
 # 两层共用的字段名(报告列头按这个取)
 ROW_FIELDS = ("mass_flow_kgh", "mole_flow_kmolh", "temperature_c", "pressure_bar")
@@ -114,6 +115,7 @@ def _tally(items) -> dict:
 
 # ---------------------------------------------------------------- 界区衡算
 
+
 def boundary_build(streams, parts) -> dict:
     """按确认后的界区边界做质量守恒。
 
@@ -156,39 +158,50 @@ def boundary_build(streams, parts) -> dict:
         else:
             state, rel = _judge(mass_in, mass_out)
             if state == NO_DATA:
-                note = (f"流股 {_missing_streams(rows_in + rows_out)} 缺质量流量"
-                        if _missing_streams(rows_in + rows_out)
-                        else "进界合计为 0，相对误差无意义")
+                note = (
+                    f"流股 {_missing_streams(rows_in + rows_out)} 缺质量流量"
+                    if _missing_streams(rows_in + rows_out)
+                    else "进界合计为 0，相对误差无意义"
+                )
             elif state == TOO_SMALL:
-                note = (f"进界 {mass_in:,.3f}、出界 {mass_out:,.3f} kg/h 都低于 "
-                        f"{MIN_FLOW_KGH:g} kg/h，相对误差无意义")
+                note = (
+                    f"进界 {mass_in:,.3f}、出界 {mass_out:,.3f} kg/h 都低于 "
+                    f"{MIN_FLOW_KGH:g} kg/h，相对误差无意义"
+                )
             elif state == PASS:
-                note = (f"进界 {mass_in:,.2f} = 出界 {mass_out:,.2f} kg/h，"
-                        f"相对误差 {rel:.4%}（容差 {TOL_REL:.1%}）")
+                note = (
+                    f"进界 {mass_in:,.2f} = 出界 {mass_out:,.2f} kg/h，"
+                    f"相对误差 {rel:.4%}（容差 {TOL_REL:.1%}）"
+                )
             else:
-                note = (f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%}，疑似漏流股或质量不守恒"
-                        f"（进界 {mass_in:,.2f}、出界 {mass_out:,.2f} kg/h）")
+                note = (
+                    f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%}，疑似漏流股或质量不守恒"
+                    f"（进界 {mass_in:,.2f}、出界 {mass_out:,.2f} kg/h）"
+                )
 
-        out.append({
-            "key": key,
-            "label": info.get("label") or section_rules.label_for(key),
-            "in_rows": rows_in,
-            "out_rows": rows_out,
-            "mass_in_kgh": mass_in,
-            "mass_out_kgh": mass_out,
-            "mole_in_kmolh": mole_in,
-            "mole_out_kmolh": mole_out,
-            "rel_err": rel,
-            "state": state,
-            "note": note,
-            "blocks": list(info.get("blocks") or []),
-            "missing": missing,
-        })
+        out.append(
+            {
+                "key": key,
+                "label": info.get("label") or section_rules.label_for(key),
+                "in_rows": rows_in,
+                "out_rows": rows_out,
+                "mass_in_kgh": mass_in,
+                "mass_out_kgh": mass_out,
+                "mole_in_kmolh": mole_in,
+                "mole_out_kmolh": mole_out,
+                "rel_err": rel,
+                "state": state,
+                "note": note,
+                "blocks": list(info.get("blocks") or []),
+                "missing": missing,
+            }
+        )
 
     return {"parts": out, "summary": _tally(out)}
 
 
 # ---------------------------------------------------------------- 逐设备衡算
+
 
 def build(streams, blocks, connections, overrides=None, picked=None) -> dict:
     """逐设备质量守恒,并按工段分组。
@@ -242,33 +255,43 @@ def build(streams, blocks, connections, overrides=None, picked=None) -> dict:
         else:
             state, rel = _judge(mass_in, mass_out)
             if state == NO_DATA:
-                note = (f"流股 {_missing_streams(rows_in + rows_out)} 缺质量流量"
-                        if _missing_streams(rows_in + rows_out)
-                        else "进口合计为 0，相对误差无意义")
+                note = (
+                    f"流股 {_missing_streams(rows_in + rows_out)} 缺质量流量"
+                    if _missing_streams(rows_in + rows_out)
+                    else "进口合计为 0，相对误差无意义"
+                )
             elif state == TOO_SMALL:
-                note = (f"进 {mass_in:,.3f}、出 {mass_out:,.3f} kg/h 都低于 "
-                        f"{MIN_FLOW_KGH:g} kg/h，相对误差无意义")
+                note = (
+                    f"进 {mass_in:,.3f}、出 {mass_out:,.3f} kg/h 都低于 "
+                    f"{MIN_FLOW_KGH:g} kg/h，相对误差无意义"
+                )
             elif state == PASS:
-                note = (f"进 {mass_in:,.2f} = 出 {mass_out:,.2f} kg/h，"
-                        f"相对误差 {rel:.4%}（容差 {TOL_REL:.1%}）")
+                note = (
+                    f"进 {mass_in:,.2f} = 出 {mass_out:,.2f} kg/h，"
+                    f"相对误差 {rel:.4%}（容差 {TOL_REL:.1%}）"
+                )
             else:
-                note = (f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%}，疑似漏流股或质量不守恒"
-                        f"（进 {mass_in:,.2f}、出 {mass_out:,.2f} kg/h）")
+                note = (
+                    f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%}，疑似漏流股或质量不守恒"
+                    f"（进 {mass_in:,.2f}、出 {mass_out:,.2f} kg/h）"
+                )
 
-        devices.append({
-            "block": name,
-            "type": block.get("type") or "",
-            "section": section_rules.resolve(name, in_streams, out_streams, overrides),
-            "in_rows": rows_in,
-            "out_rows": rows_out,
-            "mass_in_kgh": mass_in,
-            "mass_out_kgh": mass_out,
-            "mole_in_kmolh": mole_in,
-            "mole_out_kmolh": mole_out,
-            "rel_err": rel,
-            "state": state,
-            "note": note,
-        })
+        devices.append(
+            {
+                "block": name,
+                "type": block.get("type") or "",
+                "section": section_rules.resolve(name, in_streams, out_streams, overrides),
+                "in_rows": rows_in,
+                "out_rows": rows_out,
+                "mass_in_kgh": mass_in,
+                "mass_out_kgh": mass_out,
+                "mole_in_kmolh": mole_in,
+                "mole_out_kmolh": mole_out,
+                "rel_err": rel,
+                "state": state,
+                "note": note,
+            }
+        )
 
     return {
         "devices": devices,

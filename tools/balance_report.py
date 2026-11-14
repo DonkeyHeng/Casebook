@@ -20,6 +20,7 @@
 `--blocks` 与 `--families` 可以一起用,取并集;都不给就是全部设备。
 家族 key 见 `python -m tools.balance_report --families`(误填会列出来)。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -56,25 +57,27 @@ def _pick(blocks, args) -> list[str] | None:
             picked.add(name)
     for key in (args.families or "").replace(" ", "").split(","):
         if key:
-            picked.update(b["name"] for b in blocks
-                          if block_family.family_of(b.get("type")) == key)
+            picked.update(b["name"] for b in blocks if block_family.family_of(b.get("type")) == key)
     return sorted(picked) if picked else None
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="生成物料与能量衡算报告(.docx)")
-    parser.add_argument("--db", default=os.path.join("data", "cases.db"),
-                        help="工况库路径(默认 data/cases.db)")
+    parser = argparse.ArgumentParser(description="生成物料与能量衡算报告(.docx)")
+    parser.add_argument(
+        "--db", default=os.path.join("data", "cases.db"), help="工况库路径(默认 data/cases.db)"
+    )
     parser.add_argument("--case", type=int, default=0, help="工况 id")
     parser.add_argument("--blocks", default="", help="设备名,逗号分隔")
-    parser.add_argument("--families", default="",
-                        help="设备家族 key,逗号分隔(如 mix,column)")
-    parser.add_argument("--out", default=os.path.join("data", "preview"),
-                        help="输出目录(默认 data/preview)")
-    parser.add_argument("--kind", default="all",
-                        choices=["mass", "energy", "all"],
-                        help="导出哪一册:mass 物料 / energy 能量 / all 合成一本(默认)")
+    parser.add_argument("--families", default="", help="设备家族 key,逗号分隔(如 mix,column)")
+    parser.add_argument(
+        "--out", default=os.path.join("data", "preview"), help="输出目录(默认 data/preview)"
+    )
+    parser.add_argument(
+        "--kind",
+        default="all",
+        choices=["mass", "energy", "all"],
+        help="导出哪一册:mass 物料 / energy 能量 / all 合成一本(默认)",
+    )
     parser.add_argument("--list", action="store_true", help="列出库里的工况")
     args = parser.parse_args(argv)
 
@@ -88,9 +91,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.list:
         print(f"{args.db} 共 {len(cases)} 个工况:")
         for row in cases:
-            print(f"  #{row['id']:<4} {row['model_name'] or ''}  "
-                  f"{row['read_at'] or ''}  流股 {row['stream_count']} / "
-                  f"设备 {row['block_count']}")
+            print(
+                f"  #{row['id']:<4} {row['model_name'] or ''}  "
+                f"{row['read_at'] or ''}  流股 {row['stream_count']} / "
+                f"设备 {row['block_count']}"
+            )
         return 0
 
     if not args.case:
@@ -106,24 +111,22 @@ def main(argv: list[str] | None = None) -> int:
     if picked is not None:
         unknown = [p for p in picked if p not in {b["name"] for b in blocks}]
         if unknown:
-            print(f"! 这些设备名在工况 #{args.case} 里不存在,已忽略:"
-                  f"{'、'.join(unknown)}")
+            print(f"! 这些设备名在工况 #{args.case} 里不存在,已忽略:{'、'.join(unknown)}")
         picked = [p for p in picked if p not in unknown] or None
         labels = [k for k in (args.families or "").replace(" ", "").split(",") if k]
         bad = [k for k in labels if k not in block_family.FAMILY_LABELS]
         if bad:
-            print(f"! 未知家族 key:{'、'.join(bad)};"
-                  f"可用:{'、'.join(block_family.FAMILY_LABELS)}")
+            print(f"! 未知家族 key:{'、'.join(bad)};可用:{'、'.join(block_family.FAMILY_LABELS)}")
 
     loaded = _read_sections(args.case)
     confirmed, overrides, deleted = loaded
     if confirmed or deleted:
         parts = section_rules.merge(
-            section_rules.draft(blocks, [dict(r) for r in
-                                         db.read_connections(conn, args.case)]),
-            confirmed, deleted)
-        print(f"工段边界:{CONFIG_PATH} 里 #%d 的 {len(confirmed)} 个工段已确认"
-              % args.case)
+            section_rules.draft(blocks, [dict(r) for r in db.read_connections(conn, args.case)]),
+            confirmed,
+            deleted,
+        )
+        print(f"工段边界:{CONFIG_PATH} 里 #%d 的 {len(confirmed)} 个工段已确认" % args.case)
     else:
         parts = None
         print("工段边界:未找到人工确认的边界,按设备名段号自动推导")
@@ -132,8 +135,10 @@ def main(argv: list[str] | None = None) -> int:
         data = report_export.build_data(conn, args.case, parts, picked)
         blob = report_export.render(data, args.kind)
     except ImportError as exc:
-        print(f"无法生成: {exc}\n先装依赖:{sys.executable} -m pip install "
-              f"\u0022python-docx>=1.1\u0022")
+        print(
+            f"无法生成: {exc}\n先装依赖:{sys.executable} -m pip install "
+            f"\u0022python-docx>=1.1\u0022"
+        )
         return 3
     except LookupError as exc:
         print(f"无法生成:{exc}")
@@ -150,11 +155,13 @@ def main(argv: list[str] | None = None) -> int:
     n_comp = len(data["wide"]["components"])
     has_mass_comp = any(z["has_mass_comp"] for z in data["wide"]["zones"])
     print(f"已生成({args.kind}):{path}")
-    print(f"  物料表 {n_zone} 个工段 + 全流程,组分 {n_comp} 个"
-          f"({'含质量段' if has_mass_comp else '只有摩尔段,重读工况可补质量段'}),"
-          f"能量表 {len(data['energy']['devices'])} 行,"
-          f"塔负荷 {data['energy']['summary']['tower_count']} 座,"
-          f"{len(blob) / 1024:.0f} KB")
+    print(
+        f"  物料表 {n_zone} 个工段 + 全流程,组分 {n_comp} 个"
+        f"({'含质量段' if has_mass_comp else '只有摩尔段,重读工况可补质量段'}),"
+        f"能量表 {len(data['energy']['devices'])} 行,"
+        f"塔负荷 {data['energy']['summary']['tower_count']} 座,"
+        f"{len(blob) / 1024:.0f} KB"
+    )
     return 0
 
 

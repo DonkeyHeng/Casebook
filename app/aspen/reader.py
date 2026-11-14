@@ -18,6 +18,7 @@
   * `on_phase(阶段名)` —— 阶段切换时调一次(读流股 → 读设备 → 判收敛 …),
     给网页进度条一个"现在在干什么"的粗粒度说明。
 """
+
 from __future__ import annotations
 
 import re
@@ -50,8 +51,8 @@ ENTHALPY_FIELDS = (
 )
 
 # 设备上的标量结果字段(不同设备类型用不同字段)
-BLOCK_DUTY_FIELDS = ("QCALC", "QNET", "HX_DUTY")      # cal/sec
-BLOCK_POWER_FIELDS = ("BRAKE_POWER", "ELEC_POWER")     # kW
+BLOCK_DUTY_FIELDS = ("QCALC", "QNET", "HX_DUTY")  # cal/sec
+BLOCK_POWER_FIELDS = ("BRAKE_POWER", "ELEC_POWER")  # kW
 BLOCK_AREA_FIELDS = ("HX_AREAC", "HX_AREAC2", "HX_AREAP")  # sqm;实测前者常空,后两个有值
 # 塔的冷凝器 / 再沸器负荷(实测 2026-11-14:1 个塔一对,单位 cal/sec,冷凝为负)
 BLOCK_TOWER_DUTY_FIELDS = (("cond_duty_kw", ("COND_DUTY",)), ("reb_duty_kw", ("REB_DUTY",)))
@@ -81,6 +82,7 @@ PhaseHook = Callable[[str], None]
 
 
 # ---------------------------------------------------------------- 底层取值
+
 
 def _unit_of(node) -> str:
     """UnitString 有时是属性、有时是方法,两种都要兼容。"""
@@ -130,6 +132,7 @@ def child_names(node) -> list[str]:
 
 
 # ---------------------------------------------------------------- 收敛状态
+
 
 def read_convergence(session, blocks: list[dict] | None = None) -> dict:
     """读取运行状态(Aspen 的 Run-Status 页)、撕裂流误差、模块级状态。
@@ -195,8 +198,8 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
       * **硬错误**(判 error):模块 status=1、CVSTAT 非 0(收敛块自己出错)、撕裂流超容差
       * **软信号**(最多判 warning):UOSSTAT / PER_ERROR / RSTAT 非 0、模块 status=2
     """
-    hard: list[str] = []      # 真·错误
-    soft: list[str] = []      # 值得提示,但数据仍可用
+    hard: list[str] = []  # 真·错误
+    soft: list[str] = []  # 值得提示,但数据仍可用
 
     text = str(errtxt or "")
     if "completed with errors" in text:
@@ -239,7 +242,8 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
         if isinstance(err, (int, float)) and tol and err > tol:
             soft.append(
                 f"撕裂流 {tear.get('stream')}({tear.get('variable')})误差 {err} > 容差 {tol}"
-                " —— Aspen 控制面板没有报错,请自行核对这条回路的收敛设置")
+                " —— Aspen 控制面板没有报错,请自行核对这条回路的收敛设置"
+            )
 
     reasons = hard + soft
     if hard:
@@ -250,7 +254,7 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
         severity = "ok"
 
     return {
-        "severity": severity,            # ok / warning / error
+        "severity": severity,  # ok / warning / error
         # 有告警的数据仍然可用(只是引用时要注明),所以 converged 只排除 error。
         # 名字沿用 converged(库里已有列),语义是"能不能拿去分析"。
         "converged": severity != "error",
@@ -262,8 +266,10 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
 
 # ---------------------------------------------------------------- 流股
 
-def read_streams(session, progress: Progress | None = None,
-                 include_composition: bool = False) -> list[dict]:
+
+def read_streams(
+    session, progress: Progress | None = None, include_composition: bool = False
+) -> list[dict]:
     ids = child_names(session.find(r"\Data\Streams"))
     total = len(ids)
     out: list[dict] = []
@@ -284,8 +290,9 @@ def read_streams(session, progress: Progress | None = None,
                 raw[leaf] = {"value": value, "unit": unit}
         # 没有 HMX_FLOW、但有质量焓时,用 m·h 现算一个能量流(kW),让 ΔH 口径统一
         if rec.get("enthalpy_flow_kw") is None:
-            rec["enthalpy_flow_kw"] = _flow_kw_from_mass(rec.get("enthalpy_kjkg"),
-                                                        rec.get("mass_flow_kgh"))
+            rec["enthalpy_flow_kw"] = _flow_kw_from_mass(
+                rec.get("enthalpy_kjkg"), rec.get("mass_flow_kgh")
+            )
 
         # 上下游:连接关系的通用来源(设备侧 IN_STRMID 常常不存在)
         upstream, _ = fetch(session, rf"{base}\SOURCE")
@@ -317,7 +324,7 @@ def _enthalpy_leaf(session, base: str, field: str) -> tuple[object, str, str]:
     if not children:
         return (*fetch(session, rf"{base}\{field}"), field)
     child = "MIXED" if "MIXED" in children else (children[0] if len(children) == 1 else None)
-    if child is None:      # 分相目录(LIQ/VAP 多个子节点),没有"混合"值,不猜
+    if child is None:  # 分相目录(LIQ/VAP 多个子节点),没有"混合"值,不猜
         return None, "", field
     leaf = f"{field}\\{child}"
     return (*fetch(session, rf"{base}\{leaf}"), leaf)
@@ -363,8 +370,8 @@ def element_pairs(session, path: str) -> list[tuple[str, object]]:
 
 # ---------------------------------------------------------------- 连接关系
 
-def read_connections(session, streams: list[dict],
-                     blocks: list[dict] | None = None) -> list[dict]:
+
+def read_connections(session, streams: list[dict], blocks: list[dict] | None = None) -> list[dict]:
     """读"设备 ↔ 流股"的连接关系:一行 = (设备, 方向 in/out, 流股)。
 
     为什么不能只用 IN_STRMID
@@ -383,8 +390,16 @@ def read_connections(session, streams: list[dict],
     rows: list[dict] = []
     index: dict[tuple[str, str, str], dict] = {}
 
-    def add(block, direction: str, stream, *, side: str = "", port: str = "",
-            stage=None, source: str = "stream") -> None:
+    def add(
+        block,
+        direction: str,
+        stream,
+        *,
+        side: str = "",
+        port: str = "",
+        stage=None,
+        source: str = "stream",
+    ) -> None:
         block = str(block or "").strip()
         stream = str(stream or "").strip()
         if not block or not stream:
@@ -392,8 +407,16 @@ def read_connections(session, streams: list[dict],
         key = (block, direction, stream)
         row = index.get(key)
         if row is None:
-            row = {"block": block, "direction": direction, "stream": stream,
-                   "side": "", "port": "", "stage": None, "source": source, "seq": 0}
+            row = {
+                "block": block,
+                "direction": direction,
+                "stream": stream,
+                "side": "",
+                "port": "",
+                "stage": None,
+                "source": source,
+                "seq": 0,
+            }
             index[key] = row
             rows.append(row)
         if side and not row["side"]:
@@ -426,8 +449,9 @@ def read_connections(session, streams: list[dict],
                 stream = known.get(text.lower()) or known.get(port.strip().lower())
                 if not stream:
                     continue
-                add(bid, direction, stream,
-                    port=port if _looks_index(port) else "", source="strmid")
+                add(
+                    bid, direction, stream, port=port if _looks_index(port) else "", source="strmid"
+                )
 
     # ---- 3) HeatX 分侧字段 + 塔进料板号
     for bid in block_names:
@@ -458,6 +482,7 @@ def read_connections(session, streams: list[dict],
         row["seq"] = i
     return rows
 
+
 def read_composition(session, stream: str) -> list[dict]:
     """液相 X / 气相 Y 摩尔分数 + 组分质量流量(按组分展开)。
 
@@ -475,12 +500,12 @@ def read_composition(session, stream: str) -> list[dict]:
         x, _ = fetch(session, f"{base}\\X\\{comp}")
         y, _ = fetch(session, f"{base}\\Y\\{comp}")
         mass, _ = fetch(session, f"{base}\\MASSFLOW3\\{comp}")
-        rows.append({"component": comp, "x_liq": x, "y_vap": y,
-                     "mass_flow_kgh": mass})
+        rows.append({"component": comp, "x_liq": x, "y_vap": y, "mass_flow_kgh": mass})
     return rows
 
 
 # ---------------------------------------------------------------- 设备
+
 
 def read_blocks(session, progress: Progress | None = None) -> list[dict]:
     nodes = []
@@ -566,6 +591,7 @@ def _first_converted(session, base: str, fields, quantity: str, raw: dict):
 
 # ---------------------------------------------------------------- 塔板剖面
 
+
 def read_stage_duty_ends(session, blocks: list[dict] | None = None) -> dict[str, list[dict]]:
     """只读塔的首级与末级 duty —— 给焓平衡做塔的对照值,不做完整剖面。
 
@@ -574,8 +600,7 @@ def read_stage_duty_ends(session, blocks: list[dict] | None = None) -> dict[str,
     实测 93 座塔的中间级 duty 全为 0,所以这个口径不丢项。
     """
     out: dict[str, list[dict]] = {}
-    for col in [b for b in (blocks or []) if b.get("type") in
-                ("RadFrac", "Absorber", "Extract")]:
+    for col in [b for b in (blocks or []) if b.get("type") in ("RadFrac", "Absorber", "Extract")]:
         base = rf"\Data\Blocks\{col['name']}\Output"
         names = child_names(session.find(rf"{base}\DUTY"))
         if not names:
@@ -583,8 +608,12 @@ def read_stage_duty_ends(session, blocks: list[dict] | None = None) -> dict[str,
         rows = []
         for stage in (names[0], names[-1]) if len(names) > 1 else (names[0],):
             value, unit = fetch(session, rf"{base}\DUTY\{stage}")
-            rows.append({"stage": int(stage) if stage.isdigit() else stage,
-                         "duty_kw": units.convert("power", value, unit)})
+            rows.append(
+                {
+                    "stage": int(stage) if stage.isdigit() else stage,
+                    "duty_kw": units.convert("power", value, unit),
+                }
+            )
         out[col["name"]] = rows
     return out
 
@@ -630,8 +659,14 @@ def read_column_profiles(session, blocks: list[dict] | None = None) -> list[dict
 # ---------------------------------------------------------------- 结果完整性
 
 # 流股上"有结果才会有值"的字段
-STREAM_VALUE_KEYS = ("temperature_c", "pressure_bar", "mass_flow_kgh",
-                     "mole_flow_kmolh", "vap_frac", "vol_flow_m3h")
+STREAM_VALUE_KEYS = (
+    "temperature_c",
+    "pressure_bar",
+    "mass_flow_kgh",
+    "mole_flow_kmolh",
+    "vap_frac",
+    "vol_flow_m3h",
+)
 
 # 低于这个覆盖率就当"模型没有结果"(实测未运行的模型是 0%)
 EMPTY_COVERAGE = 0.1
@@ -655,7 +690,7 @@ def mark_empty(convergence: dict, coverage: float, run_id=None) -> dict:
     一张全空的表配一个"收敛"的绿勾,比报错更误导人。
     """
     if convergence.get("severity") == "error":
-        return convergence          # 已经有硬错误,不用再叠一层
+        return convergence  # 已经有硬错误,不用再叠一层
     if coverage >= EMPTY_COVERAGE:
         return convergence
 
@@ -670,6 +705,7 @@ def mark_empty(convergence: dict, coverage: float, run_id=None) -> dict:
 
 
 # ---------------------------------------------------------------- 单位诊断
+
 
 def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
     """统计"有原始值、但单位不认识导致换算不出来"的字段。
@@ -686,8 +722,14 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
         for key, field, _quantity in STREAM_FIELDS:
             item = raw.get(field)
             if item and item.get("value") is not None and s.get(key) is None:
-                gaps.append({"scope": "stream", "name": s["name"],
-                             "field": field, "unit": item.get("unit") or ""})
+                gaps.append(
+                    {
+                        "scope": "stream",
+                        "name": s["name"],
+                        "field": field,
+                        "unit": item.get("unit") or "",
+                    }
+                )
         # 焓的原始键是叶子路径(如 HMX\MIXED),所以按前缀找
         for key, field, _quantity in ENTHALPY_FIELDS:
             if s.get(key) is not None:
@@ -695,22 +737,36 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
             for raw_key, item in raw.items():
                 if raw_key == field or raw_key.startswith(field + "\\"):
                     if item and item.get("value") is not None:
-                        gaps.append({"scope": "stream", "name": s["name"],
-                                     "field": raw_key, "unit": item.get("unit") or ""})
+                        gaps.append(
+                            {
+                                "scope": "stream",
+                                "name": s["name"],
+                                "field": raw_key,
+                                "unit": item.get("unit") or "",
+                            }
+                        )
                     break
 
     for b in blocks:
         raw = b.get("raw") or {}
-        for key, fields in (("duty_kw", BLOCK_DUTY_FIELDS),
-                            ("power_kw", BLOCK_POWER_FIELDS),
-                            ("area_m2", BLOCK_AREA_FIELDS)):
+        for key, fields in (
+            ("duty_kw", BLOCK_DUTY_FIELDS),
+            ("power_kw", BLOCK_POWER_FIELDS),
+            ("area_m2", BLOCK_AREA_FIELDS),
+        ):
             if b.get(key) is not None:
                 continue
             for field in fields:
                 item = raw.get(field)
                 if item and item.get("value") is not None:
-                    gaps.append({"scope": "block", "name": b["name"],
-                                 "field": field, "unit": item.get("unit") or ""})
+                    gaps.append(
+                        {
+                            "scope": "block",
+                            "name": b["name"],
+                            "field": field,
+                            "unit": item.get("unit") or "",
+                        }
+                    )
                     break
 
         # 泵的标量字段同样要统计:单位集换了写法(meter → m-kgf/kg、kmol/cum → mol/cc)
@@ -721,8 +777,14 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
                     continue
                 item = raw.get(field)
                 if item and item.get("value") is not None:
-                    gaps.append({"scope": "block", "name": b["name"],
-                                 "field": field, "unit": item.get("unit") or ""})
+                    gaps.append(
+                        {
+                            "scope": "block",
+                            "name": b["name"],
+                            "field": field,
+                            "unit": item.get("unit") or "",
+                        }
+                    )
 
     return {
         "count": len(gaps),
@@ -876,17 +938,24 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
             vol = inlet.get("vol_flow_m3h")
             if mass and vol:
                 rho_from_flow = float(mass) / float(vol)
-        block["rho_kgm3"] = (rho_from_flow if rho_from_flow is not None
-                             else pump_rules.mass_density_kgm3(rho_molar, mw))
+        block["rho_kgm3"] = (
+            rho_from_flow
+            if rho_from_flow is not None
+            else pump_rules.mass_density_kgm3(rho_molar, mw)
+        )
         block["motor_kw"], _note = pump_rules.pick_motor(block.get("power_kw"))
 
 
 # ---------------------------------------------------------------- 总入口
 
-def read_case(session, include_composition: bool = False,
-              include_profiles: bool = True,
-              progress: Progress | None = None,
-              on_phase: PhaseHook | None = None) -> dict:
+
+def read_case(
+    session,
+    include_composition: bool = False,
+    include_profiles: bool = True,
+    progress: Progress | None = None,
+    on_phase: PhaseHook | None = None,
+) -> dict:
     """读一整个工况,返回可直接入库的 dict。"""
     t0 = time.time()
 
@@ -898,8 +967,7 @@ def read_case(session, include_composition: bool = False,
                 pass  # 进度回调出错不能连累读取
 
     phase("读取流股")
-    streams = read_streams(session, progress=progress,
-                           include_composition=include_composition)
+    streams = read_streams(session, progress=progress, include_composition=include_composition)
     phase("读取设备")
     blocks = read_blocks(session, progress=progress)
     # 收敛判定要用到模块级状态,所以必须放在 blocks 之后
@@ -929,8 +997,8 @@ def read_case(session, include_composition: bool = False,
     return {
         "model": {
             "path": session.model_path,
-            "name": _model_name(session.model_path),   # 文件名,不是 COM 服务名
-            "server": _doc_name(session),               # 'Aspen Plus 41.0 OLE 服务'
+            "name": _model_name(session.model_path),  # 文件名,不是 COM 服务名
+            "server": _doc_name(session),  # 'Aspen Plus 41.0 OLE 服务'
             "process_id": session.process_id,
             "read_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         },

@@ -35,6 +35,7 @@ Explorer 走那条"从 .lnk 的 IconLocation 取图标"的路径时失败。
 
 结论:**桌面快捷方式必须指向项目目录之外的副本**,所以这个脚本会顺手部署一份。
 """
+
 from __future__ import annotations
 
 import os
@@ -52,9 +53,7 @@ from PIL import Image
 SIZES = [16, 24, 32, 48, 64, 128]
 
 # 桌面快捷方式用这份副本(项目目录里那份只给网页 favicon 用)
-DEPLOY_DIR = os.path.join(
-    os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Casebook"
-)
+DEPLOY_DIR = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "Casebook")
 
 
 def load_and_cut(path: str) -> Image.Image:
@@ -95,7 +94,7 @@ def load_and_cut(path: str) -> Image.Image:
             elif d2 >= r_out * r_out:
                 px[x, y] = 0
             else:
-                d = d2 ** 0.5
+                d = d2**0.5
                 px[x, y] = int(255 * (r_out - d) / (r_out - r_in))
 
     im = im.convert("RGBA")
@@ -116,15 +115,15 @@ def _dib_entry(img: Image.Image) -> bytes:
     mask = bytearray()
     mask_row_bytes = ((w + 31) // 32) * 4
 
-    for y in range(h - 1, -1, -1):          # 自下而上
+    for y in range(h - 1, -1, -1):  # 自下而上
         row = bytearray()
         bits = bytearray()
         cur = 0
         for x in range(w):
             r, g, b, a = px[x, y]
-            row += bytes((b, g, r, a))      # BGRA
+            row += bytes((b, g, r, a))  # BGRA
             if a == 0:
-                cur |= 0x80 >> (x % 8)      # 全透明 → 掩码置 1
+                cur |= 0x80 >> (x % 8)  # 全透明 → 掩码置 1
             if x % 8 == 7:
                 bits.append(cur)
                 cur = 0
@@ -136,12 +135,17 @@ def _dib_entry(img: Image.Image) -> bytes:
 
     header = struct.pack(
         "<IiiHHIIiiII",
-        40,            # biSize
-        w, h * 2,      # biWidth / biHeight(XOR + AND 两张图叠起来)
-        1, 32,         # biPlanes / biBitCount
-        0,             # biCompression = BI_RGB
+        40,  # biSize
+        w,
+        h * 2,  # biWidth / biHeight(XOR + AND 两张图叠起来)
+        1,
+        32,  # biPlanes / biBitCount
+        0,  # biCompression = BI_RGB
         len(xor) + len(mask),
-        0, 0, 0, 0,
+        0,
+        0,
+        0,
+        0,
     )
     return header + bytes(xor) + bytes(mask)
 
@@ -151,15 +155,19 @@ def save_ico(images: list[Image.Image], dst: str) -> None:
     blobs = [_dib_entry(im) for im in images]
     count = len(blobs)
     offset = 6 + 16 * count
-    out = bytearray(struct.pack("<HHH", 0, 1, count))   # reserved / type=1(icon) / 条目数
+    out = bytearray(struct.pack("<HHH", 0, 1, count))  # reserved / type=1(icon) / 条目数
     for im, blob in zip(images, blobs):
         w, h = im.size
         out += struct.pack(
             "<BBBBHHII",
-            w % 256, h % 256,   # 256 要写成 0
-            0, 0,               # 调色板数 / 保留
-            1, 32,              # planes / bpp
-            len(blob), offset,
+            w % 256,
+            h % 256,  # 256 要写成 0
+            0,
+            0,  # 调色板数 / 保留
+            1,
+            32,  # planes / bpp
+            len(blob),
+            offset,
         )
         offset += len(blob)
     for blob in blobs:

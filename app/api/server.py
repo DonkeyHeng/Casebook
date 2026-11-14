@@ -29,6 +29,7 @@
   * 只读:除了"读工况"和"写这次的快照",不碰用户的模型
   * 每个请求单独开库,避免多线程共享连接
 """
+
 from __future__ import annotations
 
 import argparse
@@ -170,17 +171,20 @@ def _pipe_table_status() -> dict:
 
     stress_grades = sorted(pipe_data.ALLOWABLE_STRESS)
     return {
-        "dn_to_od": {"loaded": bool(pipe_data.DN_TO_OD), "count": len(pipe_data.DN_TO_OD),
-                     "verified": sorted(pipe_data.DN_OD_VERIFIED)},
-        "od_to_walls": {"loaded": bool(pipe_data.OD_TO_WALLS),
-                        "count": len(pipe_data.OD_TO_WALLS)},
-        "stress": {"loaded": bool(pipe_data.ALLOWABLE_STRESS),
-                   "grades": stress_grades,
-                   "count": sum(len(v) for v in pipe_data.ALLOWABLE_STRESS.values())},
+        "dn_to_od": {
+            "loaded": bool(pipe_data.DN_TO_OD),
+            "count": len(pipe_data.DN_TO_OD),
+            "verified": sorted(pipe_data.DN_OD_VERIFIED),
+        },
+        "od_to_walls": {"loaded": bool(pipe_data.OD_TO_WALLS), "count": len(pipe_data.OD_TO_WALLS)},
+        "stress": {
+            "loaded": bool(pipe_data.ALLOWABLE_STRESS),
+            "grades": stress_grades,
+            "count": sum(len(v) for v in pipe_data.ALLOWABLE_STRESS.values()),
+        },
         # 管道等级表:不填也能跑 —— 全部流股按页面上的默认材质
         "piping_class": pipe_data.piping_class_status(),
-        "ready": bool(pipe_data.DN_TO_OD and pipe_data.ALLOWABLE_STRESS
-                      and pipe_data.OD_TO_WALLS),
+        "ready": bool(pipe_data.DN_TO_OD and pipe_data.ALLOWABLE_STRESS and pipe_data.OD_TO_WALLS),
     }
 
 
@@ -301,8 +305,7 @@ class Handler(BaseHTTPRequestHandler):
                 from app.design import pipe_data
 
                 ok, errors = pipe_data.save_piping_classes(self._read_json_body())
-                payload = {"ok": ok, "errors": errors,
-                           "status": pipe_data.piping_class_status()}
+                payload = {"ok": ok, "errors": errors, "status": pipe_data.piping_class_status()}
                 self._json(payload, 200 if ok else 400)
                 return
             if path == "/api/pipe-standards":
@@ -310,10 +313,15 @@ class Handler(BaseHTTPRequestHandler):
                 from app.design import pipe_data
 
                 ok, errors, files = pipe_data.import_standards(
-                    self._read_json_body(STANDARDS_BODY_LIMIT))
-                payload = {"ok": ok, "errors": errors,
-                           "dir": files["dir"], "files": files["files"],
-                           "status": _pipe_table_status()}
+                    self._read_json_body(STANDARDS_BODY_LIMIT)
+                )
+                payload = {
+                    "ok": ok,
+                    "errors": errors,
+                    "dir": files["dir"],
+                    "files": files["files"],
+                    "status": _pipe_table_status(),
+                }
                 if ok:
                     payload["loaded"] = {
                         "od_to_walls": len(pipe_data.OD_TO_WALLS),
@@ -387,8 +395,15 @@ class Handler(BaseHTTPRequestHandler):
                 return
         finally:
             conn.close()
-        self._json({"ok": True, "case_id": case_id, "block": block, "pv_bar": pv,
-                    "pv_source": "manual" if pv is not None else None})
+        self._json(
+            {
+                "ok": True,
+                "case_id": case_id,
+                "block": block,
+                "pv_bar": pv,
+                "pv_source": "manual" if pv is not None else None,
+            }
+        )
 
     def _inherit_pump_pv(self, raw_id: str) -> None:
         """把同一模型更早工况填过的 p_v 按位号沿用过来(只填空行,不覆盖手填值)。"""
@@ -426,8 +441,10 @@ class Handler(BaseHTTPRequestHandler):
                 from app.design import pipe_data
 
                 ok, errors = pipe_data.save_piping_classes({"rules": [], "default": None})
-                self._json({"ok": ok, "errors": errors,
-                            "status": pipe_data.piping_class_status()}, 200 if ok else 400)
+                self._json(
+                    {"ok": ok, "errors": errors, "status": pipe_data.piping_class_status()},
+                    200 if ok else 400,
+                )
                 return
             self._error("未知接口", 404)
         except BrokenPipeError:
@@ -449,13 +466,15 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
             removed = db.delete_case(conn, case_id)
-            self._json({
-                "ok": True,
-                "deleted": case_id,
-                "model_name": case["model_name"],
-                "read_at": case["read_at"],
-                "removed": removed,
-            })
+            self._json(
+                {
+                    "ok": True,
+                    "deleted": case_id,
+                    "model_name": case["model_name"],
+                    "read_at": case["read_at"],
+                    "removed": removed,
+                }
+            )
         finally:
             conn.close()
 
@@ -470,11 +489,14 @@ class Handler(BaseHTTPRequestHandler):
             include_composition=bool(self._read_json_body().get("include_composition")),
         )
         if not started:
-            self._json({
-                "ok": False,
-                "error": "已经有一次读取在进行中,等它结束再点。",
-                "job": snap,
-            }, 409)
+            self._json(
+                {
+                    "ok": False,
+                    "error": "已经有一次读取在进行中,等它结束再点。",
+                    "job": snap,
+                },
+                409,
+            )
             return
         self._json({"ok": True, "job": snap})
 
@@ -499,21 +521,24 @@ class Handler(BaseHTTPRequestHandler):
             from app.design import pipe_data
 
             files = pipe_data.standards_status()
-            self._json({"dir": files["dir"], "files": files["files"],
-                        "status": _pipe_table_status()})
+            self._json(
+                {"dir": files["dir"], "files": files["files"], "status": _pipe_table_status()}
+            )
             return
         if parts == ["api", "piping-classes"]:
             # 管道等级表的当前内容(页面上的「等级表」弹窗读它)
             from app.design import pipe_data
 
-            self._json({
-                "status": pipe_data.piping_class_status(),
-                "rules": pipe_data.PIPING_CLASS_RULES,
-                "default": pipe_data.PIPING_CLASS_DEFAULT,
-                "grades": list(pipe_data.PIPING_CLASS_GRADES),
-                "media": list(pipe_data.PIPING_CLASS_MEDIA),
-                "file": "data/config/piping-classes.json",
-            })
+            self._json(
+                {
+                    "status": pipe_data.piping_class_status(),
+                    "rules": pipe_data.PIPING_CLASS_RULES,
+                    "default": pipe_data.PIPING_CLASS_DEFAULT,
+                    "grades": list(pipe_data.PIPING_CLASS_GRADES),
+                    "media": list(pipe_data.PIPING_CLASS_MEDIA),
+                    "file": "data/config/piping-classes.json",
+                }
+            )
             return
         if parts == ["api", "block-families"]:
             # 设备页的类型页签:类型 → 家族。唯一来源是 app/design/block_family.py
@@ -534,7 +559,7 @@ class Handler(BaseHTTPRequestHandler):
 
         conn = db.open_db(self.db_path)
         try:
-            if len(parts) == 2:                       # /api/cases
+            if len(parts) == 2:  # /api/cases
                 self._json([_row_to_dict(r) for r in db.list_cases(conn)])
                 return
 
@@ -549,13 +574,18 @@ class Handler(BaseHTTPRequestHandler):
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
 
-            if len(parts) == 3:                       # /api/cases/{id}
+            if len(parts) == 3:  # /api/cases/{id}
                 payload = _row_to_dict(case)
                 # 首页仪表盘要用的两项:连接条数、焓平衡四态台数
                 payload["connection_count"] = len(db.read_connections(conn, case_id))
                 payload["balance_summary"] = db.balance_summary(conn, case_id)
-                for key in ("reasons_json", "status_json", "tear_json",
-                            "block_errors", "block_warnings"):
+                for key in (
+                    "reasons_json",
+                    "status_json",
+                    "tear_json",
+                    "block_errors",
+                    "block_warnings",
+                ):
                     if payload.get(key):
                         try:
                             payload[key.replace("_json", "")] = json.loads(payload[key])
@@ -594,10 +624,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts[3] == "impact":
                 # 报错设备的进出口流股 —— 直接从 connections 反查,不用再连 Aspen
-                self._json(impact.build(
-                    [dict(r) for r in db.read_connections(conn, case_id)],
-                    [dict(r) for r in db.read_blocks(conn, case_id)],
-                ))
+                self._json(
+                    impact.build(
+                        [dict(r) for r in db.read_connections(conn, case_id)],
+                        [dict(r) for r in db.read_blocks(conn, case_id)],
+                    )
+                )
                 return
             if parts[3] == "pipes":
                 self._pipes(conn, case_id, query)
@@ -607,8 +639,9 @@ class Handler(BaseHTTPRequestHandler):
                     self._json([_row_to_dict(r) for r in db.list_columns(conn, case_id)])
                 else:
                     block = unquote(parts[4])
-                    self._json([_row_to_dict(r)
-                                for r in db.read_column_stages(conn, case_id, block)])
+                    self._json(
+                        [_row_to_dict(r) for r in db.read_column_stages(conn, case_id, block)]
+                    )
                 return
             if parts[3] == "export.xlsx":
                 self._export(conn, case_id)
@@ -669,15 +702,16 @@ class Handler(BaseHTTPRequestHandler):
 
         material = _q("material") or "S30408"
         if material not in pipe_data.MATERIAL_CODE_BY_GRADE:
-            material = "S30408"      # 认不出的牌号不硬套,退回默认并在页面提示
+            material = "S30408"  # 认不出的牌号不硬套,退回默认并在页面提示
         try:
             options = {
                 "velocity": {
                     "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"], 0.01, 100.0),
                     "gas": _f("gas", pipe_calc.DEFAULT_VELOCITY["gas"], 0.01, 100.0),
                     "two": _f("two", pipe_calc.DEFAULT_VELOCITY["two"], 0.01, 100.0),
-                    "pump_inlet": _f("pump_inlet",
-                                     pipe_calc.DEFAULT_VELOCITY["pump_inlet"], 0.01, 100.0),
+                    "pump_inlet": _f(
+                        "pump_inlet", pipe_calc.DEFAULT_VELOCITY["pump_inlet"], 0.01, 100.0
+                    ),
                 },
                 "pressure_factor": _f("factor", 1.1, 0.5, 10.0),
                 "pressure_floor_mpa": _f("floor", 1.0, 0.0, 100.0),
@@ -696,8 +730,11 @@ class Handler(BaseHTTPRequestHandler):
             result = pipe_calc.build(streams, blocks, conns, options=options)
         except pipe_calc.TablesNotReady as exc:
             # 表没录不是错误,是"还没装数据"——把要做什么一并给出来,别只丢一句报错
-            payload = {"error": str(exc), "tables": _pipe_table_status(),
-                       "setup": pipe_data.setup_guide()}
+            payload = {
+                "error": str(exc),
+                "tables": _pipe_table_status(),
+                "setup": pipe_data.setup_guide(),
+            }
             self._json(payload, 409)
             return
 
@@ -820,17 +857,19 @@ class Handler(BaseHTTPRequestHandler):
         connections = [dict(r) for r in db.read_connections(conn, case_id)]
         draft = section_rules.draft(blocks, connections)
         confirmed, overrides, deleted, error = report_config.load(case_id)
-        self._json({
-            "case_id": case_id,
-            "draft": draft,
-            "confirmed": confirmed,
-            "deleted": deleted,
-            "merged": section_rules.merge(draft, confirmed, deleted),
-            "auto": not confirmed,
-            "device_sections": overrides,
-            "config": report_config.status(),
-            "error": error,
-        })
+        self._json(
+            {
+                "case_id": case_id,
+                "draft": draft,
+                "confirmed": confirmed,
+                "deleted": deleted,
+                "merged": section_rules.merge(draft, confirmed, deleted),
+                "auto": not confirmed,
+                "device_sections": overrides,
+                "config": report_config.status(),
+                "error": error,
+            }
+        )
 
     def _save_sections(self, raw_id: str) -> None:
         """POST /api/cases/{id}/sections —— 保存边界(只写 data/config/,不碰工况库)。"""
@@ -872,8 +911,9 @@ class Handler(BaseHTTPRequestHandler):
         picked.update(n for n in _q("blocks").replace(" ", "").split(",") if n)
         for key in _q("families").replace(" ", "").split(","):
             if key:
-                picked.update(b["name"] for b in blocks
-                              if block_family.family_of(b.get("type")) == key)
+                picked.update(
+                    b["name"] for b in blocks if block_family.family_of(b.get("type")) == key
+                )
         keys = {b["name"] for b in blocks}
         picked_list = sorted(picked & keys) or None
 
@@ -881,18 +921,21 @@ class Handler(BaseHTTPRequestHandler):
         parts = None
         if confirmed or deleted:
             parts = section_rules.merge(
-                section_rules.draft(blocks, connections), confirmed, deleted)
+                section_rules.draft(blocks, connections), confirmed, deleted
+            )
 
         kind = _q("kind") or "all"
         if kind not in report_export.KINDS:
             self._error(f"未知册别:{kind}(可用 {'/'.join(report_export.KIND_KEYS)})", 400)
             return
         try:
-            data, fname = report_export.build_report(conn, case_id, parts, picked_list,
-                                                     kind)
+            data, fname = report_export.build_report(conn, case_id, parts, picked_list, kind)
         except ImportError:
-            self._error('服务器没有安装 python-docx,无法生成 Word 报告。'
-                        '请先 pip install "python-docx>=1.1"', 500)
+            self._error(
+                "服务器没有安装 python-docx,无法生成 Word 报告。"
+                '请先 pip install "python-docx>=1.1"',
+                500,
+            )
             return
         except LookupError:
             self._error(f"没有 id={case_id} 的工况", 404)
@@ -918,12 +961,27 @@ class Handler(BaseHTTPRequestHandler):
             self._error("需要 base 和 other 两个工况 id,例如 /api/compare?base=1&other=2")
             return
 
-        fields = ["temperature_c", "pressure_bar", "mass_flow_kgh",
-                  "mole_flow_kmolh", "vap_frac", "vol_flow_m3h"]
+        fields = [
+            "temperature_c",
+            "pressure_bar",
+            "mass_flow_kgh",
+            "mole_flow_kmolh",
+            "vap_frac",
+            "vol_flow_m3h",
+        ]
         # 设备要比的字段:负荷/功率/级数/顶底温 + ΔH(焓平衡自检) + 泵的流量/扬程
         # ⚠️ 前端 app.js 的 BLOCK_COMPARE_FIELDS 必须同步,否则接口加了界面不显示
-        block_fields = ["duty_kw", "power_kw", "nstage", "top_temp_c", "bottom_temp_c",
-                        "dh_kw", "ref_kw", "head_m", "flow_m3h"]
+        block_fields = [
+            "duty_kw",
+            "power_kw",
+            "nstage",
+            "top_temp_c",
+            "bottom_temp_c",
+            "dh_kw",
+            "ref_kw",
+            "head_m",
+            "flow_m3h",
+        ]
 
         conn = db.open_db(self.db_path)
         try:
@@ -943,17 +1001,23 @@ class Handler(BaseHTTPRequestHandler):
                 for f in fields:
                     va = a.get(f) if a else None
                     vb = b.get(f) if b else None
-                    delta[f] = round(vb - va, 6) if isinstance(va, (int, float)) and isinstance(vb, (int, float)) else None
+                    delta[f] = (
+                        round(vb - va, 6)
+                        if isinstance(va, (int, float)) and isinstance(vb, (int, float))
+                        else None
+                    )
                 if a and b:
                     common += 1
                     if any(d not in (None, 0) for d in delta.values()):
                         changed += 1
-                rows.append({
-                    "name": name,
-                    "base": {f: a.get(f) for f in fields} if a else None,
-                    "other": {f: b.get(f) for f in fields} if b else None,
-                    "delta": delta,
-                })
+                rows.append(
+                    {
+                        "name": name,
+                        "base": {f: a.get(f) for f in fields} if a else None,
+                        "other": {f: b.get(f) for f in fields} if b else None,
+                        "delta": delta,
+                    }
+                )
 
             # ---- 设备 ----
             b_left = {r["name"]: _row_to_dict(r) for r in db.read_blocks(conn, base_id)}
@@ -965,50 +1029,68 @@ class Handler(BaseHTTPRequestHandler):
                 for f in block_fields:
                     va = a.get(f) if a else None
                     vb = b.get(f) if b else None
-                    delta[f] = round(vb - va, 6) if isinstance(va, (int, float)) and isinstance(vb, (int, float)) else None
+                    delta[f] = (
+                        round(vb - va, 6)
+                        if isinstance(va, (int, float)) and isinstance(vb, (int, float))
+                        else None
+                    )
                 status_a = a.get("status") if a else None
                 status_b = b.get("status") if b else None
                 balance_a = a.get("balance_state") if a else None
                 balance_b = b.get("balance_state") if b else None
                 if a and b:
                     b_common += 1
-                    if (any(d not in (None, 0) for d in delta.values())
-                            or status_a != status_b
-                            or balance_a != balance_b):
+                    if (
+                        any(d not in (None, 0) for d in delta.values())
+                        or status_a != status_b
+                        or balance_a != balance_b
+                    ):
                         b_changed += 1
-                block_rows.append({
-                    "name": name,
-                    "type": (a or b or {}).get("type"),
-                    "base": {f: a.get(f) for f in block_fields} if a else None,
-                    "other": {f: b.get(f) for f in block_fields} if b else None,
-                    "delta": delta,
-                    "status": {"base": status_a, "other": status_b},
-                    # 焓平衡判定不能相减,只能并排看:A 通过 → B 超差 才算"变了"
-                    "balance": {"base": balance_a, "other": balance_b},
-                })
+                block_rows.append(
+                    {
+                        "name": name,
+                        "type": (a or b or {}).get("type"),
+                        "base": {f: a.get(f) for f in block_fields} if a else None,
+                        "other": {f: b.get(f) for f in block_fields} if b else None,
+                        "delta": delta,
+                        "status": {"base": status_a, "other": status_b},
+                        # 焓平衡判定不能相减,只能并排看:A 通过 → B 超差 才算"变了"
+                        "balance": {"base": balance_a, "other": balance_b},
+                    }
+                )
 
-            self._json({
-                "base": {"id": base["id"], "model_name": base["model_name"],
-                         "read_at": base["read_at"], "severity": base["severity"]},
-                "other": {"id": other["id"], "model_name": other["model_name"],
-                          "read_at": other["read_at"], "severity": other["severity"]},
-                "fields": fields,
-                "block_fields": block_fields,
-                "streams": rows,
-                "blocks": block_rows,
-                "summary": {
-                    "total": len(rows),
-                    "common": common,
-                    "changed": changed,
-                    "only_base": sorted(set(left) - set(right)),
-                    "only_other": sorted(set(right) - set(left)),
-                    "block_total": len(block_rows),
-                    "block_common": b_common,
-                    "block_changed": b_changed,
-                    "block_only_base": sorted(set(b_left) - set(b_right)),
-                    "block_only_other": sorted(set(b_right) - set(b_left)),
-                },
-            })
+            self._json(
+                {
+                    "base": {
+                        "id": base["id"],
+                        "model_name": base["model_name"],
+                        "read_at": base["read_at"],
+                        "severity": base["severity"],
+                    },
+                    "other": {
+                        "id": other["id"],
+                        "model_name": other["model_name"],
+                        "read_at": other["read_at"],
+                        "severity": other["severity"],
+                    },
+                    "fields": fields,
+                    "block_fields": block_fields,
+                    "streams": rows,
+                    "blocks": block_rows,
+                    "summary": {
+                        "total": len(rows),
+                        "common": common,
+                        "changed": changed,
+                        "only_base": sorted(set(left) - set(right)),
+                        "only_other": sorted(set(right) - set(left)),
+                        "block_total": len(block_rows),
+                        "block_common": b_common,
+                        "block_changed": b_changed,
+                        "block_only_base": sorted(set(b_left) - set(b_right)),
+                        "block_only_other": sorted(set(b_right) - set(b_left)),
+                    },
+                }
+            )
         finally:
             conn.close()
 
@@ -1042,7 +1124,7 @@ class Handler(BaseHTTPRequestHandler):
         full = os.path.realpath(os.path.join(web_root, rel))
         try:
             inside = os.path.commonpath([web_root, full]) == web_root
-        except ValueError:      # 跨盘符时 commonpath 直接抛,当越界处理
+        except ValueError:  # 跨盘符时 commonpath 直接抛,当越界处理
             inside = False
         if not inside:
             self._error("非法路径", 403)
@@ -1056,7 +1138,9 @@ class Handler(BaseHTTPRequestHandler):
         with open(full, "rb") as fh:
             body = fh.read()
         self.send_response(200)
-        self.send_header("Content-Type", f"{ctype}; charset=utf-8" if ctype.startswith("text") else ctype)
+        self.send_header(
+            "Content-Type", f"{ctype}; charset=utf-8" if ctype.startswith("text") else ctype
+        )
         self.send_header("Content-Length", str(len(body)))
         # 本地应用,更新后必须立刻生效:否则浏览器会拿旧 app.js 配新 index.html,
         # 表现为"新按钮点了没反应",非常难排查。
@@ -1071,15 +1155,22 @@ def _stop_after_window_closed(httpd) -> None:
     threading.Thread(target=httpd.shutdown, daemon=True).start()
 
 
-def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
-          open_browser: bool = True, app_window: bool = True) -> None:
+def serve(
+    db_path: str = DEFAULT_DB,
+    host: str = "127.0.0.1",
+    port: int = 8000,
+    open_browser: bool = True,
+    app_window: bool = True,
+) -> None:
     url = f"http://{host}:{port}"
     if host not in ("127.0.0.1", "localhost", "::1"):
         # 安装说明对外承诺「只监听本机」;允许改 host 就意味着把工况数据暴露到网络,
         # 而本服务没有登录、没有加密,必须明确警告而不是悄悄放行。
-        warn = (f"⚠ 正在监听 {host},不是本机回环。\n"
-                "  本服务没有登录与加密,局域网内任何人都能读取工况数据、删除工况。\n"
-                "  只有在你清楚后果时才这样用。")
+        warn = (
+            f"⚠ 正在监听 {host},不是本机回环。\n"
+            "  本服务没有登录与加密,局域网内任何人都能读取工况数据、删除工况。\n"
+            "  只有在你清楚后果时才这样用。"
+        )
         _say(warn)
     handler = type("BoundHandler", (Handler,), {"db_path": db_path})
     # 关掉端口复用:否则同时开两个服务会都"成功"绑上同一端口,请求随机落到旧进程
@@ -1092,11 +1183,13 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
         #   10013 = 系统拒绝监听(端口被排除/被安全软件拦)→ 必须弹窗说明,
         #           否则 pythonw 下双击"毫无反应",用户根本不知道发生了什么
         if getattr(exc, "winerror", None) == 10013:
-            msg = (f"端口 {port} 无法监听(系统拒绝):{exc}\n\n"
-                   "常见原因:该端口落在 Windows 的排除端口段里(Hyper-V / WSL 会保留一些端口),\n"
-                   "或者被安全软件拦截。换个端口即可,例如:\n"
-                   f"    python -m app.api --port {port + 20}\n"
-                   "(桌面快捷方式的「目标」里也要跟着改。)")
+            msg = (
+                f"端口 {port} 无法监听(系统拒绝):{exc}\n\n"
+                "常见原因:该端口落在 Windows 的排除端口段里(Hyper-V / WSL 会保留一些端口),\n"
+                "或者被安全软件拦截。换个端口即可,例如:\n"
+                f"    python -m app.api --port {port + 20}\n"
+                "(桌面快捷方式的「目标」里也要跟着改。)"
+            )
             _say(msg)
             _alert(msg)
             return
@@ -1118,9 +1211,9 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
         _say(f"已用 {mode} 方式打开界面" + (" (恢复上次窗口尺寸)" if state else ""))
         if mode == "app":
             # 记录窗口几何 + 窗口关闭时停服务
-            win.start_watch(WINDOW_KEY, STATE_PATH,
-                            on_closed=lambda: _stop_after_window_closed(httpd),
-                            log=_say)
+            win.start_watch(
+                WINDOW_KEY, STATE_PATH, on_closed=lambda: _stop_after_window_closed(httpd), log=_say
+            )
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -1181,9 +1274,13 @@ def _write_pid_file(port: int) -> None:
     try:
         pid_file = Path(PID_PATH)
         pid_file.parent.mkdir(parents=True, exist_ok=True)
-        pid_file.write_text(json.dumps({"pid": os.getpid(), "port": port,
-                                        "started": time.strftime("%Y-%m-%d %H:%M:%S")},
-                                       ensure_ascii=False), encoding="utf-8")
+        pid_file.write_text(
+            json.dumps(
+                {"pid": os.getpid(), "port": port, "started": time.strftime("%Y-%m-%d %H:%M:%S")},
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
     except OSError as exc:
         _say(f"写 PID 文件失败(不影响服务):{exc}")
 
@@ -1208,8 +1305,10 @@ def _install_sample(db_path: str, alert: bool = True) -> tuple[bool, str]:
     """
     src = paths.resource_root() / "samples" / "case-23-error.db"
     if not src.is_file():
-        msg = (f"这个版本里没有内置示例工况库(缺 {src})。"
-               "可以到仓库的 samples/ 目录拿 case-23-error.db。")
+        msg = (
+            f"这个版本里没有内置示例工况库(缺 {src})。"
+            "可以到仓库的 samples/ 目录拿 case-23-error.db。"
+        )
         _say(msg)
         if alert:
             _alert(msg)
@@ -1263,10 +1362,15 @@ def main() -> int:
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--no-browser", action="store_true", help="启动后不自动打开界面")
-    ap.add_argument("--app", action="store_true", help="用无地址栏的应用窗口打开(默认用普通浏览器标签页)")
+    ap.add_argument(
+        "--app", action="store_true", help="用无地址栏的应用窗口打开(默认用普通浏览器标签页)"
+    )
     ap.add_argument("--log", default=DEFAULT_LOG, help=f"无控制台时的日志文件(默认 {DEFAULT_LOG})")
-    ap.add_argument("--sample", action="store_true",
-                    help="把内置的示例工况库装进当前库(没有 Aspen 也能先看界面;原库会备份成 .bak)")
+    ap.add_argument(
+        "--sample",
+        action="store_true",
+        help="把内置的示例工况库装进当前库(没有 Aspen 也能先看界面;原库会备份成 .bak)",
+    )
     args = ap.parse_args()
 
     _ensure_logging(args.log)
@@ -1275,9 +1379,7 @@ def main() -> int:
         _install_sample(args.db)
     _say("提示:没有 Aspen 时,可以在首页点「载入示例工况」,或用 --sample 启动。")
     try:
-        serve(args.db, args.host, args.port,
-              open_browser=not args.no_browser,
-              app_window=args.app)
+        serve(args.db, args.host, args.port, open_browser=not args.no_browser, app_window=args.app)
     except Exception as exc:
         traceback.print_exc()
         _alert(f"Casebook 启动失败:\n{type(exc).__name__}: {exc}\n\n详情见 {args.log}")
@@ -1338,15 +1440,23 @@ def build_workbook(conn, case_id: int) -> bytes:
         ("运行 ID", case["run_id"]),
         ("运行时间", case["run_date"]),
         ("Aspen 版本", case["aspen_version"]),
-        ("收敛判定", {"ok": "收敛", "warning": "有告警", "error": "有错误"}
-         .get(case["severity"], case["severity"])),
+        (
+            "收敛判定",
+            {"ok": "收敛", "warning": "有告警", "error": "有错误"}.get(
+                case["severity"], case["severity"]
+            ),
+        ),
         ("是否可用于统计对比", "是" if case["converged"] else "否"),
         ("流股数", case["stream_count"]),
         ("设备数", case["block_count"]),
         ("连接关系数", len(connections)),
-        ("焓平衡 通过/超差/无法校验/不校验", "/".join(
-            str(sum(1 for b in blocks if b["balance_state"] == st))
-            for st in ("ok", "bad", "no_data", "skip"))),
+        (
+            "焓平衡 通过/超差/无法校验/不校验",
+            "/".join(
+                str(sum(1 for b in blocks if b["balance_state"] == st))
+                for st in ("ok", "bad", "no_data", "skip")
+            ),
+        ),
         ("结论", "\n".join(f"- {r}" for r in reasons) or "无异常"),
     ]
     for key, value in summary:
@@ -1362,11 +1472,33 @@ def build_workbook(conn, case_id: int) -> bytes:
     ws = wb.create_sheet("流股")
     fill_sheet(
         ws,
-        ["流股", "温度 ℃", "压力 bar", "质量流量 kg/h", "摩尔流量 kmol/h", "汽化率",
-         "体积流量 m³/h", "质量焓 kJ/kg", "摩尔焓 kJ/kmol", "能量流 kW"],
-        [(s["name"], s["temperature_c"], s["pressure_bar"], s["mass_flow_kgh"],
-          s["mole_flow_kmolh"], s["vap_frac"], s["vol_flow_m3h"],
-          s["enthalpy_kjkg"], s["enthalpy_kjkmol"], s["enthalpy_flow_kw"]) for s in streams],
+        [
+            "流股",
+            "温度 ℃",
+            "压力 bar",
+            "质量流量 kg/h",
+            "摩尔流量 kmol/h",
+            "汽化率",
+            "体积流量 m³/h",
+            "质量焓 kJ/kg",
+            "摩尔焓 kJ/kmol",
+            "能量流 kW",
+        ],
+        [
+            (
+                s["name"],
+                s["temperature_c"],
+                s["pressure_bar"],
+                s["mass_flow_kgh"],
+                s["mole_flow_kmolh"],
+                s["vap_frac"],
+                s["vol_flow_m3h"],
+                s["enthalpy_kjkg"],
+                s["enthalpy_kjkmol"],
+                s["enthalpy_flow_kw"],
+            )
+            for s in streams
+        ],
         [18, 12, 12, 16, 18, 10, 16, 16, 18, 16],
     )
 
@@ -1374,16 +1506,51 @@ def build_workbook(conn, case_id: int) -> bytes:
     ws = wb.create_sheet("设备")
     fill_sheet(
         ws,
-        ["设备", "类型", "状态", "热负荷 kW", "功率 kW", "换热面积 m²",
-         "理论级数", "顶温 ℃", "底温 ℃", "ΔH kW", "参照 kW", "焓平衡", "平衡说明", "提示",
-         "进口 ℃", "出口 ℃", "出口汽化率", "冷凝器 kW", "再沸器 kW"],
-        [(b["name"], b["type"], status_text.get(b["status"], ""), b["duty_kw"],
-          b["power_kw"], b["area_m2"], b["nstage"], b["top_temp_c"],
-          b["bottom_temp_c"], b["dh_kw"], b["ref_kw"],
-          balance_text.get(b["balance_state"], ""), b["balance_note"],
-          b["message"], b["inlet_temp_c"], b["outlet_temp_c"], b["outlet_vap_frac"],
-          b["cond_duty_kw"], b["reb_duty_kw"])
-         for b in blocks],
+        [
+            "设备",
+            "类型",
+            "状态",
+            "热负荷 kW",
+            "功率 kW",
+            "换热面积 m²",
+            "理论级数",
+            "顶温 ℃",
+            "底温 ℃",
+            "ΔH kW",
+            "参照 kW",
+            "焓平衡",
+            "平衡说明",
+            "提示",
+            "进口 ℃",
+            "出口 ℃",
+            "出口汽化率",
+            "冷凝器 kW",
+            "再沸器 kW",
+        ],
+        [
+            (
+                b["name"],
+                b["type"],
+                status_text.get(b["status"], ""),
+                b["duty_kw"],
+                b["power_kw"],
+                b["area_m2"],
+                b["nstage"],
+                b["top_temp_c"],
+                b["bottom_temp_c"],
+                b["dh_kw"],
+                b["ref_kw"],
+                balance_text.get(b["balance_state"], ""),
+                b["balance_note"],
+                b["message"],
+                b["inlet_temp_c"],
+                b["outlet_temp_c"],
+                b["outlet_vap_frac"],
+                b["cond_duty_kw"],
+                b["reb_duty_kw"],
+            )
+            for b in blocks
+        ],
         [14, 12, 8, 14, 12, 14, 10, 12, 12, 14, 14, 10, 46, 60, 10, 10, 12, 14, 14],
     )
 
@@ -1399,14 +1566,43 @@ def build_workbook(conn, case_id: int) -> bytes:
         ws = wb.create_sheet("泵")
         fill_sheet(
             ws,
-            ["设备", "状态", "流量 m³/h", "扬程 m", "效率 %", "轴功率 kW",
-             "建议电机 kW", "进口压力 bar", "出口压力 bar", "压升 bar", "密度 kg/m³",
-             "进口汽化率", "p_v bar", "NPSHₐ m", "提示"],
-            [(b["name"], status_text.get(b["status"], ""), b["flow_m3h"], b["head_m"],
-              None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1),
-              b["power_kw"], b["motor_kw"], b["p_in_bar"], b["p_out_bar"], b["dp_bar"],
-              b["rho_kgm3"], b["pump_vap_frac"], b["pv_bar"], pump_npsh(b),
-              b["message"]) for b in pumps],
+            [
+                "设备",
+                "状态",
+                "流量 m³/h",
+                "扬程 m",
+                "效率 %",
+                "轴功率 kW",
+                "建议电机 kW",
+                "进口压力 bar",
+                "出口压力 bar",
+                "压升 bar",
+                "密度 kg/m³",
+                "进口汽化率",
+                "p_v bar",
+                "NPSHₐ m",
+                "提示",
+            ],
+            [
+                (
+                    b["name"],
+                    status_text.get(b["status"], ""),
+                    b["flow_m3h"],
+                    b["head_m"],
+                    None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1),
+                    b["power_kw"],
+                    b["motor_kw"],
+                    b["p_in_bar"],
+                    b["p_out_bar"],
+                    b["dp_bar"],
+                    b["rho_kgm3"],
+                    b["pump_vap_frac"],
+                    b["pv_bar"],
+                    pump_npsh(b),
+                    b["message"],
+                )
+                for b in pumps
+            ],
             [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 12, 10, 12, 50],
         )
 
@@ -1415,9 +1611,18 @@ def build_workbook(conn, case_id: int) -> bytes:
     fill_sheet(
         ws,
         ["设备", "方向", "流股", "分侧", "端口", "进料板", "来源"],
-        [(c["block"], "进" if c["direction"] == "in" else "出", c["stream"],
-          c["side"] or "", c["port"] or "", c["stage"], c["source"] or "")
-         for c in connections],
+        [
+            (
+                c["block"],
+                "进" if c["direction"] == "in" else "出",
+                c["stream"],
+                c["side"] or "",
+                c["port"] or "",
+                c["stage"],
+                c["source"] or "",
+            )
+            for c in connections
+        ],
         [14, 8, 18, 10, 10, 10, 14],
     )
 
@@ -1426,9 +1631,17 @@ def build_workbook(conn, case_id: int) -> bytes:
     stage_rows = []
     for col in columns:
         for st in db.read_column_stages(conn, case_id, col["block"]):
-            stage_rows.append((col["block"], st["stage"], st["temperature_c"],
-                               st["pressure_bar"], st["liq_flow"], st["vap_flow"],
-                               st["duty_kw"]))
+            stage_rows.append(
+                (
+                    col["block"],
+                    st["stage"],
+                    st["temperature_c"],
+                    st["pressure_bar"],
+                    st["liq_flow"],
+                    st["vap_flow"],
+                    st["duty_kw"],
+                )
+            )
     fill_sheet(
         ws,
         ["塔", "级", "温度 ℃", "压力 bar", "液流量 kmol/h", "气流量 kmol/h", "热负荷 kW"],
@@ -1441,8 +1654,9 @@ def build_workbook(conn, case_id: int) -> bytes:
     try:
         from app.design import pipe as pipe_calc
 
-        pres = pipe_calc.build([dict(s) for s in streams], [dict(b) for b in blocks],
-                               [dict(c) for c in connections])
+        pres = pipe_calc.build(
+            [dict(s) for s in streams], [dict(b) for b in blocks], [dict(c) for c in connections]
+        )
         pchecks = pipe_calc.validate(pres["rows"])
         hit_by_stream: dict[str, list[str]] = {}
         for f in pchecks["findings"]:
@@ -1452,18 +1666,40 @@ def build_workbook(conn, case_id: int) -> bytes:
         ws = wb.create_sheet("管道")
         fill_sheet(
             ws,
-            ["流股", "温度 ℃", "压力 MPa(绝)", "状态", "体积流量 m³/h", "公称直径",
-             "壁厚 mm", "管材", "类型", "等级号", "校验", "备注"],
-            [(
-                r["stream"],
-                next((s["temperature_c"] for s in streams if s["name"] == r["stream"]), None),
-                next((s["pressure_bar"] / 10.0 for s in streams
-                      if s["name"] == r["stream"]), None),
-                phase_text.get(r["phase"], r["phase"]),
-                r["vol_flow_m3h"], r["dn"], r["wall_mm"], r["material"], "无缝",
-                r["grade_code"], " ".join(hit_by_stream.get(r["stream"], [])),
-                "; ".join(r["warnings"]),
-            ) for r in pres["rows"]],
+            [
+                "流股",
+                "温度 ℃",
+                "压力 MPa(绝)",
+                "状态",
+                "体积流量 m³/h",
+                "公称直径",
+                "壁厚 mm",
+                "管材",
+                "类型",
+                "等级号",
+                "校验",
+                "备注",
+            ],
+            [
+                (
+                    r["stream"],
+                    next((s["temperature_c"] for s in streams if s["name"] == r["stream"]), None),
+                    next(
+                        (s["pressure_bar"] / 10.0 for s in streams if s["name"] == r["stream"]),
+                        None,
+                    ),
+                    phase_text.get(r["phase"], r["phase"]),
+                    r["vol_flow_m3h"],
+                    r["dn"],
+                    r["wall_mm"],
+                    r["material"],
+                    "无缝",
+                    r["grade_code"],
+                    " ".join(hit_by_stream.get(r["stream"], [])),
+                    "; ".join(r["warnings"]),
+                )
+                for r in pres["rows"]
+            ],
             [16, 12, 16, 12, 18, 12, 10, 12, 8, 12, 12, 52],
         )
         if pres["missing"]:
@@ -1475,24 +1711,56 @@ def build_workbook(conn, case_id: int) -> bytes:
         ws = wb.create_sheet("管道计算书")
         fill_sheet(
             ws,
-            ["流股", "相态", "介质代号", "流速 m/s", "计算内径 mm", "外径 mm",
-             "设计压力 MPa", "表压 MPa", "设计温度 ℃", "许用应力 MPa", "计算壁厚 mm",
-             "腐蚀裕量 mm", "所需壁厚 mm", "最小壁厚 mm", "选定壁厚 mm", "负偏差 mm",
-             "壁厚是否按下限", "等级号"],
-            [(
-                r["stream"], r["phase"], r["medium_code"], r["velocity_ms"],
-                r["inner_d_mm"], r["od_mm"], r["design_pressure_mpa"],
-                r["gauge_pressure_mpa"], r["design_temp_c"], r["stress_mpa"],
-                r["t_calc_mm"], r["c2_mm"], r["t_required_mm"],
-                r.get("min_wall_mm"), r["wall_mm"],
-                (pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
-                 if r["wall_mm"] else None),
-                "是" if r.get("wall_floored") else "",
-                r["grade_code"],
-            ) for r in pres["rows"]],
+            [
+                "流股",
+                "相态",
+                "介质代号",
+                "流速 m/s",
+                "计算内径 mm",
+                "外径 mm",
+                "设计压力 MPa",
+                "表压 MPa",
+                "设计温度 ℃",
+                "许用应力 MPa",
+                "计算壁厚 mm",
+                "腐蚀裕量 mm",
+                "所需壁厚 mm",
+                "最小壁厚 mm",
+                "选定壁厚 mm",
+                "负偏差 mm",
+                "壁厚是否按下限",
+                "等级号",
+            ],
+            [
+                (
+                    r["stream"],
+                    r["phase"],
+                    r["medium_code"],
+                    r["velocity_ms"],
+                    r["inner_d_mm"],
+                    r["od_mm"],
+                    r["design_pressure_mpa"],
+                    r["gauge_pressure_mpa"],
+                    r["design_temp_c"],
+                    r["stress_mpa"],
+                    r["t_calc_mm"],
+                    r["c2_mm"],
+                    r["t_required_mm"],
+                    r.get("min_wall_mm"),
+                    r["wall_mm"],
+                    (
+                        pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
+                        if r["wall_mm"]
+                        else None
+                    ),
+                    "是" if r.get("wall_floored") else "",
+                    r["grade_code"],
+                )
+                for r in pres["rows"]
+            ],
             [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 14, 12, 14, 12],
         )
-    except pipe_calc.TablesNotReady as exc:   # 标准表没录:写明原因与补录办法,不造数
+    except pipe_calc.TablesNotReady as exc:  # 标准表没录:写明原因与补录办法,不造数
         ws = wb.create_sheet("管道")
         ws.append(["管路选型暂时不可用"])
         ws.append([str(exc)])
@@ -1510,7 +1778,7 @@ def build_workbook(conn, case_id: int) -> bytes:
             ws.append([i, step])
         ws.append([])
         ws.append(["详细页码与分页结构:", guide["doc"]])
-    except Exception as exc:                  # 选型出问题不该拖垮整份 Excel
+    except Exception as exc:  # 选型出问题不该拖垮整份 Excel
         ws = wb.create_sheet("管道")
         ws.append(["管路选型出错"])
         ws.append([f"{type(exc).__name__}: {exc}"])

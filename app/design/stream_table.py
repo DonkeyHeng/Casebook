@@ -23,6 +23,7 @@
   老工况这一列是空的(要重读一次工况才有),此时**整段不出**,并让报告注明,
   不用分子量反算 —— 分子量反算等于替用户猜。
 """
+
 from __future__ import annotations
 
 from app.design import mass_balance
@@ -104,8 +105,7 @@ def _column(stream: dict, composition: dict[str, list[dict]], names: list[str]) 
             mass_comp[comp] = None
             continue
         frac = _mole_fraction(row, vap)
-        mole_comp[comp] = (None if (frac is None or mole is None)
-                           else frac * float(mole))
+        mole_comp[comp] = None if (frac is None or mole is None) else frac * float(mole)
         mass_comp[comp] = row.get("mass_flow_kgh")
 
     return {
@@ -168,8 +168,7 @@ def _table(key, label, in_columns, out_columns, names) -> dict:
     }
 
 
-def build(streams, connections, parts, composition=None,
-          hours_per_year: float = 8000.0) -> dict:
+def build(streams, connections, parts, composition=None, hours_per_year: float = 8000.0) -> dict:
     """产出物料平衡宽表(工段 + 全流程)与总结数据。
 
     Args:
@@ -190,17 +189,23 @@ def build(streams, connections, parts, composition=None,
     names = _component_names(composition)
 
     def columns(stream_names):
-        return [_column(stream_map[name], composition, names)
-                for name in stream_names if name in stream_map]
+        return [
+            _column(stream_map[name], composition, names)
+            for name in stream_names
+            if name in stream_map
+        ]
 
     zones = []
     for key, info in (parts or {}).items():
-        zones.append(_table(
-            key, info.get("label") or key,
-            columns(info.get("in") or []),
-            columns(info.get("out") or []),
-            names,
-        ))
+        zones.append(
+            _table(
+                key,
+                info.get("label") or key,
+                columns(info.get("in") or []),
+                columns(info.get("out") or []),
+                names,
+            )
+        )
 
     # 全流程:没有上游 = 外部进料;没有下游 = 出界产物/三废
     src: dict[str, list[str]] = {}
@@ -218,13 +223,16 @@ def build(streams, connections, parts, composition=None,
         rows = []
         for col in columns_:
             mass = col.get("mass_flow_kgh")
-            rows.append({
-                "stream": col["stream"],
-                "phase": col["phase"],
-                "mass_flow_kgh": mass,
-                "t_per_year": None if mass is None
-                else float(mass) * float(hours_per_year) / 1000.0,
-            })
+            rows.append(
+                {
+                    "stream": col["stream"],
+                    "phase": col["phase"],
+                    "mass_flow_kgh": mass,
+                    "t_per_year": None
+                    if mass is None
+                    else float(mass) * float(hours_per_year) / 1000.0,
+                }
+            )
         return rows
 
     return {

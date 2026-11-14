@@ -53,8 +53,11 @@ class Cdp:
         target = None
         while time.time() < deadline:
             try:
-                raw = urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}/json/list", timeout=2).read().decode()
+                raw = (
+                    urllib.request.urlopen(f"http://127.0.0.1:{port}/json/list", timeout=2)
+                    .read()
+                    .decode()
+                )
                 page = next(t for t in json.loads(raw) if t.get("type") == "page")
                 target = page["webSocketDebuggerUrl"]
                 break
@@ -82,7 +85,9 @@ class Cdp:
             if msg.get("method") == "Log.entryAdded":
                 entry = msg["params"]["entry"]
                 if entry.get("level") == "error":
-                    self.errors.append(f"{entry.get('source', 'log')}: {entry.get('text', '')[:200]}")
+                    self.errors.append(
+                        f"{entry.get('source', 'log')}: {entry.get('text', '')[:200]}"
+                    )
                 continue
             if msg.get("id") == self._id:
                 if "error" in msg:
@@ -90,8 +95,7 @@ class Cdp:
                 return msg.get("result", {})
 
     def js(self, expr: str):
-        r = self.cmd("Runtime.evaluate", expression=expr,
-                     returnByValue=True, awaitPromise=True)
+        r = self.cmd("Runtime.evaluate", expression=expr, returnByValue=True, awaitPromise=True)
         if r.get("exceptionDetails"):
             return None
         return r["result"].get("value")
@@ -121,11 +125,21 @@ def run(base: str, out_dir: str, themes: list[str], browser: str, width: int, he
     port = 9333
     profile = tempfile.mkdtemp(prefix="casebook-ui-sweep-")
     proc = subprocess.Popen(
-        [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-         "--no-first-run", "--no-default-browser-check",
-         f"--remote-debugging-port={port}", f"--user-data-dir={profile}",
-         f"--window-size={width},{height}", "about:blank"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        [
+            browser,
+            "--headless=new",
+            "--disable-gpu",
+            "--hide-scrollbars",
+            "--no-first-run",
+            "--no-default-browser-check",
+            f"--remote-debugging-port={port}",
+            f"--user-data-dir={profile}",
+            f"--window-size={width},{height}",
+            "about:blank",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     cdp = None
     try:
         cdp = Cdp(port)
@@ -152,8 +166,11 @@ def run(base: str, out_dir: str, themes: list[str], browser: str, width: int, he
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Casebook 界面回归自检")
     ap.add_argument("--base", default="http://127.0.0.1:8000", help="服务地址")
-    ap.add_argument("--out", default=os.path.join("data", "preview", "ui-check"),
-                    help="截图输出目录(默认 data/preview/ui-check,不入库)")
+    ap.add_argument(
+        "--out",
+        default=os.path.join("data", "preview", "ui-check"),
+        help="截图输出目录(默认 data/preview/ui-check,不入库)",
+    )
     ap.add_argument("--theme", choices=["light", "dark", "both"], default="both")
     ap.add_argument("--browser", default=None, help="浏览器可执行文件路径")
     ap.add_argument("--size", default="1440x900", help="窗口尺寸,如 1024x768")

@@ -143,8 +143,8 @@
 ```python
 # 每个候选边界 x 处,统计该行带内被墨迹覆盖的高度比例
 # 真边界 ≈ 1.00;合并没有线 ≈ 0.00–0.23
-band = gray[int(y0*h)+4:int(y1*h)-4, :]
-frac = max((band[:, int(f*w)+d] < 128).mean() for d in range(-3, 4))
+band = gray[int(y0 * h) + 4 : int(y1 * h) - 4, :]
+frac = max((band[:, int(f * w) + d] < 128).mean() for d in range(-3, 4))
 ```
 
 表 8 实测(数据区 x = 0.225–0.893,四等分边界 0.392 / 0.558 / 0.725):

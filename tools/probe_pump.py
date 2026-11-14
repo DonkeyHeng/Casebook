@@ -18,6 +18,7 @@
     python tools\\probe_pump.py --attach          # 只打印
     python tools\\probe_pump.py --attach --save   # 另存 probe_out/probe_pump.txt|json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -34,8 +35,19 @@ from tools.probe_aspen import Report, attach, find  # noqa: E402
 
 # 蒸气压候选名:Aspen 流股输出里可能叫这些,逐个试,不做假设
 PV_CANDIDATES = (
-    "VAP_PRES", "VAPP", "PVAP", "PV", "VPRES", "VAPOR_PRESSURE",
-    "PSAT", "P_VAP", "VAPPRESS", "B_PRES", "BUBL_PRES", "PBUB", "PRES_VAP",
+    "VAP_PRES",
+    "VAPP",
+    "PVAP",
+    "PV",
+    "VPRES",
+    "VAPOR_PRESSURE",
+    "PSAT",
+    "P_VAP",
+    "VAPPRESS",
+    "B_PRES",
+    "BUBL_PRES",
+    "PBUB",
+    "PRES_VAP",
 )
 
 # 泵块输出里"我们希望有"的节点:只用于给结论,不用于取值。
@@ -55,10 +67,12 @@ WANTED_BLOCK = {
 def _norm(text: str) -> str:
     return str(text).upper().replace("-", "_")
 
+
 INPUT_KEYWORDS = ("HEAD", "CURVE", "EFF", "NPSH", "PRES", "FLOW", "SPEED")
 
 
 # ---------------------------------------------------------------- 树操作
+
 
 def children(node) -> list:
     out = []
@@ -104,12 +118,14 @@ def dump_children(rep: Report, node, limit: int = 200) -> list[list]:
     for k in children(node)[:limit]:
         sub = children(k)
         kv = value_of(k)
-        rows.append([name_of(k), "" if kv is None else kv, unit_of(k),
-                     str(len(sub)) if sub else ""])
+        rows.append(
+            [name_of(k), "" if kv is None else kv, unit_of(k), str(len(sub)) if sub else ""]
+        )
     return rows
 
 
 # ---------------------------------------------------------------- 主流程
+
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -229,8 +245,7 @@ def main() -> int:
     first = pumps[0][0]
     sample_rows = {r[0]: (r[1], r[2]) for r in block_out_rows.get(first, [])}
     for label, cands in WANTED_BLOCK.items():
-        got = sorted(n for n in all_out
-                     if any(_norm(c) in _norm(n) for c in cands))
+        got = sorted(n for n in all_out if any(_norm(c) in _norm(n) for c in cands))
         if not got:
             rep.item(f"{label} 可直接读", "❌ 没有(要走计算)")
             continue

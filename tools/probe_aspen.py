@@ -30,6 +30,7 @@
   python tools/probe_aspen.py --launch model.apw   # 自己开 Aspen(慢,占许可证)
   python tools/probe_aspen.py --attach --run  # [谨慎] 附加后跑一次仿真
 """
+
 from __future__ import annotations
 
 import argparse
@@ -63,6 +64,7 @@ BLOCK_CANDIDATES = [
 
 
 # ---------------------------------------------------------------- 报告收集
+
 
 class Report:
     def __init__(self) -> None:
@@ -183,6 +185,7 @@ def scan_registry(rep: Report) -> list[tuple[str, str]]:
 
 # ---------------------------------------------------------------- 连接
 
+
 def rot_apw_monikers() -> list[str]:
     """ROT 里所有 .apw/.bkp 文件 moniker。
 
@@ -245,6 +248,7 @@ def attach(rep: Report, progids: list[str]):
 
 # ---------------------------------------------------------------- 树操作
 
+
 def find(tree, path: str):
     try:
         return tree.FindNode(path)
@@ -306,6 +310,7 @@ def read(tree, path: str):
 
 
 # ---------------------------------------------------------------- 主体探测
+
 
 def probe_convergence(tree, rep: Report):
     rep.head("3. 收敛 / 运行状态")
@@ -479,7 +484,9 @@ def probe_columns(tree, rep: Report):
             p, pu = read(tree, rf"\Data\Blocks\{bid}\Output\B_PRES\{st}")
             rows.append([st, _fmt(t), tu, _fmt(p), pu])
         rep.table(["级", "温度", "单位", "压力", "单位"], rows)
-        rep.say("      (剖面变量还有:DUTY / LIQ_FLOW / VAP_FLOW / RHO_LIQ / RHO_GAS / MW_LIQ / MW_GAS / X / Y / B_K / MASS_CONC)")
+        rep.say(
+            "      (剖面变量还有:DUTY / LIQ_FLOW / VAP_FLOW / RHO_LIQ / RHO_GAS / MW_LIQ / MW_GAS / X / Y / B_K / MASS_CONC)"
+        )
     if not found_any:
         rep.say("  (没找到塔板剖面节点)")
 
@@ -513,6 +520,7 @@ def _fmt(v) -> str:
 
 
 # ---------------------------------------------------------------- main
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Aspen Plus COM 只读探测")

@@ -18,6 +18,7 @@
     python tools\\probe_blocks.py            # 只打印
     python tools\\probe_blocks.py --save     # 另存 probe_out/probe_blocks.txt|json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -40,8 +41,9 @@ TOWER_KEYS = ("COND", "REB", "DUTY", "QCALC", "QNET", "HEAT")
 HEAT_KEYS = ("AREA", "UA", "UTOT", "U", "DUTY", "TEMP", "SPEC", "MODE")
 
 
-def dump(rep: Report, prefix: str, tree, base: str, keys: tuple[str, ...],
-         show_all: bool = False) -> None:
+def dump(
+    rep: Report, prefix: str, tree, base: str, keys: tuple[str, ...], show_all: bool = False
+) -> None:
     """把 base 下名字命中 keys 的子节点列出来;show_all=True 时全部列名字。"""
     node = find(tree, base)
     if node is None:
@@ -52,8 +54,7 @@ def dump(rep: Report, prefix: str, tree, base: str, keys: tuple[str, ...],
         nm = name_of(k)
         up = nm.upper()
         if show_all or any(key in up for key in keys):
-            rows.append([nm, value_of(k), unit_of(k),
-                         len(children(k)) or ""])
+            rows.append([nm, value_of(k), unit_of(k), len(children(k)) or ""])
     rep.say(f"  [{prefix}] 命中 {len(rows)} 个")
     if rows:
         rep.table(["节点", "值", "单位", "子元素"], rows)
@@ -92,8 +93,14 @@ def main() -> int:
     for t in towers:
         dump(rep, f"{t}\\Output", tree, rf"\Data\Blocks\{t}\Output", TOWER_KEYS)
     if towers:
-        dump(rep, f"{towers[0]}\\Output 全部", tree, rf"\Data\Blocks\{towers[0]}\Output",
-             TOWER_KEYS, show_all=True)
+        dump(
+            rep,
+            f"{towers[0]}\\Output 全部",
+            tree,
+            rf"\Data\Blocks\{towers[0]}\Output",
+            TOWER_KEYS,
+            show_all=True,
+        )
 
     # ---- 换热:面积 / UA / 规格
     rep.head("换热器的面积与传热节点")
@@ -101,14 +108,28 @@ def main() -> int:
         dump(rep, f"{h}\\Output", tree, rf"\Data\Blocks\{h}\Output", HEAT_KEYS)
         dump(rep, f"{h}\\Input", tree, rf"\Data\Blocks\{h}\Input", HEAT_KEYS)
     if heatx:
-        dump(rep, f"{heatx[0]}\\Output 全部", tree, rf"\Data\Blocks\{heatx[0]}\Output",
-             HEAT_KEYS, show_all=True)
-        dump(rep, f"{heatx[0]}\\Input 全部", tree, rf"\Data\Blocks\{heatx[0]}\Input",
-             HEAT_KEYS, show_all=True)
+        dump(
+            rep,
+            f"{heatx[0]}\\Output 全部",
+            tree,
+            rf"\Data\Blocks\{heatx[0]}\Output",
+            HEAT_KEYS,
+            show_all=True,
+        )
+        dump(
+            rep,
+            f"{heatx[0]}\\Input 全部",
+            tree,
+            rf"\Data\Blocks\{heatx[0]}\Input",
+            HEAT_KEYS,
+            show_all=True,
+        )
 
     rep.head("结论提示")
     rep.say("  塔:看上面有没有 COND_DUTY / REB_DUTY 一类节点(带值)。")
-    rep.say("  换热:区分 Output(计算值)与 Input(用户输入值);Input 的面积可以展示,但要标注是输入值。")
+    rep.say(
+        "  换热:区分 Output(计算值)与 Input(用户输入值);Input 的面积可以展示,但要标注是输入值。"
+    )
 
     if a.save:
         _save(rep, a.out)

@@ -32,6 +32,7 @@
 * 结果确定:同一输入永远同一输出(流股名排序),自测才能断言;
 * 不丢工段:草稿推出来的工段与你确认的工段取并集,确认过的以你为准。
 """
+
 from __future__ import annotations
 
 import re
@@ -129,11 +130,14 @@ def group(devices) -> list[dict]:
     def order(key: str):
         return (key == UTILITY_KEY, key)
 
-    return [{"key": key, "label": label_for(key), "devices": buckets[key]}
-            for key in sorted(buckets, key=order)]
+    return [
+        {"key": key, "label": label_for(key), "devices": buckets[key]}
+        for key in sorted(buckets, key=order)
+    ]
 
 
 # ---------------------------------------------------------------- 界区草稿
+
 
 def _ports(connections) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """connections → ({流股: [源设备]}, {流股: [去向设备]})。"""
@@ -168,19 +172,22 @@ def draft(blocks, connections) -> dict:
         name = block["name"]
         part = cache.setdefault(name, section_of_block(name))
         if part:
-            parts.setdefault(part, {"label": label_for(part), "in": [], "out": [],
-                                    "blocks": []})["blocks"].append(name)
+            parts.setdefault(part, {"label": label_for(part), "in": [], "out": [], "blocks": []})[
+                "blocks"
+            ].append(name)
 
     src, dst = _ports(connections)
     for stream in set(src) | set(dst):
         part_in = _first_section(dst.get(stream, ()), cache)
         part_out = _first_section(src.get(stream, ()), cache)
         if part_in and part_in != part_out:
-            parts.setdefault(part_in, {"label": label_for(part_in), "in": [], "out": [],
-                                       "blocks": []})["in"].append(stream)
+            parts.setdefault(
+                part_in, {"label": label_for(part_in), "in": [], "out": [], "blocks": []}
+            )["in"].append(stream)
         if part_out and part_out != part_in:
-            parts.setdefault(part_out, {"label": label_for(part_out), "in": [], "out": [],
-                                        "blocks": []})["out"].append(stream)
+            parts.setdefault(
+                part_out, {"label": label_for(part_out), "in": [], "out": [], "blocks": []}
+            )["out"].append(stream)
 
     for info in parts.values():
         info["in"] = sorted(set(info["in"]))
@@ -203,8 +210,7 @@ def parse_part(raw, key="") -> dict | None:
             return []
         return [_norm(v) for v in value if _norm(v)]
 
-    return {"label": label, "in": names("in"), "out": names("out"),
-            "blocks": names("blocks")}
+    return {"label": label, "in": names("in"), "out": names("out"), "blocks": names("blocks")}
 
 
 def load(data, case_id) -> tuple[dict, dict, list[str]]:
@@ -251,14 +257,22 @@ def merge(draft_parts: dict, confirmed: dict, deleted=()) -> dict:
     确认时把 `in` / `out` 改成空列表是**有效决定**(表示「该工段没有跨界流股」),
     不当成「没配」而回退到草稿 —— 否则用户想把某段清空也做不到。
     """
-    merged = {key: {"label": info["label"], "in": list(info["in"]),
-                    "out": list(info["out"]), "blocks": list(info["blocks"])}
-              for key, info in (draft_parts or {}).items()}
+    merged = {
+        key: {
+            "label": info["label"],
+            "in": list(info["in"]),
+            "out": list(info["out"]),
+            "blocks": list(info["blocks"]),
+        }
+        for key, info in (draft_parts or {}).items()
+    }
     for key, info in (confirmed or {}).items():
-        merged[key] = {"label": info.get("label") or label_for(key),
-                       "in": list(info.get("in") or []),
-                       "out": list(info.get("out") or []),
-                       "blocks": list(info.get("blocks") or [])}
+        merged[key] = {
+            "label": info.get("label") or label_for(key),
+            "in": list(info.get("in") or []),
+            "out": list(info.get("out") or []),
+            "blocks": list(info.get("blocks") or []),
+        }
     for key in deleted or ():
         merged.pop(_norm(key), None)
     return dict(sorted(merged.items()))

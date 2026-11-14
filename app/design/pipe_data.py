@@ -190,7 +190,9 @@ def negative_deviation(
     raise ValueError(f"未知的偏差规则:{rule!r}")
 
 
-def min_wall_for_negative_deviation(t_required_mm: float, grade: str = DEFAULT_WALL_TOL_GRADE) -> float:
+def min_wall_for_negative_deviation(
+    t_required_mm: float, grade: str = DEFAULT_WALL_TOL_GRADE
+) -> float:
     """负偏差只往下做时,反解"至少要选多厚",使 t_required ≤ S·(1 − pct)。
 
     只处理表 9 / 表 8 里"百分比负偏差"的情形(表 8 的 S2-B、S3-C、表 9 全部);
@@ -276,6 +278,7 @@ def minimum_wall(dn: int | None) -> float | None:
             return float(MIN_WALL_BY_DN[upper])
     return None
 
+
 # --------------------------------------------------------------------------
 # 4. 从 data/ 加载标准表(不放进公开仓库)
 # --------------------------------------------------------------------------
@@ -353,8 +356,7 @@ def _fill_staging(staging: Path, base: Path, accepted: dict[str, str]) -> None:
     for spec in STD_FILES:
         name = spec["name"]
         if name in accepted:
-            (staging / name).write_text(accepted[name].lstrip("\ufeff"),
-                                        encoding="utf-8-sig")
+            (staging / name).write_text(accepted[name].lstrip("\ufeff"), encoding="utf-8-sig")
         elif (base / name).is_file():
             shutil.copy2(base / name, staging / name)
 
@@ -369,16 +371,19 @@ def _check_staged(staging: Path, accepted: dict[str, str]) -> list[str]:
     if "t4-17395-table4.csv" in accepted and not sst:
         errors.append("表 4 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
     if "t3-20801-tableB1.csv" in accepted and not stress:
-        errors.append("表 B.1 里没有本工具用到的牌号:「标准」+「牌号」两列要能对上 "
-                      "GB/T 8163、GB/T 6479、GB/T 14976 里的 20# / Q345A / Q345B / "
-                      "S30408 / S31603")
+        errors.append(
+            "表 B.1 里没有本工具用到的牌号:「标准」+「牌号」两列要能对上 "
+            "GB/T 8163、GB/T 6479、GB/T 14976 里的 20# / Q345A / Q345B / "
+            "S30408 / S31603"
+        )
     return errors
+
 
 #: 表 B.1 里每个本项目牌号**取哪一行**(同一牌号有多个标准/尺寸档时)
 _STRESS_PICK = {
-    "20#": ("GB/T 8163", ""),                      # 流体输送用无缝钢管
+    "20#": ("GB/T 8163", ""),  # 流体输送用无缝钢管
     "Q345A": ("GB/T 8163", ""),
-    "Q345B": ("GB/T 6479", "*"),                   # 三个尺寸档取各温度下的最小值
+    "Q345B": ("GB/T 6479", "*"),  # 三个尺寸档取各温度下的最小值
     "S30408": ("GB/T 14976", "06Cr19Ni10(304)"),
     "S31603": ("GB/T 14976", "022Cr17Ni12Mo2(316L)"),
 }
@@ -397,15 +402,21 @@ STRESS_ROWS: list[dict] = []
 
 SETUP_GUIDE: dict = {
     "why": "这些数值来自 GB/T 国家标准原文,受著作权保护,不能随本项目分发,"
-           "所以仓库和安装包里都不带。请从合法渠道取得标准后自行整理一份。",
+    "所以仓库和安装包里都不带。请从合法渠道取得标准后自行整理一份。",
     "dir": "data/preview/std/docx",
     "doc": "docs/pipe-standards-index.md",
     "prompt": "docs/pipe-standards-extract-prompt.md",
     "standards": [
-        {"code": "GB/T 17395-2024", "title": "无缝钢管尺寸、外形、重量及允许偏差",
-         "tables": "表 1(普通钢管)、表 4(不锈钢管);本工具用到 D ≤ 630、S ≤ 25 的部分"},
-        {"code": "GB/T 20801.1-2025", "title": "压力管道规范 工业管道 第 1 部分:总则",
-         "tables": "表 B.1(材料许用应力)"},
+        {
+            "code": "GB/T 17395-2024",
+            "title": "无缝钢管尺寸、外形、重量及允许偏差",
+            "tables": "表 1(普通钢管)、表 4(不锈钢管);本工具用到 D ≤ 630、S ≤ 25 的部分",
+        },
+        {
+            "code": "GB/T 20801.1-2025",
+            "title": "压力管道规范 工业管道 第 1 部分:总则",
+            "tables": "表 B.1(材料许用应力)",
+        },
     ],
     "steps": [
         "取得上面两份标准(正版纸质/电子,或单位订阅的标准库),找到对应表。",
@@ -418,12 +429,21 @@ SETUP_GUIDE: dict = {
         "回到「管道」页,上面的状态会变成「已录」,管道表自动算出来。",
     ],
     "files": [
-        {"name": "t1-17395-table1.csv", "from": "GB/T 17395-2024 表 1",
-         "columns": "D_mm, S_mm(其余列可空)"},
-        {"name": "t4-17395-table4.csv", "from": "GB/T 17395-2024 表 4",
-         "columns": "D_mm, S_mm(其余列可空)"},
-        {"name": "t3-20801-tableB1.csv", "from": "GB/T 20801.1-2025 表 B.1",
-         "columns": "标准, 牌号, 许用应力_20 … 400(每个温度一列)"},
+        {
+            "name": "t1-17395-table1.csv",
+            "from": "GB/T 17395-2024 表 1",
+            "columns": "D_mm, S_mm(其余列可空)",
+        },
+        {
+            "name": "t4-17395-table4.csv",
+            "from": "GB/T 17395-2024 表 4",
+            "columns": "D_mm, S_mm(其余列可空)",
+        },
+        {
+            "name": "t3-20801-tableB1.csv",
+            "from": "GB/T 20801.1-2025 表 B.1",
+            "columns": "标准, 牌号, 许用应力_20 … 400(每个温度一列)",
+        },
     ],
 }
 
@@ -449,7 +469,9 @@ def _parse_size(raw: str | None) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def _load_od_to_walls(dir_: Path | None = None) -> tuple[dict[float, tuple[float, ...]], dict[float, tuple[float, ...]]]:
+def _load_od_to_walls(
+    dir_: Path | None = None,
+) -> tuple[dict[float, tuple[float, ...]], dict[float, tuple[float, ...]]]:
     """表 1(碳钢/普通钢管)与表 4(不锈钢管)→ {外径: 标准壁厚序列}。
 
     `dir_` 只在导入时用到(先往临时目录里试加载);平时读 `data/preview/std/docx`。
@@ -467,8 +489,10 @@ def _load_od_to_walls(dir_: Path | None = None) -> tuple[dict[float, tuple[float
         s = _parse_size(row.get("S_mm"))
         if d and s:
             sst.setdefault(d, []).append(s)
-    return ({d: tuple(sorted(set(v))) for d, v in carbon.items()},
-            {d: tuple(sorted(set(v))) for d, v in sst.items()})
+    return (
+        {d: tuple(sorted(set(v))) for d, v in carbon.items()},
+        {d: tuple(sorted(set(v))) for d, v in sst.items()},
+    )
 
 
 def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
@@ -482,9 +506,12 @@ def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
 
     out: dict[str, dict[float, float]] = {}
     for grade, (std, mark) in _STRESS_PICK.items():
-        matched = [r for r in rows
-                   if r.get("标准") == std
-                   and (mark in ("", "*") or str(r.get("牌号", "")).startswith(mark))]
+        matched = [
+            r
+            for r in rows
+            if r.get("标准") == std
+            and (mark in ("", "*") or str(r.get("牌号", "")).startswith(mark))
+        ]
         if not matched:
             continue
         table: dict[float, float] = {}
@@ -521,8 +548,9 @@ _refresh_active_dir()
 OD_TO_WALLS, OD_TO_WALLS_SST = _load_od_to_walls()
 ALLOWABLE_STRESS: dict[str, dict[float, float]] = _load_stress()
 
-_CURRENT_SNAPSHOT = StandardsSnapshot(OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS,
-                                      str(_CURATED_DIR))
+_CURRENT_SNAPSHOT = StandardsSnapshot(
+    OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS, str(_CURATED_DIR)
+)
 
 
 def tables_snapshot() -> StandardsSnapshot:
@@ -563,7 +591,7 @@ STD_FILES: tuple[dict, ...] = (
         "label": "表 1 · 普通钢管",
         "from": "GB/T 17395-2024 表 1",
         "columns": ["D_mm", "S_mm"],
-        "need": 10,        # 最少数据行;"够不够用"另有临时目录试加载兜着
+        "need": 10,  # 最少数据行;"够不够用"另有临时目录试加载兜着
     },
     {
         "name": "t4-17395-table4.csv",
@@ -606,14 +634,26 @@ def standards_status(dir_: Path | None = None) -> dict:
     files = []
     for spec in STD_FILES:
         path = base / spec["name"]
-        item = {"name": spec["name"], "label": spec["label"], "from": spec["from"],
-                "columns": list(spec["columns"]), "exists": False,
-                "rows": 0, "bytes": 0, "mtime": None}
+        item = {
+            "name": spec["name"],
+            "label": spec["label"],
+            "from": spec["from"],
+            "columns": list(spec["columns"]),
+            "exists": False,
+            "rows": 0,
+            "bytes": 0,
+            "mtime": None,
+        }
         if path.is_file():
             st = path.stat()
-            item.update({"exists": True, "rows": len(_read_csv(path)),
-                         "bytes": st.st_size,
-                         "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime))})
+            item.update(
+                {
+                    "exists": True,
+                    "rows": len(_read_csv(path)),
+                    "bytes": st.st_size,
+                    "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+                }
+            )
         files.append(item)
     return {"dir": _dir_label(base), "files": files}
 
@@ -650,8 +690,10 @@ def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
             pairs += 1
             ods.add(d)
     if pairs < spec["need"]:
-        return [f"能读出「外径 + 壁厚」的只有 {pairs} 行(至少 {spec['need']} 行),"
-                "检查 D_mm / S_mm 是不是数值"], {}
+        return [
+            f"能读出「外径 + 壁厚」的只有 {pairs} 行(至少 {spec['need']} 行),"
+            "检查 D_mm / S_mm 是不是数值"
+        ], {}
     return [], {"rows": len(rows), "sizes": pairs, "od_count": len(ods)}
 
 
@@ -664,18 +706,23 @@ def reload_standards(dir_: Path | None = None) -> dict:
         od, sst = _load_od_to_walls(base)
         stress = _load_stress(base)
     except Exception:
-        with _STANDARDS_LOCK:      # 读坏了保留旧的,别把页面打空
+        with _STANDARDS_LOCK:  # 读坏了保留旧的,别把页面打空
             _apply_snapshot(old)
         raise
     snap = StandardsSnapshot(od, sst, stress, str(base))
     with _STANDARDS_LOCK:
         _apply_snapshot(snap)
-    return {"od_to_walls": len(od), "od_to_walls_sst": len(sst),
-            "stress_grades": sorted(stress), "source": str(base)}
+    return {
+        "od_to_walls": len(od),
+        "od_to_walls_sst": len(sst),
+        "stress_grades": sorted(stress),
+        "source": str(base),
+    }
 
 
-def import_standards(payload, *, target_dir: Path | str | None = None,
-                     reload: bool = True) -> tuple[bool, list[str], dict]:
+def import_standards(
+    payload, *, target_dir: Path | str | None = None, reload: bool = True
+) -> tuple[bool, list[str], dict]:
     """把页面选中的 CSV 写进标准表目录,并(默认)立即重新加载。
 
     `payload` 形如 `{"files": {"t1-17395-table1.csv": "<CSV 文本>", ...}}`,
@@ -693,8 +740,9 @@ def import_standards(payload, *, target_dir: Path | str | None = None,
     for name, text in files.items():
         spec = std_file_spec(str(name))
         if spec is None:
-            errors.append(f"不认识的文件名 {name!r};只收 "
-                          + "、".join(s["name"] for s in STD_FILES))
+            errors.append(
+                f"不认识的文件名 {name!r};只收 " + "、".join(s["name"] for s in STD_FILES)
+            )
             continue
         errs, _info = _validate_std_text(spec, text)
         if errs:
@@ -749,8 +797,9 @@ def import_standards(payload, *, target_dir: Path | str | None = None,
     return True, [], standards_status()
 
 
-def _import_into_dir(base: Path, accepted: dict[str, str], *, reload: bool
-                     ) -> tuple[bool, list[str], dict]:
+def _import_into_dir(
+    base: Path, accepted: dict[str, str], *, reload: bool
+) -> tuple[bool, list[str], dict]:
     """自测路径:直接写进指定目录(不建版本、不动指针)。"""
     staging = base.parent / f".std-import-{os.getpid()}-{time.time_ns()}"
     try:
@@ -811,7 +860,7 @@ def _load_piping_classes() -> tuple[list[dict], dict | None]:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return [], None      # 配置写坏了当没配,不要因此让整个选型挂掉
+        return [], None  # 配置写坏了当没配,不要因此让整个选型挂掉
     rules = [r for r in (data.get("rules") or []) if isinstance(r, dict)]
     default = data.get("default") if isinstance(data.get("default"), dict) else None
     return rules, default
@@ -820,9 +869,9 @@ def _load_piping_classes() -> tuple[list[dict], dict | None]:
 PIPING_CLASS_RULES, PIPING_CLASS_DEFAULT = _load_piping_classes()
 
 
-def resolve_piping_class(stream: str, medium: str,
-                         rules: list[dict] | None = None,
-                         default: dict | None = None) -> dict:
+def resolve_piping_class(
+    stream: str, medium: str, rules: list[dict] | None = None, default: dict | None = None
+) -> dict:
     """按「流股名前缀 + 介质代号」查管道等级。
 
     返回 `{grade, corrosion_mm, note, source}`:
@@ -839,12 +888,19 @@ def resolve_piping_class(stream: str, medium: str,
             continue
         if media and medium not in media:
             continue
-        return {"grade": rule.get("grade"), "corrosion_mm": rule.get("corrosion_mm"),
-                "note": rule.get("note", ""), "source": "rule"}
+        return {
+            "grade": rule.get("grade"),
+            "corrosion_mm": rule.get("corrosion_mm"),
+            "note": rule.get("note", ""),
+            "source": "rule",
+        }
     if use_default:
-        return {"grade": use_default.get("grade"),
-                "corrosion_mm": use_default.get("corrosion_mm"),
-                "note": use_default.get("note", ""), "source": "default"}
+        return {
+            "grade": use_default.get("grade"),
+            "corrosion_mm": use_default.get("corrosion_mm"),
+            "note": use_default.get("note", ""),
+            "source": "default",
+        }
     return {"grade": None, "corrosion_mm": None, "note": "", "source": "none"}
 
 
@@ -914,7 +970,9 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
             continue
         bad_media = [m for m in media if m not in PIPING_CLASS_MEDIA]
         if bad_media:
-            errors.append(f"第 {i} 条:介质代号 {bad_media} 不认识(可用 {'/'.join(PIPING_CLASS_MEDIA)})")
+            errors.append(
+                f"第 {i} 条:介质代号 {bad_media} 不认识(可用 {'/'.join(PIPING_CLASS_MEDIA)})"
+            )
             continue
         c2 = raw.get("corrosion_mm")
         try:
@@ -961,8 +1019,9 @@ def save_piping_classes(payload) -> tuple[bool, list[str]]:
     if "rules" not in payload and "default" not in payload:
         # "没收到内容"不等于"你要清空":删配置文件必须显式提交空表,
         # 否则一个缺 body 或字段拼错的请求就能把等级表清掉。
-        return False, ["请求体里没有 rules / default;清空等级表请显式提交 "
-                       '{"rules": [], "default": null}']
+        return False, [
+            '请求体里没有 rules / default;清空等级表请显式提交 {"rules": [], "default": null}'
+        ]
     cleaned, errors = validate_piping_classes(payload)
     if errors:
         return False, errors
@@ -975,11 +1034,11 @@ def save_piping_classes(payload) -> tuple[bool, list[str]]:
             return False, [f"删除配置失败:{exc}"]
         reload_piping_classes()
         return True, []
-    payload_out = {"_说明": "由管道页的「等级表」按钮生成;删掉本文件等于回到默认材质",
-                   **cleaned}
+    payload_out = {"_说明": "由管道页的「等级表」按钮生成;删掉本文件等于回到默认材质", **cleaned}
     try:
         PIPING_CLASS_PATH.write_text(
-            json.dumps(payload_out, ensure_ascii=False, indent=2), encoding="utf-8")
+            json.dumps(payload_out, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     except OSError as exc:
         return False, [f"写入配置失败:{exc}"]
     reload_piping_classes()

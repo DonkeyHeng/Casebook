@@ -21,6 +21,7 @@
     python tools\\probe_pv.py            # 只打印
     python tools\\probe_pv.py --save     # 另存 probe_out/probe_pv.txt|json
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,9 +46,17 @@ G = 9.80665
 PV_CANDIDATES = (
     "STRM_UPP\\PBUB\\MIXED\\TOTAL",
     "STRM_UPP\\PL\\MIXED\\TOTAL",
-    "PL", "PL\\MIXED", "PL\\LIQUID", "PL\\VAPOR",
-    "PBUB", "PBUB\\MIXED", "PBUB\\LIQUID",
-    "PSAT", "VAP_PRES", "PVAP", "P_VAP",
+    "PL",
+    "PL\\MIXED",
+    "PL\\LIQUID",
+    "PL\\VAPOR",
+    "PBUB",
+    "PBUB\\MIXED",
+    "PBUB\\LIQUID",
+    "PSAT",
+    "VAP_PRES",
+    "PVAP",
+    "P_VAP",
 )
 
 PV_KEYWORDS = ("VAP", "BUB", "PSAT")
@@ -89,8 +98,14 @@ def describe(tree, path: str) -> dict:
     }
 
 
-def walk(node, path: str = "", depth: int = 0, max_depth: int = 3,
-         out: list | None = None, limit: int = 4000) -> list:
+def walk(
+    node,
+    path: str = "",
+    depth: int = 0,
+    max_depth: int = 3,
+    out: list | None = None,
+    limit: int = 4000,
+) -> list:
     """递归遍历子树,收集 (路径, 值, 单位, 子节点数)。目录节点的 Value 常是 0。"""
     if out is None:
         out = []
@@ -133,16 +148,25 @@ def main() -> int:
     rep.head("4. 蒸气压节点解剖(第一个流股)")
     names = [name_of(k) for k in children(find(tree, base0))]
     rep.item("Output 子节点数", len(names))
-    rep.item("名字像蒸气压的", [n for n in names
-                                if n.upper() in ("PL", "PBUB") or any(w in n.upper() for w in PV_KEYWORDS)]
-             or "(无)")
+    rep.item(
+        "名字像蒸气压的",
+        [
+            n
+            for n in names
+            if n.upper() in ("PL", "PBUB") or any(w in n.upper() for w in PV_KEYWORDS)
+        ]
+        or "(无)",
+    )
     for path in PV_CANDIDATES:
         d = describe(tree, rf"{base0}\{path}")
         if not d["exists"]:
             rep.item(path, "不存在")
             continue
-        rep.item(path, f"值={d['value']}  单位={d['unit']!r}  "
-                       f"子节点={d['child_count']}个 {d['children'] if d['children'] else ''}")
+        rep.item(
+            path,
+            f"值={d['value']}  单位={d['unit']!r}  "
+            f"子节点={d['child_count']}个 {d['children'] if d['children'] else ''}",
+        )
 
     # ---- 4b) 按单位/数值扫子树:泡点压力到底藏在哪个节点
     rep.head("4b. 扫 P0101 进口流股 0103 的 Output 子树")
@@ -155,8 +179,11 @@ def main() -> int:
         rep.say(f"    {p}  = {v} {u}" + (f"   ({n} 子节点)" if n else ""))
     # 用户截图里 0103 的「泡点压力」= 0.533831 bar、WATER 分压 = 0.6529 bar
     for t in (0.533831, 0.6529):
-        hit = [r for r in rows
-               if isinstance(r[1], (int, float)) and abs(float(r[1]) - t) <= abs(t) * 2e-3 + 1e-9]
+        hit = [
+            r
+            for r in rows
+            if isinstance(r[1], (int, float)) and abs(float(r[1]) - t) <= abs(t) * 2e-3 + 1e-9
+        ]
         rep.item(f"数值 ≈ {t} 命中", hit[:6] or "(无)")
     prop_data = find(tree, rf"\Data\Streams\{scan_stream}\Output\Prop Data")
     if prop_data is None:
@@ -167,11 +194,17 @@ def main() -> int:
 
     # ---- 5) 单位确认(密度算错会把 NPSHₐ 算歪)
     rep.head("5. 单位确认(第一个流股,带换算)")
-    for field, quantity in (("RES_TEMP", "temperature"), ("RES_PRES", "pressure"),
-                            ("RES_MASSFLOW", "mass_flow"), ("RES_VOLFLOW", "volume_flow"),
-                            ("RES_VFRAC", "fraction")):
+    for field, quantity in (
+        ("RES_TEMP", "temperature"),
+        ("RES_PRES", "pressure"),
+        ("RES_MASSFLOW", "mass_flow"),
+        ("RES_VOLFLOW", "volume_flow"),
+        ("RES_VFRAC", "fraction"),
+    ):
         raw_v, raw_u = val_unit(tree, rf"{base0}\{field}")
-        rep.item(field, f"值={raw_v}  单位={raw_u!r}  → {conv(tree, rf'{base0}\{field}', quantity)}")
+        rep.item(
+            field, f"值={raw_v}  单位={raw_u!r}  → {conv(tree, rf'{base0}\{field}', quantity)}"
+        )
 
     # ---- 6) 泵与进口流股
     pumps: list[str] = []
@@ -186,12 +219,13 @@ def main() -> int:
 
     src_dst: dict[str, tuple[str, str]] = {}
     for sname in streams:
-        src = (val_unit(tree, rf"\Data\Streams\{sname}\Output\SOURCE")[0] or "")
-        dst = (val_unit(tree, rf"\Data\Streams\{sname}\Output\DESTINATION")[0] or "")
+        src = val_unit(tree, rf"\Data\Streams\{sname}\Output\SOURCE")[0] or ""
+        dst = val_unit(tree, rf"\Data\Streams\{sname}\Output\DESTINATION")[0] or ""
         src_dst[sname] = (str(src).strip(), str(dst).strip())
 
-    pump_inlet = {p: [s for s, (_src, dst) in src_dst.items() if dst.lower() == p.lower()]
-                  for p in pumps}
+    pump_inlet = {
+        p: [s for s, (_src, dst) in src_dst.items() if dst.lower() == p.lower()] for p in pumps
+    }
 
     rep.head("6. 泵进口流股的 T / p_in / ρ / 蒸气压候选")
     coverage: dict[str, int] = {}
@@ -212,9 +246,11 @@ def main() -> int:
                 if pv is not None:
                     parts.append(f"{cand}={pv:g}bar")
                     coverage[cand] = coverage.get(cand, 0) + 1
-            rep.item(f"{p} 进口 {sname}",
-                     f"T={temp}  p_in={p_in} bar  ρ={None if rho is None else round(rho)} kg/m³  "
-                     f"vap={vap}  " + ("  ".join(parts) if parts else "❌ 无可用 p_v"))
+            rep.item(
+                f"{p} 进口 {sname}",
+                f"T={temp}  p_in={p_in} bar  ρ={None if rho is None else round(rho)} kg/m³  "
+                f"vap={vap}  " + ("  ".join(parts) if parts else "❌ 无可用 p_v"),
+            )
 
     # ---- 7) NPSHₐ 交叉验算
     rep.head("7. NPSHₐ 交叉验算(同一套换算;[Aspen NPSH-AVAIL] 仅参考)")
@@ -233,8 +269,10 @@ def main() -> int:
                 pv = conv(tree, rf"{base}\{cand}", "pressure")
                 if pv is not None:
                     parts.append(f"{cand}: NPSHₐ={(p_in - pv) * 1e5 / (rho * G):.2f} m")
-            rep.item(f"{p} {sname}",
-                     "  ".join(parts) + (f"   [Aspen={avail} {avail_u}]" if avail is not None else ""))
+            rep.item(
+                f"{p} {sname}",
+                "  ".join(parts) + (f"   [Aspen={avail} {avail_u}]" if avail is not None else ""),
+            )
 
     # ---- 8) 结论
     rep.head("8. 结论")

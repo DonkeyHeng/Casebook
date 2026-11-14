@@ -17,6 +17,7 @@
   5. 是否存在"干板"(液体流量趋近 0)
   6. 馏出量相对进料是否小到可疑
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,6 +36,7 @@ PROFILE_VARS = [
 
 
 # ---------------------------------------------------------------- 读取
+
 
 def _num(session, path):
     v, u = reader.fetch(session, path)
@@ -65,8 +67,21 @@ def read_setup(session, block: str) -> dict:
     """读塔的关键设置与进料信息。"""
     base = rf"\Data\Blocks\{block}"
     setup = {}
-    for key in ("NSTAGE", "FEED_STAGE", "CONDENSER", "COND", "BASIS_RR", "RR_BASIS",
-                "D:F", "D:F_BASIS", "PRES1", "OPT_PRES", "ABSORBER", "SPC_RR", "SPC_D"):
+    for key in (
+        "NSTAGE",
+        "FEED_STAGE",
+        "CONDENSER",
+        "COND",
+        "BASIS_RR",
+        "RR_BASIS",
+        "D:F",
+        "D:F_BASIS",
+        "PRES1",
+        "OPT_PRES",
+        "ABSORBER",
+        "SPC_RR",
+        "SPC_D",
+    ):
         setup[key] = session.value(rf"{base}\Input\{key}")
 
     # 进料流股
@@ -84,18 +99,21 @@ def read_setup(session, block: str) -> dict:
 
     feed_info = []
     for f in feeds:
-        feed_info.append({
-            "name": f,
-            "temperature_c": session.value(rf"\Data\Streams\{f}\Output\RES_TEMP"),
-            "pressure_bar": session.value(rf"\Data\Streams\{f}\Output\RES_PRES"),
-            "mole_flow": session.value(rf"\Data\Streams\{f}\Output\RES_MOLEFLOW"),
-            "vap_frac": session.value(rf"\Data\Streams\{f}\Output\RES_VFRAC"),
-        })
+        feed_info.append(
+            {
+                "name": f,
+                "temperature_c": session.value(rf"\Data\Streams\{f}\Output\RES_TEMP"),
+                "pressure_bar": session.value(rf"\Data\Streams\{f}\Output\RES_PRES"),
+                "mole_flow": session.value(rf"\Data\Streams\{f}\Output\RES_MOLEFLOW"),
+                "vap_frac": session.value(rf"\Data\Streams\{f}\Output\RES_VFRAC"),
+            }
+        )
     setup["feed_info"] = feed_info
     return setup
 
 
 # ---------------------------------------------------------------- 检查
+
 
 def check(profile: dict, setup: dict) -> list[dict]:
     """返回异常标记列表,每条含 level / title / detail。"""
@@ -116,11 +134,13 @@ def check(profile: dict, setup: dict) -> list[dict]:
         # 级号与温度都取越界的那一侧:以前两处都格式化 hot,低温越界会显示成最高温
         bad = hot if hot > 400 else cold
         worst = temps_ok.index(bad) + 1
-        issues.append({
-            "level": "error",
-            "title": f"温度超出物理可能范围(第 {worst} 级 {bad:.0f}℃)",
-            "detail": "低压塔里出现这种温度,说明迭代已经发散,当前剖面数值不可用。",
-        })
+        issues.append(
+            {
+                "level": "error",
+                "title": f"温度超出物理可能范围(第 {worst} 级 {bad:.0f}℃)",
+                "detail": "低压塔里出现这种温度,说明迭代已经发散,当前剖面数值不可用。",
+            }
+        )
 
     # 2. 相邻级温度跳变
     jumps = []
@@ -132,22 +152,26 @@ def check(profile: dict, setup: dict) -> list[dict]:
             jumps.append((i + 1, d))
     if jumps:
         i, d = max(jumps, key=lambda x: x[1])
-        issues.append({
-            "level": "error",
-            "title": f"相邻级温度跳变 {d:.0f}℃(第 {i} 级附近)",
-            "detail": f"共 {len(jumps)} 处跳变 >80℃,正常精馏塔逐板温差通常只有几度。",
-        })
+        issues.append(
+            {
+                "level": "error",
+                "title": f"相邻级温度跳变 {d:.0f}℃(第 {i} 级附近)",
+                "detail": f"共 {len(jumps)} 处跳变 >80℃,正常精馏塔逐板温差通常只有几度。",
+            }
+        )
 
     # 3. 流量震荡
     positive = [x for x in liq_ok if x > 1e-9]
     if positive and min(positive) > 0:
         ratio = max(positive) / min(positive)
         if ratio > 50:
-            issues.append({
-                "level": "error",
-                "title": f"级间液流量震荡 {ratio:.0f} 倍",
-                "detail": f"最大 {max(positive):.0f}、最小 {min(positive):.2f} kmol/hr,不是收敛解。",
-            })
+            issues.append(
+                {
+                    "level": "error",
+                    "title": f"级间液流量震荡 {ratio:.0f} 倍",
+                    "detail": f"最大 {max(positive):.0f}、最小 {min(positive):.2f} kmol/hr,不是收敛解。",
+                }
+            )
 
     # 4. 塔顶回流 vs 规格
     rr = setup.get("BASIS_RR")
@@ -155,38 +179,46 @@ def check(profile: dict, setup: dict) -> list[dict]:
     if isinstance(rr, (int, float)) and isinstance(d, (int, float)) and d > 0 and liq and liq[0]:
         expect = rr * d
         if expect > 0 and abs(liq[0] - expect) / expect > 0.3:
-            issues.append({
-                "level": "error",
-                "title": f"塔顶液流量与规格不符(实际 {liq[0]:.1f} vs 规格推算 {expect:.1f} kmol/hr)",
-                "detail": f"回流比 {rr:g} × 馏出量 {d:g} = {expect:.2f} kmol/hr,实际却读出 {liq[0]:.1f}。"
-                          "说明这次运行没有收敛到规格,读到的是迭代中途值。",
-            })
+            issues.append(
+                {
+                    "level": "error",
+                    "title": f"塔顶液流量与规格不符(实际 {liq[0]:.1f} vs 规格推算 {expect:.1f} kmol/hr)",
+                    "detail": f"回流比 {rr:g} × 馏出量 {d:g} = {expect:.2f} kmol/hr,实际却读出 {liq[0]:.1f}。"
+                    "说明这次运行没有收敛到规格,读到的是迭代中途值。",
+                }
+            )
 
     # 5. 干板
     if liq_ok:
         scale = max(liq_ok) or 1.0
         dry = [i + 1 for i, x in enumerate(liq) if x is not None and x < scale * 1e-3]
         if dry:
-            issues.append({
-                "level": "warning",
-                "title": f"{len(dry)} 块板液体流量接近 0(第 {dry[0]} 级起)",
-                "detail": "对应 Aspen 的 \"COLUMN DRIES UP\" 一类提示。",
-            })
+            issues.append(
+                {
+                    "level": "warning",
+                    "title": f"{len(dry)} 块板液体流量接近 0(第 {dry[0]} 级起)",
+                    "detail": '对应 Aspen 的 "COLUMN DRIES UP" 一类提示。',
+                }
+            )
 
     # 6. 馏出量相对进料过小
-    feed_total = sum(f["mole_flow"] for f in setup["feed_info"]
-                     if isinstance(f.get("mole_flow"), (int, float)))
+    feed_total = sum(
+        f["mole_flow"] for f in setup["feed_info"] if isinstance(f.get("mole_flow"), (int, float))
+    )
     if feed_total and isinstance(d, (int, float)) and 0 < d < feed_total * 0.01:
-        issues.append({
-            "level": "warning",
-            "title": f"馏出量只有进料的 {d / feed_total * 100:.2f}%",
-            "detail": f"进料 {feed_total:.1f} kmol/hr,馏出 {d:g} kmol/hr(仅供参考)。",
-        })
+        issues.append(
+            {
+                "level": "warning",
+                "title": f"馏出量只有进料的 {d / feed_total * 100:.2f}%",
+                "detail": f"进料 {feed_total:.1f} kmol/hr,馏出 {d:g} kmol/hr(仅供参考)。",
+            }
+        )
 
     return issues
 
 
 # ---------------------------------------------------------------- 输出
+
 
 def print_profile(block: str, profile: dict, setup: dict) -> None:
     stages = profile["stages"]
@@ -201,10 +233,14 @@ def print_profile(block: str, profile: dict, setup: dict) -> None:
 
     print(f"  {'级':>3} {'温度℃':>9} {'压力bar':>9} {'液流量':>11} {'气流量':>11} {'热负荷':>11}")
     for i, st in enumerate(stages):
+
         def f(v, w=9, p=2):
             return f"{v:{w}.{p}f}" if isinstance(v, (int, float)) else f"{'-':>{w}}"
-        print(f"  {st:>3} {f(temps[i])} {f(pres[i], 9, 3)} {f(liq[i], 11, 2)} "
-              f"{f(vap[i], 11, 2)} {f(duty[i], 11, 0)}")
+
+        print(
+            f"  {st:>3} {f(temps[i])} {f(pres[i], 9, 3)} {f(liq[i], 11, 2)} "
+            f"{f(vap[i], 11, 2)} {f(duty[i], 11, 0)}"
+        )
     print(f"  单位:液体/气体 {profile['flow_unit']}")
 
 
@@ -213,12 +249,16 @@ def diagnose(session, block: str) -> int:
     profile = read_profile(session, block)
 
     print(f"\n{'=' * 70}")
-    print(f"塔 {block}  冷凝器={setup.get('CONDENSER')}  级数={setup.get('NSTAGE')}  "
-          f"进料级={setup.get('FEED_STAGE')}  塔压={setup.get('PRES1')} bar")
+    print(
+        f"塔 {block}  冷凝器={setup.get('CONDENSER')}  级数={setup.get('NSTAGE')}  "
+        f"进料级={setup.get('FEED_STAGE')}  塔压={setup.get('PRES1')} bar"
+    )
     print(f"  规格:回流比={setup.get('BASIS_RR')}  馏出量 D:F={setup.get('D:F')}")
     for f in setup["feed_info"]:
-        print(f"  进料 {f['name']}: {f['mole_flow']} kmol/hr, {f['temperature_c']} ℃, "
-              f"汽化率 {f['vap_frac']}")
+        print(
+            f"  进料 {f['name']}: {f['mole_flow']} kmol/hr, {f['temperature_c']} ℃, "
+            f"汽化率 {f['vap_frac']}"
+        )
 
     print("\n  逐板剖面:")
     print_profile(block, profile, setup)

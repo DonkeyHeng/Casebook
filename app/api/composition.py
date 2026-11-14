@@ -16,6 +16,7 @@
    模型如果之后重跑过,现在的组成和表里的温度/流量就不是同一次运行的结果,混在一起会算错。
    这种情况下宁可不给(项目一贯的"宁缺勿错"),并告诉用户该怎么办。
 """
+
 from __future__ import annotations
 
 import threading
@@ -32,6 +33,7 @@ class CompositionError(RuntimeError):
 
 # ---------------------------------------------------------------- 公开入口
 
+
 def get(conn, case, stream: str, force: bool = False) -> dict:
     """取一条流股的组成:先看工况库里有没有,没有就去 Aspen 现读并缓存。
 
@@ -47,20 +49,30 @@ def get(conn, case, stream: str, force: bool = False) -> dict:
     if not force:
         cached = db.read_stream_composition(conn, case["id"], stream)
         if cached:
-            return _payload(stream, "case",
-                            [{"component": r["component"],
-                              "x_liq": r["x_liq"], "y_vap": r["y_vap"]} for r in cached],
-                            run_id=case["run_id"])
+            return _payload(
+                stream,
+                "case",
+                [
+                    {"component": r["component"], "x_liq": r["x_liq"], "y_vap": r["y_vap"]}
+                    for r in cached
+                ],
+                run_id=case["run_id"],
+            )
 
     with _lock:
         # 双重检查:等锁的这段时间里,别的请求可能已经读好并写库了
         if not force:
             cached = db.read_stream_composition(conn, case["id"], stream)
             if cached:
-                return _payload(stream, "case",
-                                [{"component": r["component"],
-                                  "x_liq": r["x_liq"], "y_vap": r["y_vap"]} for r in cached],
-                                run_id=case["run_id"])
+                return _payload(
+                    stream,
+                    "case",
+                    [
+                        {"component": r["component"], "x_liq": r["x_liq"], "y_vap": r["y_vap"]}
+                        for r in cached
+                    ],
+                    run_id=case["run_id"],
+                )
 
         rows, run_id = _read_live(case, stream)
         db.save_stream_composition(conn, case["id"], stream, rows)
@@ -69,18 +81,21 @@ def get(conn, case, stream: str, force: bool = False) -> dict:
 
 # ---------------------------------------------------------------- 实际读
 
+
 def _read_live(case, stream: str) -> tuple[list[dict], str]:
     try:
         from app.aspen import connect, reader
     except Exception as exc:  # pragma: no cover - 只有环境坏掉才会进来
         raise CompositionError(
             f"缺少依赖:{type(exc).__name__}: {exc}\n\n"
-            "读取组成需要 pywin32,请先执行:pip install pywin32") from exc
+            "读取组成需要 pywin32,请先执行:pip install pywin32"
+        ) from exc
 
     # 每个 HTTP 请求都在**新线程**里跑,而 COM 是按线程初始化的。
     # 不先初始化就去枚举 ROT,可能拿不到任何对象 —— 表现为"Aspen 明明开着却说没开"。
     try:
         import pythoncom
+
         pythoncom.CoInitialize()
     except Exception:
         pass
@@ -91,13 +106,13 @@ def _read_live(case, stream: str) -> tuple[list[dict], str]:
     try:
         rows = reader.read_composition(session, stream)
     except Exception as exc:
-        raise CompositionError(
-            f"读取流股 {stream} 的组成失败:{type(exc).__name__}: {exc}") from exc
+        raise CompositionError(f"读取流股 {stream} 的组成失败:{type(exc).__name__}: {exc}") from exc
 
     if not rows:
         raise CompositionError(
             f"流股 {stream} 没有读到任何组分。\n\n"
-            "可能原因:该流股的 X / Y 节点为空(纯能量流?),或者模型里没定义组分。")
+            "可能原因:该流股的 X / Y 节点为空(纯能量流?),或者模型里没定义组分。"
+        )
 
     run_id = str(session.value(r"\Data\Results Summary\Run-Status\Output\RUNID") or "")
     return rows, run_id
@@ -114,7 +129,8 @@ def _attach_matching(connect, case):
         raise CompositionError(
             "没有打开着的 Aspen 模型,读不到组成。\n\n"
             "组成是现从 Aspen 读的(不跟着主读取一起存,因为全量读会慢 4 倍)。\n"
-            "要看组成,请先把模型打开:Aspen → File → Open → 这个工况对应的 .apw。")
+            "要看组成,请先把模型打开:Aspen → File → Open → 这个工况对应的 .apw。"
+        )
 
     want = str(case["model_path"] or "")
     norm = lambda p: str(p).replace("/", "\\").strip().lower()  # noqa: E731
@@ -124,7 +140,8 @@ def _attach_matching(connect, case):
         raise CompositionError(
             "现在打开的模型不是这个工况的来源模型,不能把它的组成记到这个工况上。\n\n"
             f"  工况来源:{want}\n  当前打开:\n{opened}\n\n"
-            "请先打开对应的 .apw 再点流股;或者先用当前模型点一次「读取当前工况」。")
+            "请先打开对应的 .apw 再点流股;或者先用当前模型点一次「读取当前工况」。"
+        )
 
     try:
         return connect.attach(match[0])
@@ -146,10 +163,12 @@ def _check_same_run(connect, session, case) -> None:
         f"  这个工况({case['read_at']})的运行 ID:{want}\n"
         f"  当前模型里的运行 ID:{live}\n\n"
         "混在一起会算出错的物料平衡,所以这里不读。\n"
-        "→ 重新点一次「读取当前工况」拿一份新快照,再点流股看组成。")
+        "→ 重新点一次「读取当前工况」拿一份新快照,再点流股看组成。"
+    )
 
 
 # ---------------------------------------------------------------- 组装返回
+
 
 def _payload(stream: str, source: str, rows: list[dict], run_id: str = "") -> dict:
     def total(key: str):
@@ -159,7 +178,7 @@ def _payload(stream: str, source: str, rows: list[dict], run_id: str = "") -> di
 
     return {
         "stream": stream,
-        "source": source,          # case = 工况库里存的;live = 刚从 Aspen 读并已存库
+        "source": source,  # case = 工况库里存的;live = 刚从 Aspen 读并已存库
         "run_id": run_id or "",
         "components": rows,
         "count": len(rows),

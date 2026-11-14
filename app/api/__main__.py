@@ -1,4 +1,5 @@
 """让 `python -m app.api` 可执行。"""
+
 import sys
 
 from app.api.server import main

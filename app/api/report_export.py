@@ -21,6 +21,7 @@
 * 空值**留空**,不写 0 —— 库里 `None` 就是「没读到」,写 0 会被当成真值;
 * 超差行整行浅红底,状态列写「超差」。
 """
+
 from __future__ import annotations
 
 import io
@@ -37,12 +38,27 @@ TITLE = "物料与能量衡算报告"
 # 一册一主题色:物料册冷蓝、能量册暖砖红。黑白打印时靠封面「册别」与章节标题
 # 的文字区分,颜色只是辅助 —— 评委多半会打印出来看。
 KINDS: dict[str, dict] = {
-    "mass": {"title": "物料衡算报告", "book": "物料衡算册",
-             "accent": "1F4E79", "light": "DCE6F1", "zebra": "F7FAFD"},
-    "energy": {"title": "能量衡算报告", "book": "能量衡算册",
-               "accent": "9C3B23", "light": "F7E3DD", "zebra": "FDF8F6"},
-    "all": {"title": "物料与能量衡算报告", "book": "衡算报告",
-            "accent": "1F4E79", "light": "DCE6F1", "zebra": "F7FAFD"},
+    "mass": {
+        "title": "物料衡算报告",
+        "book": "物料衡算册",
+        "accent": "1F4E79",
+        "light": "DCE6F1",
+        "zebra": "F7FAFD",
+    },
+    "energy": {
+        "title": "能量衡算报告",
+        "book": "能量衡算册",
+        "accent": "9C3B23",
+        "light": "F7E3DD",
+        "zebra": "FDF8F6",
+    },
+    "all": {
+        "title": "物料与能量衡算报告",
+        "book": "衡算报告",
+        "accent": "1F4E79",
+        "light": "DCE6F1",
+        "zebra": "F7FAFD",
+    },
 }
 KIND_KEYS = tuple(KINDS)
 _ACTIVE_KIND = KINDS["all"]
@@ -50,6 +66,7 @@ _ACTIVE_KIND = KINDS["all"]
 
 def kind_meta(kind: str) -> dict:
     return KINDS.get(kind) or KINDS["all"]
+
 
 # 焓平衡状态(库里存的就是这四个)
 _BALANCE_STATE = energy_report.STATE_TEXT
@@ -64,6 +81,7 @@ _W_TOWER_5 = (2.8, 2.4, 3.2, 3.2, 4.4)
 
 
 # ---------------------------------------------------------------- 取数
+
 
 def _balance_results(blocks) -> dict:
     """把库里已存的焓平衡结论翻成 `balance.compute()` 的形状(不重算)。"""
@@ -85,8 +103,7 @@ def _stages(conn, case_id: int, blocks) -> dict:
     for block in blocks:
         if block.get("type") not in ("RadFrac", "Absorber", "Extract"):
             continue
-        out[block["name"]] = [dict(r) for r in
-                              db.read_column_stages(conn, case_id, block["name"])]
+        out[block["name"]] = [dict(r) for r in db.read_column_stages(conn, case_id, block["name"])]
     return out
 
 
@@ -143,6 +160,7 @@ def build_data(conn, case_id: int, parts=None, picked=None) -> dict:
 
 # ---------------------------------------------------------------- 数字格式
 
+
 def _r(value, digits: int):
     """按位数取整;None / 非数字一律留空(与 family_export 同口径)。"""
     if value is None:
@@ -178,6 +196,7 @@ def filename(case_id: int, kind: str = "all") -> str:
 
 # ---------------------------------------------------------------- 文档骨架
 
+
 def _setup(doc, case: dict, kind: str = "all") -> None:
     """A4 版面 + 页眉(册别/工况)+ 页脚(页码)。"""
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -200,7 +219,6 @@ def _setup(doc, case: dict, kind: str = "all") -> None:
     style.paragraph_format.line_spacing = 1.22
 
 
-
 def _font(run, size=None, bold=None, name="宋体"):
     from docx.oxml.ns import qn
 
@@ -213,8 +231,7 @@ def _font(run, size=None, bold=None, name="宋体"):
     return run
 
 
-def _para(doc, text="", size=None, bold=False, align=None, space_after=None,
-          name="宋体"):
+def _para(doc, text="", size=None, bold=False, align=None, space_after=None, name="宋体"):
     from docx.shared import Pt
 
     para = doc.add_paragraph()
@@ -239,7 +256,8 @@ def _heading(doc, text, level=1):
     level_node = OxmlElement("w:outlineLvl")
     level_node.set(qn("w:val"), str(max(level - 1, 0)))
     para._p.get_or_add_pPr().insert_element_before(
-        level_node, "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange")
+        level_node, "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange"
+    )
     para.paragraph_format.space_before = Pt(10)
     para.paragraph_format.space_after = Pt(4)
     _font(para.add_run(text), sizes.get(level, Pt(11)), True, "黑体")
@@ -248,6 +266,7 @@ def _heading(doc, text, level=1):
 
 def _rgb(hex_color: str):
     from docx.shared import RGBColor
+
     return RGBColor.from_string(hex_color)
 
 
@@ -272,13 +291,20 @@ def _left_bar(cell, eighth_pt: int = 18, color: str = "000000") -> None:
     borders = OxmlElement("w:tcBorders")
     left = OxmlElement("w:left")
     left.set(qn("w:val"), "single")
-    left.set(qn("w:sz"), str(eighth_pt))     # 1/8 pt 为单位:18 ≈ 2.25 pt
+    left.set(qn("w:sz"), str(eighth_pt))  # 1/8 pt 为单位:18 ≈ 2.25 pt
     left.set(qn("w:color"), color)
     borders.append(left)
     # tcBorders 必须排在 shd 之前,否则 Word 宽容、WPS/旧版会丢
-    tc_pr.insert_element_before(borders, "w:shd", "w:noWrap", "w:tcMar",
-                                "w:textDirection", "w:tcFitText", "w:vAlign",
-                                "w:hideMark")
+    tc_pr.insert_element_before(
+        borders,
+        "w:shd",
+        "w:noWrap",
+        "w:tcMar",
+        "w:textDirection",
+        "w:tcFitText",
+        "w:vAlign",
+        "w:hideMark",
+    )
 
 
 def _shade(cell, hex_fill: str) -> None:
@@ -291,12 +317,22 @@ def _shade(cell, hex_fill: str) -> None:
     shd.set(qn("w:color"), "auto")
     shd.set(qn("w:fill"), hex_fill)
     tc_pr = cell._tc.get_or_add_tcPr()
-    tc_pr.insert_element_before(shd, "w:noWrap", "w:tcMar", "w:textDirection",
-                                "w:tcFitText", "w:vAlign", "w:hideMark")
+    tc_pr.insert_element_before(
+        shd, "w:noWrap", "w:tcMar", "w:textDirection", "w:tcFitText", "w:vAlign", "w:hideMark"
+    )
 
 
-def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
-                header_extra=None, status_col=None, span_rows=()):
+def _three_line(
+    doc,
+    headers,
+    rows,
+    widths,
+    caption="",
+    font_pt=None,
+    header_extra=None,
+    status_col=None,
+    span_rows=(),
+):
     """三线表:顶线 1.5 pt、表头下线 0.75 pt、底线 1.5 pt,无竖线无内部横线。
 
     python-docx 没有内置三线表样式,只能直接写 `w:tblBorders`。
@@ -314,7 +350,7 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         cap = doc.add_paragraph()
         cap.paragraph_format.space_before = Pt(8)
         cap.paragraph_format.space_after = Pt(2)
-        cap.paragraph_format.keep_with_next = True   # 表题不单独留在页底
+        cap.paragraph_format.keep_with_next = True  # 表题不单独留在页底
         # 表题前的小色块:黑白打印时是灰块,仍能分出"这是表题"
         _font(cap.add_run("■ "), Pt(7), True).font.color.rgb = _rgb(meta["accent"])
         _font(cap.add_run(caption), Pt(10), True)
@@ -328,8 +364,14 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
     # 注意:这里别用 size 当循环变量 —— 它会把上面算好的字号覆盖掉,
     # 表现是"设了 8pt 却还是默认字号"(踩过一次)
     # 8pt 表体配 1.5pt 线太重;顶/底 1.0pt(sz=8)、表头下 0.5pt(sz=4)
-    for edge, sz in (("top", 8), ("bottom", 8), ("left", 0), ("right", 0),
-                     ("insideH", 0), ("insideV", 0)):
+    for edge, sz in (
+        ("top", 8),
+        ("bottom", 8),
+        ("left", 0),
+        ("right", 0),
+        ("insideH", 0),
+        ("insideV", 0),
+    ):
         node = OxmlElement(f"w:{edge}")
         if sz:
             node.set(qn("w:val"), "single")
@@ -340,8 +382,14 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
             node.set(qn("w:sz"), "0")
         borders.append(node)
     table._tbl.tblPr.insert_element_before(
-        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook",
-        "w:tblCaption", "w:tblDescription")
+        borders,
+        "w:shd",
+        "w:tblLayout",
+        "w:tblCellMar",
+        "w:tblLook",
+        "w:tblCaption",
+        "w:tblDescription",
+    )
 
     def _row_flag(row, tag: str) -> None:
         """给整行加一个 w:trPr 开关(tblHeader / cantSplit)。"""
@@ -350,12 +398,11 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         node.set(qn("w:val"), "true")
         tr_pr.append(node)
 
-    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER,
-             color=None):
+    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER, color=None):
         para = cell.paragraphs[0]
         para.alignment = align
         para.paragraph_format.space_after = Pt(0)
-        para.paragraph_format.line_spacing = 1.0   # 继承 1.22 会把长表撑高一倍
+        para.paragraph_format.line_spacing = 1.0  # 继承 1.22 会把长表撑高一倍
         raw = "" if text is None else str(text)
         # 「ΣHin|kW」这种写法渲染成两行:名称在上、单位在下(7.5pt 灰),
         # 各列表头等高,不会出现有的折行有的不折
@@ -414,11 +461,9 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
     for row_index, row in enumerate(rows, start=head_rows):
         _row_flag(table.rows[row_index], "cantSplit")
         cells = table.rows[row_index].cells
-        cells_data, bold, fill_hex = (row if isinstance(row, tuple)
-                                      else (row, False, None))
+        cells_data, bold, fill_hex = row if isinstance(row, tuple) else (row, False, None)
         # 只有第一格有字 = 组分分段行(整行浅色带,把两个数据块分开)
-        is_group = bool(cells_data) and not any(
-            str(v).strip() for v in cells_data[1:])
+        is_group = bool(cells_data) and not any(str(v).strip() for v in cells_data[1:])
         for index, value in enumerate(cells_data):
             text = "" if value is None else str(value)
             # 首列(位号/流股/项目)左对齐;纯文字格(相态、状态)居中;
@@ -434,14 +479,14 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
             tone = "8C8C8C" if text in ("0.00", "0.0", "0.000", "0.0000") else None
             fill(cells[index], text, bold, align, tone)
 
-        if fill_hex:                      # 超差行:灰底 + 首列黑竖边
+        if fill_hex:  # 超差行:灰底 + 首列黑竖边
             for cell in cells:
                 _shade(cell, "E8E8E8")
             _left_bar(cells[0], 18)
-        elif is_group:                    # 分组行:主题浅色带
+        elif is_group:  # 分组行:主题浅色带
             for cell in cells:
                 _shade(cell, meta["light"])
-        elif stripe % 2 == 1:             # 斑马纹:宽表不串行
+        elif stripe % 2 == 1:  # 斑马纹:宽表不串行
             for cell in cells:
                 _shade(cell, meta["zebra"])
         if not is_group:
@@ -466,7 +511,7 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         row = table.rows[head_rows + index]
         cells = row.cells
         if len({id(c._tc) for c in cells}) != len(headers):
-            continue                       # 已经合并过,跳过
+            continue  # 已经合并过,跳过
         merged = cells[0].merge(cells[len(headers) - 1])
         for extra in merged.paragraphs[1:]:
             extra._element.getparent().remove(extra._element)
@@ -488,6 +533,7 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
 
 # ---------------------------------------------------------------- 各章内容
 
+
 class _Captions:
     """表号计数器:按章编号(表 2-1、表 3-4),与设计文档的习惯一致。"""
 
@@ -504,6 +550,7 @@ class _Captions:
         body = f"表 {self.chapter}-{self.n}"
         return f"{body}  {text}" if text else body
 
+
 def _body_section(doc, case: dict, kind: str = "all"):
     """正文另起一节:页眉页脚只打在正文,页码从 1 开始(封面/目录不进页码)。"""
     from docx.enum.section import WD_SECTION
@@ -519,9 +566,19 @@ def _body_section(doc, case: dict, kind: str = "all"):
     pg = OxmlElement("w:pgNumType")
     pg.set(qn("w:start"), "1")
     section._sectPr.insert_element_before(
-        pg, "w:cols", "w:formProt", "w:vAlign", "w:noEndnote", "w:titlePg",
-        "w:textDirection", "w:bidi", "w:rtlGutter", "w:docGrid",
-        "w:printerSettings", "w:sectPrChange")
+        pg,
+        "w:cols",
+        "w:formProt",
+        "w:vAlign",
+        "w:noEndnote",
+        "w:titlePg",
+        "w:textDirection",
+        "w:bidi",
+        "w:rtlGutter",
+        "w:docGrid",
+        "w:printerSettings",
+        "w:sectPrChange",
+    )
 
     header = section.header
     header.is_linked_to_previous = False
@@ -530,8 +587,9 @@ def _body_section(doc, case: dict, kind: str = "all"):
     stops = head.paragraph_format.tab_stops
     stops.add_tab_stop(Cm(16.0), WD_TAB_ALIGNMENT.RIGHT)
     _font(head.add_run(f"Casebook · {meta['book']}"), Pt(8.5), False)
-    _font(head.add_run(f"\t#{case.get('id')}　{case.get('model_name') or ''}"),
-          Pt(8.5), False).font.color.rgb = _rgb("808080")
+    _font(
+        head.add_run(f"\t#{case.get('id')}　{case.get('model_name') or ''}"), Pt(8.5), False
+    ).font.color.rgb = _rgb("808080")
     p_pr = head._p.get_or_add_pPr()
     borders = OxmlElement("w:pBdr")
     bottom = OxmlElement("w:bottom")
@@ -583,20 +641,30 @@ def _cover(doc, case: dict, kind: str = "all") -> None:
     _font(para.add_run(""), Pt(1))
 
     _para(doc, "", Pt(10), space_after=60)
-    _para(doc, meta["title"], Pt(26), True, WD_ALIGN_PARAGRAPH.CENTER,
-          space_after=10, name="黑体").runs[0].font.color.rgb = _rgb(meta["accent"])
-    _para(doc, meta["book"], Pt(13), False, WD_ALIGN_PARAGRAPH.CENTER,
-          space_after=8)
-    _para(doc, "（依据本工具工况快照生成 · 非工程设计依据）", Pt(9.5), False,
-          WD_ALIGN_PARAGRAPH.CENTER, space_after=80)
+    _para(
+        doc, meta["title"], Pt(26), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=10, name="黑体"
+    ).runs[0].font.color.rgb = _rgb(meta["accent"])
+    _para(doc, meta["book"], Pt(13), False, WD_ALIGN_PARAGRAPH.CENTER, space_after=8)
+    _para(
+        doc,
+        "（依据本工具工况快照生成 · 非工程设计依据）",
+        Pt(9.5),
+        False,
+        WD_ALIGN_PARAGRAPH.CENTER,
+        space_after=80,
+    )
 
     rows = [
         ("工况", case.get("model_name") or ""),
         ("工况号", f"#{case.get('id')}"),
         ("读取时间", case.get("read_at") or ""),
         ("Aspen 版本", case.get("aspen_version") or ""),
-        ("收敛判定", {"ok": "通过", "warning": "告警", "error": "报错"}.get(
-            case.get("severity") or "", case.get("severity") or "")),
+        (
+            "收敛判定",
+            {"ok": "通过", "warning": "告警", "error": "报错"}.get(
+                case.get("severity") or "", case.get("severity") or ""
+            ),
+        ),
         ("流股 / 设备", f"{case.get('stream_count') or 0} / {case.get('block_count') or 0}"),
     ]
     # 用制表位排信息块,不用表格 —— 表格在部分渲染器里会画出一圈莫名其妙的框线
@@ -607,15 +675,20 @@ def _cover(doc, case: dict, kind: str = "all") -> None:
         para.alignment = WD_ALIGN_PARAGRAPH.LEFT
         para.paragraph_format.space_after = Pt(5)
         stops = para.paragraph_format.tab_stops
-        stops.add_tab_stop(Cm(8.2), WD_TAB_ALIGNMENT.RIGHT)   # 标签右端
-        stops.add_tab_stop(Cm(8.6), WD_TAB_ALIGNMENT.LEFT)    # 值左端
+        stops.add_tab_stop(Cm(8.2), WD_TAB_ALIGNMENT.RIGHT)  # 标签右端
+        stops.add_tab_stop(Cm(8.6), WD_TAB_ALIGNMENT.LEFT)  # 值左端
         _font(para.add_run(label + "\t"), Pt(10.5), False).font.color.rgb = _rgb("595959")
         # 模型名可能很长:让它自然折到第二行,不要撑出右边距(内容不截断)
         _font(para.add_run(value), Pt(9.5), True)
 
     _para(doc, "", Pt(10), space_after=44)
-    _para(doc, f"生成时间:{datetime.now().strftime('%Y-%m-%d %H:%M')}", Pt(9.5),
-          False, WD_ALIGN_PARAGRAPH.CENTER).runs[0].font.color.rgb = _rgb("808080")
+    _para(
+        doc,
+        f"生成时间:{datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        Pt(9.5),
+        False,
+        WD_ALIGN_PARAGRAPH.CENTER,
+    ).runs[0].font.color.rgb = _rgb("808080")
     doc.add_page_break()
 
 
@@ -626,17 +699,21 @@ def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
 
     meta = kind_meta(kind)
     _para(doc, "", None, space_after=4)
-    _para(doc, "目　录", Pt(16), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=14,
-          name="黑体").runs[0].font.color.rgb = _rgb(meta["accent"])
-    _para(doc, meta["book"], Pt(9.5), False, WD_ALIGN_PARAGRAPH.CENTER,
-          space_after=22).runs[0].font.color.rgb = _rgb("808080")
+    _para(doc, "目　录", Pt(16), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=14, name="黑体").runs[
+        0
+    ].font.color.rgb = _rgb(meta["accent"])
+    _para(doc, meta["book"], Pt(9.5), False, WD_ALIGN_PARAGRAPH.CENTER, space_after=22).runs[
+        0
+    ].font.color.rgb = _rgb("808080")
 
     entries: list[tuple[str, int]] = [("校核结论摘要", 0)]
     if kind in ("mass", "all"):
-        entries += [("一、物料衡算", 0),
-                    ("1.1 各工段物料平衡表", 1),
-                    ("1.2 全流程物料平衡表", 1),
-                    ("1.3 物料消耗与产出汇总", 1)]
+        entries += [
+            ("一、物料衡算", 0),
+            ("1.1 各工段物料平衡表", 1),
+            ("1.2 全流程物料平衡表", 1),
+            ("1.3 物料消耗与产出汇总", 1),
+        ]
     if kind in ("energy", "all"):
         ch = "2" if kind == "all" else "1"
         entries.append((("二" if ch == "2" else "一") + "、能量衡算", 0))
@@ -644,8 +721,10 @@ def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
         if has_detail:
             entries.append((f"{ch}.2 选中设备的进出口明细", 1))
         base = 3 if has_detail else 2
-        entries += [(f"{ch}.{base} 全流程能量汇总", 1),
-                    (f"{ch}.{base + 1} 塔的冷凝器 / 再沸器负荷", 1)]
+        entries += [
+            (f"{ch}.{base} 全流程能量汇总", 1),
+            (f"{ch}.{base + 1} 塔的冷凝器 / 再沸器负荷", 1),
+        ]
     entries.append(("附注", 0))
 
     # TOC 域:Word / WPS 打开时按大纲级别自动生成带页码的目录(field 标了 dirty)。
@@ -709,24 +788,39 @@ def _summary_chapter(doc, data: dict, cap: "_Captions", kind: str = "all") -> No
             f"流量过小 {dev_sum[mass_balance.TOO_SMALL]} 台。"
         )
         _para(doc, text, None, False, WD_ALIGN_PARAGRAPH.LEFT)
-        states = [mass_balance.PASS, mass_balance.FAIL, mass_balance.NO_DATA,
-                  mass_balance.TOO_SMALL]
+        states = [
+            mass_balance.PASS,
+            mass_balance.FAIL,
+            mass_balance.NO_DATA,
+            mass_balance.TOO_SMALL,
+        ]
         headers = ["项目", "通过", "超差", "无法校验", "流量过小", "合计"]
         rows = [
             ["工段界区衡算"] + [zone_sum[s] for s in states] + [zone_sum["total"]],
             ["逐设备质量守恒"] + [dev_sum[s] for s in states] + [dev_sum["total"]],
         ]
-        _three_line(doc, headers, rows, (3.6, 2.0, 2.0, 2.4, 2.0, 2.0),
-                    cap.next("质量守恒校验结果"), status_col=2)
+        _three_line(
+            doc,
+            headers,
+            rows,
+            (3.6, 2.0, 2.0, 2.4, 2.0, 2.0),
+            cap.next("质量守恒校验结果"),
+            status_col=2,
+        )
 
     if kind in ("energy", "all"):
         order = [energy_report.OK, energy_report.BAD, energy_report.NO_DATA]
         by_state = energy["by_state"]
         rows = [[energy_report.STATE_TEXT[s], by_state.get(s, 0)] for s in order]
-        rows.append(["不校验（换热器热侧，不单独校验）",
-                     by_state.get(energy_report.SKIP, 0)])
-        _three_line(doc, ["焓平衡状态", "表内行数"], rows, (7.8, 3.2),
-                    cap.next("焓平衡结论分布"), status_col=0)
+        rows.append(["不校验（换热器热侧，不单独校验）", by_state.get(energy_report.SKIP, 0)])
+        _three_line(
+            doc,
+            ["焓平衡状态", "表内行数"],
+            rows,
+            (7.8, 3.2),
+            cap.next("焓平衡结论分布"),
+            status_col=0,
+        )
         text = (
             f"能量汇总：总加热 {energy['heat_total_kw']:,.2f} kW"
             f"（其中塔再沸器 {energy['tower_reb_kw']:,.2f} kW）、"
@@ -743,7 +837,7 @@ def _phase_of(column) -> str:
 
 def _chunks(columns, size: int):
     """把一簇列切成若干块(宽表一页放不下时,按 ZJU 的「表 x-1（1）（2）」拆)。"""
-    return [columns[i:i + size] for i in range(0, len(columns), size)]
+    return [columns[i : i + size] for i in range(0, len(columns), size)]
 
 
 def _widths(ncols: int):
@@ -753,8 +847,9 @@ def _widths(ncols: int):
     return (2.2, 1.8) + (each,) * ncols
 
 
-def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
-                max_cols: int = 5, title: str = "") -> None:  # noqa: D401
+def _wide_table(
+    doc, table: dict, cap: "_Captions", chapter: str, max_cols: int = 5, title: str = ""
+) -> None:  # noqa: D401
     """一张物料平衡宽表:流股做列、属性与组分做行。
 
     列多的时候按 `max_cols` 拆成「表 x-1（1）（2）…」,进口与出口永不混在同一块,
@@ -763,8 +858,7 @@ def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Cm, Pt
 
-    segments = [("进口", table.get("in_columns") or []),
-                ("出口", table.get("out_columns") or [])]
+    segments = [("进口", table.get("in_columns") or []), ("出口", table.get("out_columns") or [])]
     blocks = []
     for group, cols in segments:
         for chunk in _chunks(list(cols), max_cols):
@@ -786,8 +880,7 @@ def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
             row("相态", "—", [_phase_of(c) for c in cols]),
             row("温度", "℃", [_num(c.get("temperature_c"), 1) for c in cols]),
             row("压力", "bar", [_num(c.get("pressure_bar"), 2) for c in cols]),
-            row("质量流量", "kg/h", [_num(c.get("mass_flow_kgh"), 2) for c in cols],
-                True),
+            row("质量流量", "kg/h", [_num(c.get("mass_flow_kgh"), 2) for c in cols], True),
             row("摩尔流量", "kmol/h", [_num(c.get("mole_flow_kmolh"), 2) for c in cols]),
             row("体积流量", "m³/h", [_num(c.get("vol_flow_m3h"), 2) for c in cols]),
         ]
@@ -798,31 +891,41 @@ def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
             span_rows.append(len(rows))
             rows.append(row("组分 · 摩尔流量 kmol/h", "", [""] * len(cols), True))
             for comp in components:
-                rows.append(row(f"　{comp}", "kmol/h",
-                                [_num((c.get("mole_comp") or {}).get(comp), 3)
-                                 for c in cols]))
+                rows.append(
+                    row(
+                        f"　{comp}",
+                        "kmol/h",
+                        [_num((c.get("mole_comp") or {}).get(comp), 3) for c in cols],
+                    )
+                )
         if table.get("has_mass_comp"):
             span_rows.append(len(rows))
             rows.append(row("组分 · 质量流量 kg/h", "", [""] * len(cols), True))
             for comp in components:
-                rows.append(row(f"　{comp}", "kg/h",
-                                [_num((c.get("mass_comp") or {}).get(comp), 3)
-                                 for c in cols]))
+                rows.append(
+                    row(
+                        f"　{comp}",
+                        "kg/h",
+                        [_num((c.get("mass_comp") or {}).get(comp), 3) for c in cols],
+                    )
+                )
 
         headers = ["项目", "单位", *[c["stream"] for c in cols]]
-        _three_line(doc, headers, rows, _widths(len(cols)), caption,
-                    header_extra=group, span_rows=span_rows)
+        _three_line(
+            doc, headers, rows, _widths(len(cols)), caption, header_extra=group, span_rows=span_rows
+        )
 
     # 表下给该段的合计与误差(界区校验结论就写在这一行,不再单独出小表)
     state_text = mass_balance.STATE_TEXT.get(table.get("state"), "")
-    note = (f"Σ进 {_num(table.get('mass_in_kgh'), 2)} kg/h、"
-            f"Σ出 {_num(table.get('mass_out_kgh'), 2)} kg/h,"
-            f"相对误差 {_percent(table.get('rel_err')) or '—'}"
-            f"（容差 {mass_balance.TOL_REL:.1%}），判定：{state_text}")
+    note = (
+        f"Σ进 {_num(table.get('mass_in_kgh'), 2)} kg/h、"
+        f"Σ出 {_num(table.get('mass_out_kgh'), 2)} kg/h,"
+        f"相对误差 {_percent(table.get('rel_err')) or '—'}"
+        f"（容差 {mass_balance.TOL_REL:.1%}），判定：{state_text}"
+    )
     if not table.get("has_mass_comp"):
         note += "。组分质量流量未读取（重读一次工况后自动出现），表中只给摩尔流量"
-    para = _para(doc, note, None, False, WD_ALIGN_PARAGRAPH.LEFT,
-                 space_after=8)
+    para = _para(doc, note, None, False, WD_ALIGN_PARAGRAPH.LEFT, space_after=8)
     para.runs[0].font.size = Pt(9)
     para.runs[0].font.color.rgb = _rgb("595959")
 
@@ -845,7 +948,7 @@ def _figure_slot(doc, text: str) -> None:
 
     para = doc.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    para.paragraph_format.space_before = Pt(104)   # 上下合计约 8cm
+    para.paragraph_format.space_before = Pt(104)  # 上下合计约 8cm
     para.paragraph_format.space_after = Pt(104)
     run = para.add_run(f"【{text}：图片插入处】")
     _font(run, Pt(12), True, "黑体")
@@ -870,52 +973,91 @@ def _mass_chapter(doc, data: dict, cap: "_Captions", chapter: str = "1") -> None
     label = "一" if chapter == "1" else "二"
     wide = data["wide"]
     _heading(doc, f"{label}、物料衡算", 1)
-    _para(doc, ("表中流股做列、属性与组分做行：进口列组是该工段确认的进界流股，"
-                "出口列组是出界流股。表下给该段 Σ进 / Σ出 与相对误差——"
-                f"相对误差 ≤ {mass_balance.TOL_REL:.1%} 判通过，"
-                f"进出合计都低于 {mass_balance.MIN_FLOW_KGH:g} kg/h 时不判定。"
-                "组分行按 Aspen 里的组分 ID 原样列出，不做中文映射。"),
-          None, False, WD_ALIGN_PARAGRAPH.LEFT)
+    _para(
+        doc,
+        (
+            "表中流股做列、属性与组分做行：进口列组是该工段确认的进界流股，"
+            "出口列组是出界流股。表下给该段 Σ进 / Σ出 与相对误差——"
+            f"相对误差 ≤ {mass_balance.TOL_REL:.1%} 判通过，"
+            f"进出合计都低于 {mass_balance.MIN_FLOW_KGH:g} kg/h 时不判定。"
+            "组分行按 Aspen 里的组分 ID 原样列出，不做中文映射。"
+        ),
+        None,
+        False,
+        WD_ALIGN_PARAGRAPH.LEFT,
+    )
     if data.get("auto_boundary"):
-        _para(doc, "本报告未载入人工确认的工段边界，进 / 出界流股按设备名段号自动推导，"
-                   "建议在「衡算报告」页确认后重新生成。", None, False,
-              WD_ALIGN_PARAGRAPH.LEFT)
+        _para(
+            doc,
+            "本报告未载入人工确认的工段边界，进 / 出界流股按设备名段号自动推导，"
+            "建议在「衡算报告」页确认后重新生成。",
+            None,
+            False,
+            WD_ALIGN_PARAGRAPH.LEFT,
+        )
 
     _heading(doc, f"{chapter}.1 各工段物料平衡表", 2)
     if not wide["zones"]:
-        _para(doc, "（本工况没有可出的工段：可能被人工删除，或设备位号里没有段号；"
-                   "此时只出下面的全流程表）")
+        _para(
+            doc,
+            "（本工况没有可出的工段：可能被人工删除，或设备位号里没有段号；"
+            "此时只出下面的全流程表）",
+        )
     for zone in wide["zones"]:
         _heading(doc, zone["label"], 3)
         _figure_slot(doc, f"{zone['label']}流程图")
         _wide_table(doc, zone, cap, chapter, title=f"{zone['label']}物料平衡表")
 
     _heading(doc, f"{chapter}.2 全流程物料平衡表", 2)
-    _para(doc, ("进口列 = 没有上游的流股（外部进料 / 公用工程补水），"
-                "出口列 = 没有下游的流股（产品、副产、三废）。"
-                "公用工程流股（冷却水、蒸汽等）也在其中，是否算入原料见 1.3 的说明。"),
-          None, False, WD_ALIGN_PARAGRAPH.LEFT)
+    _para(
+        doc,
+        (
+            "进口列 = 没有上游的流股（外部进料 / 公用工程补水），"
+            "出口列 = 没有下游的流股（产品、副产、三废）。"
+            "公用工程流股（冷却水、蒸汽等）也在其中，是否算入原料见 1.3 的说明。"
+        ),
+        None,
+        False,
+        WD_ALIGN_PARAGRAPH.LEFT,
+    )
     _figure_slot(doc, "全流程图")
     _wide_table(doc, wide["overall"], cap, chapter, title="全流程物料平衡表")
 
     _heading(doc, f"{chapter}.3 物料消耗与产出汇总", 2)
     summary = wide["summary"]
     hours = summary["hours_per_year"]
-    _para(doc, f"按年运行 {hours:g} h 折算年量。原料与产品的归类由人确认；"
-               "未确认时按「外部进料 / 出界流股」原样列出，不擅自贴标签。",
-          None, False, WD_ALIGN_PARAGRAPH.LEFT)
+    _para(
+        doc,
+        f"按年运行 {hours:g} h 折算年量。原料与产品的归类由人确认；"
+        "未确认时按「外部进料 / 出界流股」原样列出，不擅自贴标签。",
+        None,
+        False,
+        WD_ALIGN_PARAGRAPH.LEFT,
+    )
 
-    rows = [[item["stream"], item["phase"],
-             _num(item["mass_flow_kgh"], 2),
-             _num(item["t_per_year"], 2)] for item in summary["feed"]]
-    _three_line(doc, ["流股", "相态", "质量流量 kg/h", "年量 t/a"], rows,
-                (4.6, 2.4, 4.4, 4.4), cap.next("外部进料（原料 / 公用工程）"))
+    rows = [
+        [item["stream"], item["phase"], _num(item["mass_flow_kgh"], 2), _num(item["t_per_year"], 2)]
+        for item in summary["feed"]
+    ]
+    _three_line(
+        doc,
+        ["流股", "相态", "质量流量 kg/h", "年量 t/a"],
+        rows,
+        (4.6, 2.4, 4.4, 4.4),
+        cap.next("外部进料（原料 / 公用工程）"),
+    )
 
-    rows = [[item["stream"], item["phase"],
-             _num(item["mass_flow_kgh"], 2),
-             _num(item["t_per_year"], 2)] for item in summary["outlet"]]
-    _three_line(doc, ["流股", "相态", "质量流量 kg/h", "年量 t/a"], rows,
-                (4.6, 2.4, 4.4, 4.4), cap.next("出界流股（产品 / 副产 / 三废）"))
+    rows = [
+        [item["stream"], item["phase"], _num(item["mass_flow_kgh"], 2), _num(item["t_per_year"], 2)]
+        for item in summary["outlet"]
+    ]
+    _three_line(
+        doc,
+        ["流股", "相态", "质量流量 kg/h", "年量 t/a"],
+        rows,
+        (4.6, 2.4, 4.4, 4.4),
+        cap.next("出界流股（产品 / 副产 / 三废）"),
+    )
 
 
 def _balance_row(block, energy_row, devices_row) -> dict:
@@ -930,11 +1072,9 @@ def _balance_row(block, energy_row, devices_row) -> dict:
     error = None
     # 塔 / 反应器 / 缺数据的设备不参与校验:它们的 ΔH 本来就不等于 Q+W
     # (塔有冷凝 / 再沸 / 中间回流),算出来只会被误读成"超差",所以留空
-    if h_in is not None and h_out is not None and \
-            (energy_row or {}).get("state") in ("ok", "bad"):
+    if h_in is not None and h_out is not None and (energy_row or {}).get("state") in ("ok", "bad"):
         error = round((h_out - h_in) - ((q or 0.0) + (w or 0.0)), 3)
-    return {"w_kw": w, "q_kw": q, "h_in_kw": h_in, "h_out_kw": h_out,
-            "error_kw": error}
+    return {"w_kw": w, "q_kw": q, "h_in_kw": h_in, "h_out_kw": h_out, "error_kw": error}
 
 
 def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> None:
@@ -944,15 +1084,22 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
     label = "一" if chapter == "1" else "二"
     energy = data["energy"]
     _heading(doc, f"{label}、能量衡算", 1)
-    _para(doc, ("以设备为基本单位，连续系统的能量平衡写作 Q + W = ΣHout − ΣHin："
-                "Q 是设备热负荷、W 是输入系统的机械功（泵 / 压缩机的轴功率）、"
-                "ΣHin、ΣHout 是进出口各物料焓之和，单位 kW。"
-                "焓值与焓平衡判定取自工况库里已有的结论，本报告不重算；"
-                "「偏差」列 = (ΣHout − ΣHin) − (Q + W)，即闭合误差。"
-                "换热器只校冷侧（整体 ΔH 恒约等于 0），故冷、热两侧各一行；"
-                "塔的对照值是首级（冷凝器）+ 末级（再沸器）负荷，反应器的对照值是反应热 QCALC；"
-                "带换热伴流的多股反应器净 ΔH 会被伴流抵消，判「无法校验」而不是超差。"),
-          None, False, WD_ALIGN_PARAGRAPH.LEFT)
+    _para(
+        doc,
+        (
+            "以设备为基本单位，连续系统的能量平衡写作 Q + W = ΣHout − ΣHin："
+            "Q 是设备热负荷、W 是输入系统的机械功（泵 / 压缩机的轴功率）、"
+            "ΣHin、ΣHout 是进出口各物料焓之和，单位 kW。"
+            "焓值与焓平衡判定取自工况库里已有的结论，本报告不重算；"
+            "「偏差」列 = (ΣHout − ΣHin) − (Q + W)，即闭合误差。"
+            "换热器只校冷侧（整体 ΔH 恒约等于 0），故冷、热两侧各一行；"
+            "塔的对照值是首级（冷凝器）+ 末级（再沸器）负荷，反应器的对照值是反应热 QCALC；"
+            "带换热伴流的多股反应器净 ΔH 会被伴流抵消，判「无法校验」而不是超差。"
+        ),
+        None,
+        False,
+        WD_ALIGN_PARAGRAPH.LEFT,
+    )
 
     # 设备 → 能量行(换热器两侧各一行)
     by_block: dict[str, list[dict]] = {}
@@ -971,22 +1118,41 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
             bad = row["state"] == energy_report.BAD
             # 不再单列「类型」:上面的分组标题就是家族(塔 / 换热 / 反应 / 泵…),
             # 9pt 表体下每省一列,数值列就能宽 0.4cm,不会把 −183,646.07 折成两行
-            energy_rows.append(([row["block"], row["side"] or "—",
-                          _num(bal["h_in_kw"], 2), _num(bal["h_out_kw"], 2),
-                          _num(bal["q_kw"], 2), _num(bal["w_kw"], 2),
-                          _num(bal["error_kw"], 2), state_text],
-                         False, "FDE8E8" if bad else None))
-        _three_line(doc, ["设备", "侧", "ΣHin|kW", "ΣHout|kW",
-                          "Q 热负荷|kW", "W 机械功|kW", "偏差|kW", "判定"],
-                    energy_rows, (2.6, 0.8, 2.5, 2.5, 2.1, 2.1, 1.7, 1.7),
-                    cap.next(f"{group['label']}能量衡算"))
+            energy_rows.append(
+                (
+                    [
+                        row["block"],
+                        row["side"] or "—",
+                        _num(bal["h_in_kw"], 2),
+                        _num(bal["h_out_kw"], 2),
+                        _num(bal["q_kw"], 2),
+                        _num(bal["w_kw"], 2),
+                        _num(bal["error_kw"], 2),
+                        state_text,
+                    ],
+                    False,
+                    "FDE8E8" if bad else None,
+                )
+            )
+        _three_line(
+            doc,
+            ["设备", "侧", "ΣHin|kW", "ΣHout|kW", "Q 热负荷|kW", "W 机械功|kW", "偏差|kW", "判定"],
+            energy_rows,
+            (2.6, 0.8, 2.5, 2.5, 2.1, 2.1, 1.7, 1.7),
+            cap.next(f"{group['label']}能量衡算"),
+        )
 
     picked = data.get("picked")
     if picked:
         _heading(doc, f"{chapter}.2 选中设备的进出口明细", 2)
-        _para(doc, "只对本次勾选的设备出明细：先流股表（进出口流股的温压与流量、焓流），"
-                   "再平衡表（W / Q / ΣHin / ΣHout / 偏差），与设计文档的写法一致。",
-              None, False, WD_ALIGN_PARAGRAPH.LEFT)
+        _para(
+            doc,
+            "只对本次勾选的设备出明细：先流股表（进出口流股的温压与流量、焓流），"
+            "再平衡表（W / Q / ΣHin / ΣHout / 偏差），与设计文档的写法一致。",
+            None,
+            False,
+            WD_ALIGN_PARAGRAPH.LEFT,
+        )
         for name in picked:
             device_rows = by_block.get(name) or []
             if not device_rows:
@@ -995,54 +1161,132 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
             _heading(doc, f"{name}（{block.get('type') or '未知类型'}）", 3)
             body = []
             for row in device_rows:
-                body.append((["进口焓流 kW", row["side"] or "—", _num(row["h_in_kw"], 2)],
-                             False, None))
-                body.append((["出口焓流 kW", row["side"] or "—", _num(row["h_out_kw"], 2)],
-                             False, None))
-            _three_line(doc, ["项目", "侧", "数值"], body, (6.0, 3.0, 6.0),
-                        cap.next(f"{name} 焓流"))
+                body.append(
+                    (["进口焓流 kW", row["side"] or "—", _num(row["h_in_kw"], 2)], False, None)
+                )
+                body.append(
+                    (["出口焓流 kW", row["side"] or "—", _num(row["h_out_kw"], 2)], False, None)
+                )
+            _three_line(
+                doc, ["项目", "侧", "数值"], body, (6.0, 3.0, 6.0), cap.next(f"{name} 焓流")
+            )
             bal = _balance_row(block, rows[0], rows[0])
-            _three_line(doc, ["W kW", "Q kW", "ΣHin kW", "ΣHout kW", "偏差 kW"],
-                        [[_num(bal["w_kw"], 2), _num(bal["q_kw"], 2),
-                          _num(bal["h_in_kw"], 2), _num(bal["h_out_kw"], 2),
-                          _num(bal["error_kw"], 2)]],
-                        (3.0, 3.0, 3.4, 3.4, 3.0), cap.next(f"{name} 能量平衡"))
+            _three_line(
+                doc,
+                ["W kW", "Q kW", "ΣHin kW", "ΣHout kW", "偏差 kW"],
+                [
+                    [
+                        _num(bal["w_kw"], 2),
+                        _num(bal["q_kw"], 2),
+                        _num(bal["h_in_kw"], 2),
+                        _num(bal["h_out_kw"], 2),
+                        _num(bal["error_kw"], 2),
+                    ]
+                ],
+                (3.0, 3.0, 3.4, 3.4, 3.0),
+                cap.next(f"{name} 能量平衡"),
+            )
 
     _heading(doc, f"{chapter}.{3 if picked else 2} 全流程能量汇总", 2)
     summary = energy["summary"]
     summary_rows = [
-        (["总加热负荷", _num(summary["heat_total_kw"], 2),
-          f"正热负荷合计 {_num(summary['heat_pos_kw'], 2)} kW"
-          f" + 塔再沸器 {_num(summary['tower_reb_kw'], 2)} kW"], True, None),
-        (["其中：塔再沸器", _num(summary["tower_reb_kw"], 2),
-          f"{summary['tower_count']} 座塔，已含在上行"], False, None),
-        (["总冷却负荷", _num(summary["cool_total_kw"], 2),
-          f"负热负荷合计 {_num(summary['cool_neg_kw'], 2)} kW"
-          f" + 塔冷凝器 {_num(summary['tower_cond_kw'], 2)} kW"], True, None),
-        (["其中：塔冷凝器", _num(summary["tower_cond_kw"], 2),
-          f"{summary['tower_count']} 座塔，已含在上行"], False, None),
-        (["泵与压缩机总轴功", _num(summary["shaft_kw"], 2),
-          "Pump / Compr / MCompr / Turbine 的轴功率合计"], False, None),
+        (
+            [
+                "总加热负荷",
+                _num(summary["heat_total_kw"], 2),
+                f"正热负荷合计 {_num(summary['heat_pos_kw'], 2)} kW"
+                f" + 塔再沸器 {_num(summary['tower_reb_kw'], 2)} kW",
+            ],
+            True,
+            None,
+        ),
+        (
+            [
+                "其中：塔再沸器",
+                _num(summary["tower_reb_kw"], 2),
+                f"{summary['tower_count']} 座塔，已含在上行",
+            ],
+            False,
+            None,
+        ),
+        (
+            [
+                "总冷却负荷",
+                _num(summary["cool_total_kw"], 2),
+                f"负热负荷合计 {_num(summary['cool_neg_kw'], 2)} kW"
+                f" + 塔冷凝器 {_num(summary['tower_cond_kw'], 2)} kW",
+            ],
+            True,
+            None,
+        ),
+        (
+            [
+                "其中：塔冷凝器",
+                _num(summary["tower_cond_kw"], 2),
+                f"{summary['tower_count']} 座塔，已含在上行",
+            ],
+            False,
+            None,
+        ),
+        (
+            [
+                "泵与压缩机总轴功",
+                _num(summary["shaft_kw"], 2),
+                "Pump / Compr / MCompr / Turbine 的轴功率合计",
+            ],
+            False,
+            None,
+        ),
     ]
     if summary.get("reaction_net_kw"):
-        summary_rows.append((["未计入：反应器热负荷", _num(summary["reaction_net_kw"], 2),
-                      "反应热不是换热设备的公用工程负荷，按约定不校验"],
-                     False, None))
-    _three_line(doc, ["项目", "数值 kW", "构成与说明"], summary_rows, _W_SUMMARY_3,
-                cap.next("全流程能量汇总"))
+        summary_rows.append(
+            (
+                [
+                    "未计入：反应器热负荷",
+                    _num(summary["reaction_net_kw"], 2),
+                    "反应热不是换热设备的公用工程负荷，按约定不校验",
+                ],
+                False,
+                None,
+            )
+        )
+    _three_line(
+        doc,
+        ["项目", "数值 kW", "构成与说明"],
+        summary_rows,
+        _W_SUMMARY_3,
+        cap.next("全流程能量汇总"),
+    )
 
     if energy["towers"]:
         _heading(doc, f"{chapter}.{4 if picked else 3} 塔的冷凝器 / 再沸器负荷", 2)
         tower_rows = []
         for tower in energy["towers"]:
-            tower_rows.append([tower["block"], tower["type"] or "",
-                               _num(tower["cond_kw"], 2), _num(tower["reb_kw"], 2),
-                               _SOURCE_TEXT.get(tower["source"], tower["source"])])
-        _three_line(doc, ["塔", "类型", "冷凝器 kW", "再沸器 kW", "来源"], tower_rows,
-                    _W_TOWER_5, cap.next("塔的冷凝器 / 再沸器负荷"))
-        _para(doc, ("说明：块字段（COND_DUTY / REB_DUTY）优先；"
-                    "取不到时用逐级剖面的首级（冷凝器）与末级（再沸器）回退，"
-                    "部分冷凝器的塔首级可能不等于冷凝器总负荷。"), None)
+            tower_rows.append(
+                [
+                    tower["block"],
+                    tower["type"] or "",
+                    _num(tower["cond_kw"], 2),
+                    _num(tower["reb_kw"], 2),
+                    _SOURCE_TEXT.get(tower["source"], tower["source"]),
+                ]
+            )
+        _three_line(
+            doc,
+            ["塔", "类型", "冷凝器 kW", "再沸器 kW", "来源"],
+            tower_rows,
+            _W_TOWER_5,
+            cap.next("塔的冷凝器 / 再沸器负荷"),
+        )
+        _para(
+            doc,
+            (
+                "说明：块字段（COND_DUTY / REB_DUTY）优先；"
+                "取不到时用逐级剖面的首级（冷凝器）与末级（再沸器）回退，"
+                "部分冷凝器的塔首级可能不等于冷凝器总负荷。"
+            ),
+            None,
+        )
 
 
 def _notes_chapter(doc, data: dict) -> None:
@@ -1063,8 +1307,7 @@ def _notes_chapter(doc, data: dict) -> None:
         "塔按「首级冷凝器 + 末级再沸器」的净热负荷校验（93 座塔实测中间级 duty 全为 0，"
         "遇中间换热器时该口径会偏小）；反应器按反应热 QCALC 校验，只对单进单出成立，"
         "带换热伴流的多股反应器记「无法校验」。",
-        "塔负荷来源：块字段优先，缺失时用逐级剖面首 / 末级回退，"
-        "并在明细表的「来源」列标出。",
+        "塔负荷来源：块字段优先，缺失时用逐级剖面首 / 末级回退，并在明细表的「来源」列标出。",
         "相对误差口径不区分「漏流股」与「求解器残差」，量级小时属于正常收敛误差，"
         "量级大（10% 以上）才值得查模型。",
         "本报告由 Casebook 自动生成，用于内部校核与存档，不能作为工程设计依据。",
@@ -1074,6 +1317,7 @@ def _notes_chapter(doc, data: dict) -> None:
 
 
 # ---------------------------------------------------------------- 入口
+
 
 def render(data: dict, kind: str = "all") -> bytes:
     """把 `build_data()` 的结果渲染成 .docx 字节。
@@ -1096,12 +1340,12 @@ def render(data: dict, kind: str = "all") -> bytes:
     _setup(doc, data["case"], kind)
     _cover(doc, data["case"], kind)
     _toc(doc, kind, bool(data.get("picked")))
-    _body_section(doc, data["case"], kind)   # 正文另起一节:页眉页脚只打在正文
+    _body_section(doc, data["case"], kind)  # 正文另起一节:页眉页脚只打在正文
     _summary_chapter(doc, data, cap, kind)
 
     # 章号=表号:分册时那一册的正文从「一」起;合订本依次 一 / 二
     if kind in ("mass", "all"):
-        doc.add_page_break()          # 每章另起一页
+        doc.add_page_break()  # 每章另起一页
         _mass_chapter(doc, data, cap, "1")
     if kind in ("energy", "all"):
         doc.add_page_break()
@@ -1114,8 +1358,9 @@ def render(data: dict, kind: str = "all") -> bytes:
     return buffer.getvalue()
 
 
-def build_report(conn, case_id: int, parts=None, picked=None,
-                 kind: str = "all") -> tuple[bytes, str]:
+def build_report(
+    conn, case_id: int, parts=None, picked=None, kind: str = "all"
+) -> tuple[bytes, str]:
     """一步生成 .docx,返回 `(字节, 文件名)`。
 
     缺 python-docx 时抛 `ImportError`;工况不存在时抛 `LookupError`。

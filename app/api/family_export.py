@@ -12,6 +12,7 @@
   `FAMILY_COLS` 一致;改了那边记得改这里)。
 * 数值按页面同样的位数取整,空值留空(不是 0)。
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
@@ -66,21 +67,58 @@ _COLS: dict[str, tuple[str, int, Callable[[Mapping[str, Any]], Any]]] = {
 # 与 app.js 的 FAMILY_COLS 一致(顺序即列序)
 FAMILY_COLUMNS: dict[str, tuple[str, ...]] = {
     "column": ("name", "status", "nstage", "top", "bottom", "cond", "reb", "message"),
-    "heat": ("name", "type", "status", "duty", "area", "inT", "outT", "coldIn", "coldOut",
-             "dh", "ref", "balance", "note", "message"),
-    "flash": ("name", "type", "status", "duty", "outT", "vapOut",
-              "dh", "ref", "balance", "message"),
+    "heat": (
+        "name",
+        "type",
+        "status",
+        "duty",
+        "area",
+        "inT",
+        "outT",
+        "coldIn",
+        "coldOut",
+        "dh",
+        "ref",
+        "balance",
+        "note",
+        "message",
+    ),
+    "flash": (
+        "name",
+        "type",
+        "status",
+        "duty",
+        "outT",
+        "vapOut",
+        "dh",
+        "ref",
+        "balance",
+        "message",
+    ),
     "react": ("name", "type", "status", "duty", "outT", "message"),
-    "move": ("name", "type", "status", "power", "inT", "outT", "dh", "ref",
-             "balance", "message"),
+    "move": ("name", "type", "status", "power", "inT", "outT", "dh", "ref", "balance", "message"),
     "mix": ("name", "type", "status", "outT", "message"),
     "other": ("name", "type", "status", "message"),
 }
 
 # 泵:与整本导出的「泵」页一致(比页面多进出口压力/压升/密度,选型时要用)
-PUMP_HEADERS = ("设备", "状态", "流量 m³/h", "扬程 m", "效率 %", "轴功率 kW",
-                "建议电机 kW", "进口压力 bar", "出口压力 bar", "压升 bar",
-                "密度 kg/m³", "进口汽化率", "p_v bar", "NPSHₐ m", "提示")
+PUMP_HEADERS = (
+    "设备",
+    "状态",
+    "流量 m³/h",
+    "扬程 m",
+    "效率 %",
+    "轴功率 kW",
+    "建议电机 kW",
+    "进口压力 bar",
+    "出口压力 bar",
+    "压升 bar",
+    "密度 kg/m³",
+    "进口汽化率",
+    "p_v bar",
+    "NPSHₐ m",
+    "提示",
+)
 PUMP_WIDTHS = (14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 12, 10, 12, 50)
 
 
@@ -100,8 +138,9 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
         raise LookupError(case_id)
 
     label = block_family.FAMILY_LABELS.get(family, family)
-    blocks = [b for b in db.read_blocks(conn, case_id)
-              if block_family.family_of(b["type"]) == family]
+    blocks = [
+        b for b in db.read_blocks(conn, case_id) if block_family.family_of(b["type"]) == family
+    ]
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -116,11 +155,23 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
         headers = list(PUMP_HEADERS)
         widths = list(PUMP_WIDTHS)
         rows = [
-            [b["name"], STATUS_TEXT.get(b["status"], ""), _r(b["flow_m3h"], 2),
-             _r(b["head_m"], 2), None if b["pump_eff"] is None else _r(b["pump_eff"] * 100, 1),
-             _r(b["power_kw"], 2), b["motor_kw"], b["p_in_bar"], b["p_out_bar"], b["dp_bar"],
-             _r(b["rho_kgm3"], 1), _r(b["pump_vap_frac"], 4), _r(b["pv_bar"], 4), npsh(b),
-             b["message"]]
+            [
+                b["name"],
+                STATUS_TEXT.get(b["status"], ""),
+                _r(b["flow_m3h"], 2),
+                _r(b["head_m"], 2),
+                None if b["pump_eff"] is None else _r(b["pump_eff"] * 100, 1),
+                _r(b["power_kw"], 2),
+                b["motor_kw"],
+                b["p_in_bar"],
+                b["p_out_bar"],
+                b["dp_bar"],
+                _r(b["rho_kgm3"], 1),
+                _r(b["pump_vap_frac"], 4),
+                _r(b["pv_bar"], 4),
+                npsh(b),
+                b["message"],
+            ]
             for b in blocks
         ]
     else:

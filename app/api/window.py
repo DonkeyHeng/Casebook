@@ -7,6 +7,7 @@
 为什么不用浏览器自己的记忆:实测 Edge 的 --app 窗口关闭重开后
 尺寸会回到默认值,不保留。所以只能我们自己在窗口层面记。
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -26,6 +27,7 @@ EnumWindowsProc = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
 
 
 # ---------------------------------------------------------------- 基础操作
+
 
 def find_window(keyword: str, class_name: str = "Chrome_WidgetWin_1") -> int:
     """找标题含 keyword、窗口类为浏览器窗口的顶层窗口。
@@ -87,13 +89,14 @@ def apply_state(hwnd: int, state: dict) -> None:
         user32.ShowWindow(hwnd, SW_MAXIMIZE)
         return
     w, h = int(state.get("w", 0)), int(state.get("h", 0))
-    if w <= 100 or h <= 100:          # 记录不可信就别动
+    if w <= 100 or h <= 100:  # 记录不可信就别动
         return
     x, y = int(state.get("x", 80)), int(state.get("y", 80))
     user32.SetWindowPos(hwnd, 0, x, y, w, h, SWP_SHOWWINDOW)
 
 
 # ---------------------------------------------------------------- 持久化
+
 
 def load_state(path: str) -> dict:
     try:
@@ -117,6 +120,7 @@ def save_state(path: str, state: dict) -> None:
 
 # ---------------------------------------------------------------- 启动参数
 
+
 def launch_args(exe: str, url: str, state: dict) -> list[str]:
     """把上次的几何翻译成浏览器启动参数(--app 模式)。"""
     args = [exe, f"--app={url}"]
@@ -130,9 +134,16 @@ def launch_args(exe: str, url: str, state: dict) -> list[str]:
 
 # ---------------------------------------------------------------- 监视
 
-def watch(keyword: str, state_path: str, on_closed=None,
-          find_timeout: float = 20.0, interval: float = 1.2,
-          close_grace: float = 2.5, log=None) -> None:
+
+def watch(
+    keyword: str,
+    state_path: str,
+    on_closed=None,
+    find_timeout: float = 20.0,
+    interval: float = 1.2,
+    close_grace: float = 2.5,
+    log=None,
+) -> None:
     """后台线程:等待窗口出现 → 恢复上次几何 → 持续记录 → 窗口消失时回调。
 
     on_closed 在窗口被关掉约 close_grace 秒后触发一次(用于停服务)。
@@ -184,9 +195,11 @@ def watch(keyword: str, state_path: str, on_closed=None,
 
 def start_watch(keyword: str, state_path: str, on_closed=None, log=None) -> threading.Thread:
     th = threading.Thread(
-        target=watch, args=(keyword, state_path, on_closed),
+        target=watch,
+        args=(keyword, state_path, on_closed),
         kwargs={"log": log},
-        name="window-watch", daemon=True,
+        name="window-watch",
+        daemon=True,
     )
     th.start()
     return th

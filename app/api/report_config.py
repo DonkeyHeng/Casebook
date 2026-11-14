@@ -12,6 +12,7 @@
     {"40": {"01": {"label": "第一工段", "in": [...], "out": [...]},
             "device_sections": {"E0211": "02"}}}
 """
+
 from __future__ import annotations
 
 import json
@@ -102,11 +103,16 @@ def validate(payload) -> tuple[dict, dict, list, list[str]]:
         out_names, errs2 = _clean_names(value.get("out"))
         errors += errs + errs2
         if not in_names and not out_names:
-            errors.append(f"工段「{name}」的进界与出界都空着,最少要填一边"
-                          "(整段不参与衡算可以直接删掉这个工段)")
+            errors.append(
+                f"工段「{name}」的进界与出界都空着,最少要填一边(整段不参与衡算可以直接删掉这个工段)"
+            )
             continue
-        parts[name] = {"label": _norm(value.get("label")) or section_rules.label_for(name),
-                       "in": in_names, "out": out_names, "blocks": []}
+        parts[name] = {
+            "label": _norm(value.get("label")) or section_rules.label_for(name),
+            "in": in_names,
+            "out": out_names,
+            "blocks": [],
+        }
 
     deleted: list[str] = []
     raw_deleted = payload.get("deleted")
@@ -127,8 +133,7 @@ def validate(payload) -> tuple[dict, dict, list, list[str]]:
     return parts, overrides, deleted, errors
 
 
-def save(case_id: int, parts: dict, overrides: dict,
-         deleted=None) -> tuple[bool, list[str]]:
+def save(case_id: int, parts: dict, overrides: dict, deleted=None) -> tuple[bool, list[str]]:
     """把该工况的边界写进配置(其它工况的内容原样保留)。
 
     读取时支持 {"cases": {...}} 与直接 {"40": {...}} 两种写法,保存必须回到
@@ -138,8 +143,9 @@ def save(case_id: int, parts: dict, overrides: dict,
         return _save_locked(case_id, parts, overrides, deleted)
 
 
-def _save_locked(case_id: int, parts: dict, overrides: dict,
-                 deleted=None) -> tuple[bool, list[str]]:
+def _save_locked(
+    case_id: int, parts: dict, overrides: dict, deleted=None
+) -> tuple[bool, list[str]]:
     data: dict = {}
     if os.path.exists(CONFIG_PATH):
         try:
@@ -155,9 +161,11 @@ def _save_locked(case_id: int, parts: dict, overrides: dict,
 
     entry: dict = {}
     for key, info in parts.items():
-        entry[key] = {"label": info.get("label") or section_rules.label_for(key),
-                      "in": list(info.get("in") or []),
-                      "out": list(info.get("out") or [])}
+        entry[key] = {
+            "label": info.get("label") or section_rules.label_for(key),
+            "in": list(info.get("in") or []),
+            "out": list(info.get("out") or []),
+        }
     if overrides:
         entry["device_sections"] = dict(overrides)
     if deleted:

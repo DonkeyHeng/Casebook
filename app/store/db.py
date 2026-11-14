@@ -8,6 +8,7 @@
   * 明细表存**已归一的数值**(℃/bar/kg·h⁻¹/kW),原始值和单位存在 `raw_json` 里备查
   * `converged=0` 的工况照样入库,但应用层应禁止其进入统计对比
 """
+
 from __future__ import annotations
 
 import json
@@ -179,9 +180,7 @@ _STREAM_ADDED_COLUMNS = (
 )
 
 # stream_components 表后加的列(组分质量流量,物料平衡表用)
-_COMPONENT_ADDED_COLUMNS = (
-    ("mass_flow_kgh", "REAL"),
-)
+_COMPONENT_ADDED_COLUMNS = (("mass_flow_kgh", "REAL"),)
 
 # blocks 表后加的列(焓平衡自检 + 第二期泵参数)
 _BLOCK_ADDED_COLUMNS = (
@@ -238,6 +237,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 
 # ---------------------------------------------------------------- 写入
+
 
 def save_case(conn: sqlite3.Connection, case: dict) -> int:
     """把 read_case() 的结果整份入库,返回 case_id。"""
@@ -335,8 +335,14 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     for stream in case.get("streams", []):
         for comp in stream.get("composition") or []:
             comp_rows.append(
-                (case_id, stream["name"], comp["component"], comp.get("x_liq"),
-                 comp.get("y_vap"), comp.get("mass_flow_kgh"))
+                (
+                    case_id,
+                    stream["name"],
+                    comp["component"],
+                    comp.get("x_liq"),
+                    comp.get("y_vap"),
+                    comp.get("mass_flow_kgh"),
+                )
             )
     if comp_rows:
         conn.executemany(
@@ -404,11 +410,18 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     stage_rows = []
     for col in case.get("columns", []):
         for st in col.get("stages", []):
-            stage_rows.append((
-                case_id, col["block"], st.get("stage"),
-                st.get("temperature_c"), st.get("pressure_bar"),
-                st.get("liq_flow"), st.get("vap_flow"), st.get("duty_kw"),
-            ))
+            stage_rows.append(
+                (
+                    case_id,
+                    col["block"],
+                    st.get("stage"),
+                    st.get("temperature_c"),
+                    st.get("pressure_bar"),
+                    st.get("liq_flow"),
+                    st.get("vap_flow"),
+                    st.get("duty_kw"),
+                )
+            )
     if stage_rows:
         conn.executemany(
             """
@@ -456,8 +469,7 @@ def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
     copied = skipped = 0
     for row in rows:
         cur = conn.execute(
-            "UPDATE blocks SET pv_bar=?, pv_source=? "
-            "WHERE case_id=? AND name=? AND pv_bar IS NULL",
+            "UPDATE blocks SET pv_bar=?, pv_source=? WHERE case_id=? AND name=? AND pv_bar IS NULL",
             (row["pv_bar"], row["pv_source"], case_id, row["name"]),
         )
         if cur.rowcount:
@@ -475,8 +487,10 @@ def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
 
 # ---------------------------------------------------------------- 查询
 
-def set_pump_pv(conn: sqlite3.Connection, case_id: int, block: str, pv_bar,
-                source: str | None = "manual") -> bool:
+
+def set_pump_pv(
+    conn: sqlite3.Connection, case_id: int, block: str, pv_bar, source: str | None = "manual"
+) -> bool:
     """写入一台泵的饱和蒸气压(bar)与来源。传 None 表示清空(来源一并清空)。
 
     口径:p_v 优先取 Aspen 进口流股的泡点压力(见 docs/aspen-field-map.md §13.2);
@@ -541,8 +555,9 @@ def balance_summary(conn: sqlite3.Connection, case_id: int) -> dict:
     """某个工况的焓平衡四态台数(给首页仪表盘用)。"""
     counts = {"ok": 0, "bad": 0, "no_data": 0, "skip": 0}
     for row in conn.execute(
-            "SELECT balance_state, COUNT(*) AS n FROM blocks WHERE case_id = ? "
-            "GROUP BY balance_state", (case_id,)):
+        "SELECT balance_state, COUNT(*) AS n FROM blocks WHERE case_id = ? GROUP BY balance_state",
+        (case_id,),
+    ):
         key = row["balance_state"]
         if key in counts:
             counts[key] = row["n"]
@@ -560,8 +575,10 @@ def list_columns(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
 
 # ---------------------------------------------------------------- 流股组成(按需读)
 
-def read_stream_composition(conn: sqlite3.Connection, case_id: int,
-                            stream: str) -> list[sqlite3.Row]:
+
+def read_stream_composition(
+    conn: sqlite3.Connection, case_id: int, stream: str
+) -> list[sqlite3.Row]:
     """某条流股已存的组成;没读过返回空列表(不区分"0 组分")。"""
     return conn.execute(
         "SELECT component, x_liq, y_vap, mass_flow_kgh FROM stream_components "
@@ -570,8 +587,9 @@ def read_stream_composition(conn: sqlite3.Connection, case_id: int,
     ).fetchall()
 
 
-def save_stream_composition(conn: sqlite3.Connection, case_id: int, stream: str,
-                            rows: list[dict]) -> int:
+def save_stream_composition(
+    conn: sqlite3.Connection, case_id: int, stream: str, rows: list[dict]
+) -> int:
     """把一条流股的组成整条替换进工况库,返回写入条数。
 
     只有"点开看过"的流股才会走到这里 —— 组成默认不读,全量读会让耗时从 9 s 涨到 41 s。
@@ -593,8 +611,17 @@ def save_stream_composition(conn: sqlite3.Connection, case_id: int, stream: str,
                     (case_id, stream, component, x_liq, y_vap, mass_flow_kgh)
                 VALUES (?,?,?,?,?,?)
                 """,
-                [(case_id, stream, r["component"], r.get("x_liq"), r.get("y_vap"),
-                  r.get("mass_flow_kgh")) for r in rows],
+                [
+                    (
+                        case_id,
+                        stream,
+                        r["component"],
+                        r.get("x_liq"),
+                        r.get("y_vap"),
+                        r.get("mass_flow_kgh"),
+                    )
+                    for r in rows
+                ],
             )
         conn.commit()
     except sqlite3.Error:
@@ -605,10 +632,13 @@ def save_stream_composition(conn: sqlite3.Connection, case_id: int, stream: str,
 
 def list_composed_streams(conn: sqlite3.Connection, case_id: int) -> list[str]:
     """这个工况里已经读过组成的流股名。"""
-    return [r["stream"] for r in conn.execute(
-        "SELECT DISTINCT stream FROM stream_components WHERE case_id = ? ORDER BY stream",
-        (case_id,),
-    )]
+    return [
+        r["stream"]
+        for r in conn.execute(
+            "SELECT DISTINCT stream FROM stream_components WHERE case_id = ? ORDER BY stream",
+            (case_id,),
+        )
+    ]
 
 
 def read_all_composition(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
