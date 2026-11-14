@@ -6,6 +6,8 @@
 
 打开已运行的 Aspen 模型，点击「读取当前工况」，即可在本地网页中一站式查看全流程流股、设备参数、塔板剖面与工艺连接图，支持**多工况对比**、**自动管路选型**、**一键生成物能衡算报告**，以及导出结构化数据。
 
+**简体中文** | [English](README-en.md)
+
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 [![安装说明](https://img.shields.io/badge/安装说明-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
