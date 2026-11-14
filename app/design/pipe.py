@@ -32,6 +32,7 @@ GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的文字层是乱码,只能看�
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.design import pipe_data
@@ -542,6 +543,234 @@ def _pump_streams(
     return inlets, outlets
 
 
+def _tables_for(tables: Mapping[str, Any] | None) -> tuple[dict, dict, dict, dict, Any]:
+    """取本次选型用的三张表。都来自同一次加载的快照,不会新旧混用。"""
+    snap = pipe_data.tables_snapshot()
+    tbl = dict(tables or {})
+    dn_to_od = tbl.get("dn_to_od", pipe_data.DN_TO_OD)
+    od_to_walls = tbl.get("od_to_walls", snap.od_to_walls)
+    stress = tbl.get("stress", snap.stress)
+
+    if not dn_to_od or not stress:
+        empty = [
+            label for label, tbl in (("DN→外径(T1)", dn_to_od), ("许用应力(T3)", stress)) if not tbl
+        ]
+        raise TablesNotReady(
+            "标准表未录入:" + "、".join(empty) + " 为空。"
+            "把 GB/T 17395-2024 表 1/表 4 与 GB/T 20801.1-2025 表 B.1 整理成 CSV,"
+            "放进 data/preview/std/docx/,再重启服务(页码与列名见 docs/pipe-standards-index.md)。"
+        )
+
+    return tbl, od_to_walls, stress, dn_to_od, snap
+
+
+@dataclass(frozen=True)
+class _BuildContext:
+    """一次选型用的常量集合:计算侧只看它,不再依赖满屏闭包变量。"""
+
+    opts: dict[str, Any]
+    tbl: dict[str, Any]
+    snap: Any
+    dn_to_od: Mapping
+    od_to_walls: Mapping
+    stress: Mapping
+    max_dn: int
+    default_material: str
+    wall_grade: str
+    global_c2: float | None
+    min_wall_map: Mapping | None
+    od_to_dn: dict
+    pump_in: set
+    pump_out: set
+
+
+def _min_wall_ctx(ctx: _BuildContext, dn: int | None) -> float | None:
+    """DN → 最小壁厚下限。options 里能覆盖(键可能是字符串,统一转 int)。"""
+    if not ctx.min_wall_map or dn is None:
+        return None
+    for upper in sorted(ctx.min_wall_map, key=lambda x: int(x)):
+        if dn <= int(upper):
+            return float(ctx.min_wall_map[upper])
+    return None
+
+
+def _resolve_material(
+    ctx: _BuildContext, name: str, medium: str, design_c: float, warnings: list[str]
+) -> tuple[str, dict, float, Mapping, float | None]:
+    """定材质、腐蚀裕量与许用应力:人工指定 > 管道等级表 > 全局默认。
+
+    工具**不判断介质是否腐蚀**,只按用户定义的表套用(见 pipe_data 第 5 节)。
+    """
+    opts = ctx.opts
+    tbl = ctx.tbl
+    snap = ctx.snap
+    stress = ctx.stress
+    od_to_walls = ctx.od_to_walls
+    default_material = ctx.default_material
+    global_c2 = ctx.global_c2
+    # 材质来源优先级:人工指定 > 管道等级表 > 全局默认
+    cls = pipe_data.resolve_piping_class(
+        name, medium, rules=opts.get("piping_rules"), default=opts.get("piping_default")
+    )
+    override = (opts.get("material_for_stream") or {}).get(name)
+    material = str(override or cls["grade"] or default_material)
+    if (
+        not override
+        and cls["source"] == "none"
+        and (opts.get("piping_rules") or pipe_data.PIPING_CLASS_RULES)
+    ):
+        warnings.append(f"介质 {medium} 未在管道等级表里定义材质,按默认 {default_material} 暂算")
+    if cls["corrosion_mm"] is not None:
+        corrosion_c2 = float(cls["corrosion_mm"])
+    elif global_c2 is not None:
+        corrosion_c2 = float(global_c2)
+    else:
+        corrosion_c2 = 1.0 if material == "20#" else 0.0
+    od_to_walls_used = od_to_walls
+    if material.startswith("S3"):
+        od_to_walls_used = tbl.get("od_to_walls_sst", snap.od_to_walls_sst) or od_to_walls
+    sigma = allowable_stress(material, design_c, dict(stress))
+    return material, cls, corrosion_c2, od_to_walls_used, sigma
+
+
+def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列出便于单测
+    ctx: _BuildContext,
+    q: float,
+    pd: dict,
+    d_i: float,
+    sigma: float | None,
+    corrosion_c2: float,
+    od_to_walls_used: Mapping,
+    is_pump_in: bool,
+    phase: str,
+    warnings: list[str],
+) -> tuple[int, float, dict, dict, float | None, float] | None:
+    """选 DN、定壁厚、核实际流速。返回 (dn, od, w, wall, min_wall_mm, t_req);
+    选不出档位时返回 None(由调用方给出"需并联/专项设计"的说明)。"""
+    dn_to_od = ctx.dn_to_od
+    od_to_dn = ctx.od_to_dn
+    wall_grade = ctx.wall_grade
+    max_dn = ctx.max_dn
+
+    def _wall_for(od: float, sigma=sigma, pd=pd) -> float | None:
+        """某外径下,考虑许用应力、负偏差与最小壁厚下限后最终选定的标准壁厚。"""
+        w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
+        if not w["applicable"]:
+            return None
+        t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
+        mw = _min_wall_ctx(ctx, od_to_dn.get(float(od)))
+        got = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade, mw)
+        return got["wall_mm"]
+
+    sel = select_dn(d_i, dn_to_od, od_to_walls_used, _wall_for)
+    dn, od = sel["dn"], sel["od_mm"]
+    if dn is None:
+        return None
+    if dn > max_dn:
+        warnings.append(f"DN{dn} 超出本期上限 DN{max_dn},需专项确认")
+    w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
+    if not w["applicable"]:
+        warnings.append(w["note"])
+    t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
+    if pd["vacuum"]:
+        warnings.append("真空流股:按最小标准壁厚,外压另行校核(不做外压计算)")
+    min_wall_mm = _min_wall_ctx(ctx, dn)
+    wall = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade, min_wall_mm)
+    if wall["wall_mm"] is None:
+        warnings.append(wall["note"])
+    else:
+        c1 = pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade)
+        v_act = actual_velocity(float(q), od - 2.0 * wall["wall_mm"])
+        if v_act is not None:
+            lo, hi = VELOCITY_RANGE.get(
+                "pump_inlet" if is_pump_in else phase, (0.0, float("inf"))
+            )
+            if not (lo - 1e-9 <= v_act <= hi + 1e-9):
+                warnings.append(
+                    f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)"
+                )
+    return dn, od, w, wall, min_wall_mm, t_req
+
+
+def _select_stream(
+    ctx: _BuildContext, s: Mapping[str, Any]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """算一条流股。返回 (row, missing):两者只会有一个非 None。"""
+    opts = ctx.opts
+    dn_to_od = ctx.dn_to_od
+    pump_in = ctx.pump_in
+    pump_out = ctx.pump_out
+
+    name = s.get("name")
+    q = s.get("vol_flow_m3h")
+    if q is None or q <= 0:
+        return None, {"stream": name, "reason": "缺体积流量,未选型"}
+    phase = phase_of(s.get("vap_frac"))
+    is_pump_in = name in pump_in
+    v = velocity_for(phase, is_pump_in, opts)
+    d_i = inner_diameter(float(q), v)
+    warnings: list[str] = []
+    pd = design_pressure(s.get("pressure_bar"), opts)
+    td = design_temperature(s.get("temperature_c"), opts.get("insulated"), opts)
+    medium = medium_code(phase, opts.get("medium_codes"))
+    material, cls, corrosion_c2, od_to_walls_used, sigma = _resolve_material(
+        ctx, name, medium, td["design_c"], warnings
+    )
+
+    sized = _size_pipe(
+        ctx, q, pd, d_i, sigma, corrosion_c2, od_to_walls_used, is_pump_in, phase, warnings
+    )
+    if sized is None:
+        od_max = max(dn_to_od.values()) if dn_to_od else None
+        return None, {
+            "stream": name,
+            "reason": f"计算内径 {d_i:.1f} mm 超出可选档位"
+            + (f"(最大 Φ{od_max:g} = DN{max(dn_to_od)})" if od_max else "")
+            + ",需并联或专项设计",
+        }
+    dn, od, w, wall, min_wall_mm, t_req = sized
+    mcode = pipe_data.MATERIAL_CODE_BY_GRADE.get(material)
+    if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
+        mcode = "E"
+        warnings.append(f"材质 {material!r} 不在映射表里,等级号末字母按 E 暂记,待人工确认")
+    gc = grade_code(pd["design_mpa"] or 0.0, mcode, td["design_c"], "", opts)
+    if gc["code"] is None:
+        warnings.append(gc["note"])
+    if phase == "two":
+        warnings.append("气液共存:按两相流速选型,需专项核算")
+    return {
+        "stream": name,
+        "phase": phase,
+        "medium_code": medium,
+        "material_grade": material,
+        "piping_class_note": cls["note"],
+        "piping_class_source": cls["source"],
+        "velocity_ms": v,
+        "pump_inlet": is_pump_in,
+        "pump_outlet": name in pump_out,
+        "inner_d_mm": d_i,
+        "dn": dn,
+        "od_mm": od,
+        "vol_flow_m3h": float(q),
+        "design_pressure_mpa": pd["design_mpa"],
+        "gauge_pressure_mpa": pd["gauge_mpa"],
+        "vacuum": pd["vacuum"],
+        "design_temp_c": td["design_c"],
+        "insulated": td["insulated"],
+        "material": material,
+        "stress_mpa": sigma,
+        "t_calc_mm": w["t_calc_mm"],
+        "c2_mm": corrosion_c2,
+        "t_required_mm": t_req,
+        "min_wall_mm": min_wall_mm,
+        "wall_mm": wall["wall_mm"],
+        "wall_floored": bool(wall.get("floored")),
+        "grade_code": gc["code"],
+        "insulation": gc.get("insulation", ""),
+        "warnings": warnings,
+    }, None
+
+
 def build(
     streams: Iterable[Mapping[str, Any]],
     blocks: Iterable[Mapping[str, Any]] | None = None,
@@ -560,184 +789,37 @@ def build(
               不传则用 `pipe_data` 里的(目前是空的 → 会明确报 TablesNotReady)
     """
     opts = dict(options or {})
-    # 三张表必须来自**同一次**加载:以前分别读三个模块变量,导入进行中可能拿到
-    # 新的壁厚表 + 旧的许用应力表 —— 壁厚"能算出来",口径已经串了。
-    snap = pipe_data.tables_snapshot()
-    tbl = dict(tables or {})
-    dn_to_od = tbl.get("dn_to_od", pipe_data.DN_TO_OD)
-    od_to_walls = tbl.get("od_to_walls", snap.od_to_walls)
-    stress = tbl.get("stress", snap.stress)
-
-    if not dn_to_od or not stress:
-        empty = [
-            label for label, tbl in (("DN→外径(T1)", dn_to_od), ("许用应力(T3)", stress)) if not tbl
-        ]
-        raise TablesNotReady(
-            "标准表未录入:" + "、".join(empty) + " 为空。"
-            "把 GB/T 17395-2024 表 1/表 4 与 GB/T 20801.1-2025 表 B.1 整理成 CSV,"
-            "放进 data/preview/std/docx/,再重启服务(页码与列名见 docs/pipe-standards-index.md)。"
-        )
-
+    tbl, od_to_walls, stress, dn_to_od, snap = _tables_for(tables)
     blocks = list(blocks or [])
     pump_in, pump_out = _pump_streams(list(connections or []), blocks)
-    max_dn = int(opts.get("max_dn", pipe_data.MAX_DN))
-    default_material = str(opts.get("material", "S30408"))
-    wall_grade = str(opts.get("wall_tol_grade", pipe_data.DEFAULT_WALL_TOL_GRADE))
-    # 腐蚀裕量:显式给了就用;否则按材质给默认值(碳钢 1.0、不锈钢 0)
-    global_c2 = opts.get("corrosion_mm")
-    # 工艺最小壁厚下限:{DN 上限: 壁厚};传 False 表示这一层不启用
-    min_wall_map = opts.get("min_wall", pipe_data.MIN_WALL_BY_DN)
-    # 反查表跟着"实际用的" DN→外径 走,不用全局表 —— 注入自定义表时下限也认得出来
-    od_to_dn = {float(od): int(dn) for dn, od in dn_to_od.items()}
-
-    def _min_wall(dn: int | None) -> float | None:
-        """DN → 最小壁厚下限。options 里能覆盖(键可能是字符串,统一转 int)。"""
-        if not min_wall_map or dn is None:
-            return None
-        for upper in sorted(min_wall_map, key=lambda x: int(x)):
-            if dn <= int(upper):
-                return float(min_wall_map[upper])
-        return None
+    ctx = _BuildContext(
+        opts=opts,
+        tbl=tbl,
+        snap=snap,
+        dn_to_od=dn_to_od,
+        od_to_walls=od_to_walls,
+        stress=stress,
+        max_dn=int(opts.get("max_dn", pipe_data.MAX_DN)),
+        default_material=str(opts.get("material", "S30408")),
+        wall_grade=str(opts.get("wall_tol_grade", pipe_data.DEFAULT_WALL_TOL_GRADE)),
+        # 腐蚀裕量:显式给了就用;否则按材质给默认值(碳钢 1.0、不锈钢 0)
+        global_c2=opts.get("corrosion_mm"),
+        # 工艺最小壁厚下限:{DN 上限: 壁厚};传 False 表示这一层不启用
+        min_wall_map=opts.get("min_wall", pipe_data.MIN_WALL_BY_DN),
+        # 反查表跟着"实际用的" DN→外径 走,注入自定义表时下限也认得出来
+        od_to_dn={float(od): int(dn) for dn, od in dn_to_od.items()},
+        pump_in=pump_in,
+        pump_out=pump_out,
+    )
 
     rows: list[dict[str, Any]] = []
     missing: list[dict[str, Any]] = []
-
     for s in streams:
-        name = s.get("name")
-        q = s.get("vol_flow_m3h")
-        if q is None or q <= 0:
-            missing.append({"stream": name, "reason": "缺体积流量,未选型"})
-            continue
-
-        phase = phase_of(s.get("vap_frac"))
-        is_pump_in = name in pump_in
-        v = velocity_for(phase, is_pump_in, opts)
-        d_i = inner_diameter(float(q), v)
-        warnings: list[str] = []
-
-        pd = design_pressure(s.get("pressure_bar"), opts)
-        td = design_temperature(s.get("temperature_c"), opts.get("insulated"), opts)
-        medium = medium_code(phase, opts.get("medium_codes"))
-
-        # 材质来源优先级:人工指定 > 管道等级表 > 全局默认
-        # 工具**不判断介质是否腐蚀**,只按用户定义的表套用(见 pipe_data 第 5 节)
-        cls = pipe_data.resolve_piping_class(
-            name, medium, rules=opts.get("piping_rules"), default=opts.get("piping_default")
-        )
-        override = (opts.get("material_for_stream") or {}).get(name)
-        material = str(override or cls["grade"] or default_material)
-        if (
-            not override
-            and cls["source"] == "none"
-            and (opts.get("piping_rules") or pipe_data.PIPING_CLASS_RULES)
-        ):
-            warnings.append(
-                f"介质 {medium} 未在管道等级表里定义材质,按默认 {default_material} 暂算"
-            )
-        if cls["corrosion_mm"] is not None:
-            corrosion_c2 = float(cls["corrosion_mm"])
-        elif global_c2 is not None:
-            corrosion_c2 = float(global_c2)
+        row, miss = _select_stream(ctx, s)
+        if miss is not None:
+            missing.append(miss)
         else:
-            corrosion_c2 = 1.0 if material == "20#" else 0.0
-
-        stress_table = dict(stress)
-        od_to_walls_used = od_to_walls
-        if material.startswith("S3"):
-            od_to_walls_used = tbl.get("od_to_walls_sst", snap.od_to_walls_sst) or od_to_walls
-        sigma = allowable_stress(material, td["design_c"], stress_table)
-
-        def _wall_for(od: float, sigma=sigma, pd=pd) -> float | None:
-            """某外径下,考虑许用应力、负偏差与最小壁厚下限后最终选定的标准壁厚。"""
-            w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
-            if not w["applicable"]:
-                return None
-            t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
-            mw = _min_wall(od_to_dn.get(float(od)))
-            got = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade, mw)
-            return got["wall_mm"]
-
-        sel = select_dn(d_i, dn_to_od, od_to_walls_used, _wall_for)
-        dn, od = sel["dn"], sel["od_mm"]
-        if dn is None:
-            od_max = max(dn_to_od.values()) if dn_to_od else None
-            missing.append(
-                {
-                    "stream": name,
-                    "reason": f"计算内径 {d_i:.1f} mm 超出可选档位"
-                    + (f"(最大 Φ{od_max:g} = DN{max(dn_to_od)})" if od_max else "")
-                    + ",需并联或专项设计",
-                }
-            )
-            continue
-        if dn > max_dn:
-            warnings.append(f"DN{dn} 超出本期上限 DN{max_dn},需专项确认")
-
-        w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
-        if not w["applicable"]:
-            warnings.append(w["note"])
-
-        t_req = (w["t_calc_mm"] or 0.0) + corrosion_c2
-        if pd["vacuum"]:
-            warnings.append("真空流股:按最小标准壁厚,外压另行校核(不做外压计算)")
-        min_wall_mm = _min_wall(dn)
-        wall = round_up_wall(t_req, od_to_walls_used.get(od), od, wall_grade, min_wall_mm)
-        if wall["wall_mm"] is None:
-            warnings.append(wall["note"])
-        else:
-            c1 = pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade)
-            v_act = actual_velocity(float(q), od - 2.0 * wall["wall_mm"])
-            if v_act is not None:
-                lo, hi = VELOCITY_RANGE.get(
-                    "pump_inlet" if is_pump_in else phase, (0.0, float("inf"))
-                )
-                if not (lo - 1e-9 <= v_act <= hi + 1e-9):
-                    warnings.append(
-                        f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)"
-                    )
-        mcode = pipe_data.MATERIAL_CODE_BY_GRADE.get(material)
-        if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
-            mcode = "E"
-            warnings.append(f"材质 {material!r} 不在映射表里,等级号末字母按 E 暂记,待人工确认")
-        gc = grade_code(pd["design_mpa"] or 0.0, mcode, td["design_c"], "", opts)
-        if gc["code"] is None:
-            warnings.append(gc["note"])
-        if phase == "two":
-            warnings.append("气液共存:按两相流速选型,需专项核算")
-
-        rows.append(
-            {
-                "stream": name,
-                "phase": phase,
-                "medium_code": medium,
-                "material_grade": material,
-                "piping_class_note": cls["note"],
-                "piping_class_source": cls["source"],
-                "velocity_ms": v,
-                "pump_inlet": is_pump_in,
-                "pump_outlet": name in pump_out,
-                "inner_d_mm": d_i,
-                "dn": dn,
-                "od_mm": od,
-                "vol_flow_m3h": float(q),
-                "design_pressure_mpa": pd["design_mpa"],
-                "gauge_pressure_mpa": pd["gauge_mpa"],
-                "vacuum": pd["vacuum"],
-                "design_temp_c": td["design_c"],
-                "insulated": td["insulated"],
-                "material": material,
-                "stress_mpa": sigma,
-                "t_calc_mm": w["t_calc_mm"],
-                "c2_mm": corrosion_c2,
-                "t_required_mm": t_req,
-                "min_wall_mm": min_wall_mm,
-                "wall_mm": wall["wall_mm"],
-                "wall_floored": bool(wall.get("floored")),
-                "grade_code": gc["code"],
-                "insulation": gc.get("insulation", ""),
-                "warnings": warnings,
-            }
-        )
+            rows.append(row)
 
     return {
         "rows": rows,

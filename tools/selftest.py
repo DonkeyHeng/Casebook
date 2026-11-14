@@ -2809,8 +2809,21 @@ def test_http_entry() -> None:
             call("POST", "/api/piping-classes", body={}) == 400 and not cfg.is_file(),
         )
         check("HTTP:数组 body 回 400", call("POST", "/api/piping-classes", raw=b"[1]") == 400)
-        huge = b'{"rules": [], "default": null, "pad": "' + b"x" * (300 * 1024) + b'"}'
-        check("HTTP:超大 body 回 413", call("POST", "/api/piping-classes", raw=huge) == 413)
+        # 声明一个超过上限的 Content-Length 但不真发 body:服务在读 body 之前就回 413,
+        # 客户端也能干净地读到这个状态码(真发 300 KB 会让服务端 RST,状态码读不到)
+        import http.client
+
+        conn = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=15)
+        try:
+            conn.putrequest("POST", "/api/piping-classes")
+            conn.putheader("X-Casebook-Client", "1")
+            conn.putheader("Content-Type", "application/json")
+            conn.putheader("Content-Length", "300000")
+            conn.endheaders()
+            status = conn.getresponse().status
+        finally:
+            conn.close()
+        check("HTTP:超大 body 回 413", status == 413, f"status={status}")
         good = {"rules": [{"medium": ["PL"], "grade": "20#", "corrosion_mm": 1.0}], "default": None}
         check(
             "HTTP:合法等级表仍能保存",
