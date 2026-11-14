@@ -146,7 +146,7 @@ def boundary_build(streams, parts) -> dict:
 
         if missing:
             state, rel = NO_DATA, None
-            note = "配置里的流股在这个工况里不存在:" + "、".join(missing[:3])
+            note = "配置里的流股在这个工况里不存在：" + "、".join(missing[:3])
         elif not rows_in:
             state, rel = NO_DATA, None
             note = "没有确认进界流股"
@@ -158,16 +158,16 @@ def boundary_build(streams, parts) -> dict:
             if state == NO_DATA:
                 note = (f"流股 {_missing_streams(rows_in + rows_out)} 缺质量流量"
                         if _missing_streams(rows_in + rows_out)
-                        else "进界合计为 0,相对误差无意义")
+                        else "进界合计为 0，相对误差无意义")
             elif state == TOO_SMALL:
                 note = (f"进界 {mass_in:,.3f}、出界 {mass_out:,.3f} kg/h 都低于 "
-                        f"{MIN_FLOW_KGH:g} kg/h,相对误差无意义")
+                        f"{MIN_FLOW_KGH:g} kg/h，相对误差无意义")
             elif state == PASS:
-                note = (f"进界 {mass_in:,.2f} = 出界 {mass_out:,.2f} kg/h,"
-                        f"相对误差 {rel:.4%}(容差 {TOL_REL:.1%})")
+                note = (f"进界 {mass_in:,.2f} = 出界 {mass_out:,.2f} kg/h，"
+                        f"相对误差 {rel:.4%}（容差 {TOL_REL:.1%}）")
             else:
-                note = (f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%},疑似漏流股或质量不守恒"
-                        f"(进界 {mass_in:,.2f}、出界 {mass_out:,.2f} kg/h)")
+                note = (f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%}，疑似漏流股或质量不守恒"
+                        f"（进界 {mass_in:,.2f}、出界 {mass_out:,.2f} kg/h）")
 
         out.append({
             "key": key,
@@ -244,16 +244,16 @@ def build(streams, blocks, connections, overrides=None, picked=None) -> dict:
             if state == NO_DATA:
                 note = (f"流股 {_missing_streams(rows_in + rows_out)} 缺质量流量"
                         if _missing_streams(rows_in + rows_out)
-                        else "进口合计为 0,相对误差无意义")
+                        else "进口合计为 0，相对误差无意义")
             elif state == TOO_SMALL:
                 note = (f"进 {mass_in:,.3f}、出 {mass_out:,.3f} kg/h 都低于 "
-                        f"{MIN_FLOW_KGH:g} kg/h,相对误差无意义")
+                        f"{MIN_FLOW_KGH:g} kg/h，相对误差无意义")
             elif state == PASS:
-                note = (f"进 {mass_in:,.2f} = 出 {mass_out:,.2f} kg/h,"
-                        f"相对误差 {rel:.4%}(容差 {TOL_REL:.1%})")
+                note = (f"进 {mass_in:,.2f} = 出 {mass_out:,.2f} kg/h，"
+                        f"相对误差 {rel:.4%}（容差 {TOL_REL:.1%}）")
             else:
-                note = (f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%},疑似漏流股或质量不守恒"
-                        f"(进 {mass_in:,.2f}、出 {mass_out:,.2f} kg/h)")
+                note = (f"相对误差 {rel:.4%} 超过 {TOL_REL:.1%}，疑似漏流股或质量不守恒"
+                        f"（进 {mass_in:,.2f}、出 {mass_out:,.2f} kg/h）")
 
         devices.append({
             "block": name,

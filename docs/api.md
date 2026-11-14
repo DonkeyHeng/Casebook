@@ -21,6 +21,9 @@
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |
 | GET | `/api/cases/{id}/export-family.xlsx?family=pump` | 设备页右上角「导出 Excel」:只导**当前分类**的设备明细;分类键见 `/api/block-families`,泵分类含 p_v / NPSHₐ / 建议电机 |
 | GET | `/api/cases/{id}/export.ai.zip` | 导出 AI 分析包(给 AI 读);多一份 `pipe_schedule.csv` |
+| GET | `/api/cases/{id}/sections` | 工段(界区)边界:自动草稿 + 已确认 + 合并结果;含配置文件现状 |
+| POST | `/api/cases/{id}/sections` | 保存工段边界(写 `data/config/sections.json`,按工况 id;不碰工况库) |
+| GET | `/api/cases/{id}/balance-report.docx?blocks=&families=` | 物料与能量衡算报告(Word);`blocks` / `families` 取并集,不给就是全部设备 |
 
 ## 管路选型 `/api/cases/{id}/pipes`
 

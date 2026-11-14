@@ -12,7 +12,7 @@
 
 草稿怎么来(实测依据)
 ---------------------
-设备名通常带段号(`E0101` / `P0201` / `VA0301` / `EX0101` / `T0202-A`),
+设备名通常带段号(`E0101` / `P0201` / `EX0101` / `T0303-A` 这类「字母 + 段号 + 序号」),
 实测 9 个工况、629 台有段号信息的设备,594 / 629 = 94.4% 的进出口流股与
 设备名段号自洽。于是可以自动推一版草稿:
 
@@ -40,7 +40,7 @@ import re
 UTILITY_KEY = "util"
 UTILITY_LABEL = "公用工程 / 未分组"
 
-# 设备名里的 4 位编码:E0101 / EX0101 / VA0301 / T0202-A / C-0501
+# 设备名里的 4 位编码:E0101 / EX0101 / C-0501 / T0303-A
 _BLOCK_CODE = re.compile(r"(\d{4})")
 # 流股名的段号:0101 → 01(至少以 4 位数字开头)
 _STREAM_CODE = re.compile(r"^(\d{2})\d{2}")
@@ -58,8 +58,8 @@ def section_of_block(name) -> str | None:
 
     >>> section_of_block("E0101")
     '01'
-    >>> section_of_block("T0202-A")
-    '02'
+    >>> section_of_block("T0303-A")
+    '03'
     >>> section_of_block("B3")
     """
     if not name:

@@ -18,6 +18,9 @@
     GET  /api/cases/{id}/impact      报错设备的波及范围(哪些流股的数据不能用)
     GET  /api/cases/{id}/export.xlsx      导出 Excel(给人看)
     GET  /api/cases/{id}/export.ai.zip    导出 AI 分析包(Markdown + CSV,给 AI 读)
+    GET  /api/cases/{id}/sections         工段边界:自动草稿 + 已确认 + 合并结果
+    POST /api/cases/{id}/sections         保存工段边界(写 data/config/sections.json)
+    GET  /api/cases/{id}/balance-report.docx   物料与能量衡算报告(Word)
 
 设计:
   * 只用标准库,不引第三方依赖(打包 exe 时省事)
@@ -303,6 +306,10 @@ class Handler(BaseHTTPRequestHandler):
                 if len(seg) == 5 and seg[3] == "pumps" and seg[4] == "inherit-pv":
                     self._inherit_pump_pv(seg[2])
                     return
+                # /api/cases/{id}/sections —— 保存工段(界区)边界
+                if len(seg) == 4 and seg[3] == "sections":
+                    self._save_sections(seg[2])
+                    return
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
@@ -571,6 +578,12 @@ class Handler(BaseHTTPRequestHandler):
             if parts[3] == "export.ai.zip":
                 self._export_ai(conn, case_id)
                 return
+            if parts[3] == "balance-report.docx":
+                self._export_report(conn, case_id, query)
+                return
+            if parts[3] == "sections":
+                self._sections(conn, case_id)
+                return
             self._error("未知接口", 404)
         finally:
             conn.close()
@@ -731,6 +744,100 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    # ------------------------------------------------------------ 衡算报告
+
+    def _sections(self, conn, case_id: int) -> None:
+        """GET /api/cases/{id}/sections —— 工段(界区)边界:草稿 + 已确认 + 合并。"""
+        from app.api import report_config
+        from app.design import sections as section_rules
+
+        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
+        connections = [dict(r) for r in db.read_connections(conn, case_id)]
+        draft = section_rules.draft(blocks, connections)
+        confirmed, overrides, error = report_config.load(case_id)
+        self._json({
+            "case_id": case_id,
+            "draft": draft,
+            "confirmed": confirmed,
+            "merged": section_rules.merge(draft, confirmed),
+            "auto": not confirmed,
+            "device_sections": overrides,
+            "config": report_config.status(),
+            "error": error,
+        })
+
+    def _save_sections(self, raw_id: str) -> None:
+        """POST /api/cases/{id}/sections —— 保存边界(只写 data/config/,不碰工况库)。"""
+        from app.api import report_config
+
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        parts, overrides, errors = report_config.validate(self._read_json_body())
+        if errors:
+            self._json({"ok": False, "errors": errors}, 400)
+            return
+        ok, save_errors = report_config.save(case_id, parts, overrides)
+        payload = {"ok": ok, "errors": save_errors, "config": report_config.status()}
+        self._json(payload, 200 if ok else 500)
+
+    def _export_report(self, conn, case_id: int, query: dict) -> None:
+        """GET /api/cases/{id}/balance-report.docx?blocks=&families= —— 衡算报告。
+
+        `blocks` / `families` 取并集;都不给就是全部设备。工段边界自动读
+        `data/config/sections.json`,没有确认过就用自动草稿(报告里会注明)。
+        """
+        from app.api import report_config, report_export
+        from app.design import block_family
+        from app.design import sections as section_rules
+
+        def _q(key: str) -> str:
+            val = query.get(key)
+            if isinstance(val, (list, tuple)):
+                val = val[0] if val else ""
+            return str(val or "").strip()
+
+        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
+        connections = [dict(r) for r in db.read_connections(conn, case_id)]
+
+        picked: set[str] = set()
+        picked.update(n for n in _q("blocks").replace(" ", "").split(",") if n)
+        for key in _q("families").replace(" ", "").split(","):
+            if key:
+                picked.update(b["name"] for b in blocks
+                              if block_family.family_of(b.get("type")) == key)
+        keys = {b["name"] for b in blocks}
+        picked_list = sorted(picked & keys) or None
+
+        confirmed, _overrides, _error = report_config.load(case_id)
+        parts = None
+        if confirmed:
+            parts = section_rules.merge(
+                section_rules.draft(blocks, connections), confirmed)
+
+        try:
+            data, fname = report_export.build_report(conn, case_id, parts, picked_list)
+        except ImportError:
+            self._error('服务器没有安装 python-docx,无法生成 Word 报告。'
+                        '请先 pip install "python-docx>=1.1"', 500)
+            return
+        except LookupError:
+            self._error(f"没有 id={case_id} 的工况", 404)
+            return
+
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
         self.send_header("Content-Length", str(len(data)))

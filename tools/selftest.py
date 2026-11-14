@@ -377,7 +377,7 @@ def test_mass_balance() -> None:
 
     # ⑧ 工段判定四层:配置 > 设备名 > 流股众数 > 公用工程
     check_eq("工段: 设备名尾四位", section_rules.section_of_block("EX0101"), "01")
-    check_eq("工段: 带后缀的塔名", section_rules.section_of_block("T0202-A"), "02")
+    check_eq("工段: 带后缀的塔名", section_rules.section_of_block("T0303-A"), "03")
     check_eq("工段: 无段号设备名", section_rules.section_of_block("B3"), None)
     check_eq("工段: 流股段号", section_rules.section_of_stream("0101"), "01")
     check_eq("工段: 公用工程流股无段号", section_rules.section_of_stream("CW1"), None)

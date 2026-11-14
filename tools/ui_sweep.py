@@ -25,7 +25,7 @@ import tempfile
 import time
 import urllib.request
 
-PAGES = ["home", "streams", "blocks", "compare", "flow", "pipes"]
+PAGES = ["home", "streams", "blocks", "compare", "flow", "pipes", "report"]
 
 CHROME_CANDIDATES = [
     r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -174,7 +174,7 @@ def main(argv=None) -> int:
     if errors:
         print(f"发现 {errors} 条控制台报错,见上。")
         return 1
-    print(f"6 个页签 × {len(themes)} 套主题,无控制台报错。")
+    print(f"{len(PAGES)} 个页签 × {len(themes)} 套主题,无控制台报错。")
     return 0
 
 
