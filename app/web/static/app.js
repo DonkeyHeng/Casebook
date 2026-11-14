@@ -517,7 +517,19 @@ async function inheritPv() {
 function renderPumpBar() {
   const bar = document.getElementById("pumpBar");
   if (!bar) return;
-  bar.classList.toggle("hidden", !(state.tab === "blocks" && state.family === "pump"));
+  const show = state.tab === "blocks" && state.family === "pump";
+  bar.classList.toggle("hidden", !show);
+  if (!show) closePvHelp();
+}
+
+/* 「?」指南收起来(切页 / 切家族时也要收,不然回来它还开着) */
+function closePvHelp() {
+  const help = document.getElementById("pvHelp");
+  const body = document.getElementById("pvHelpBody");
+  const btn = document.getElementById("pvHelpBtn");
+  if (body) body.classList.remove("show");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  if (help) delete help.dataset.pinned;
 }
 
 /* 参数条只改"显示",不写库:余量乘到流量/扬程上 */
@@ -835,6 +847,9 @@ function renderCompareBlocks(thead, tbody, data) {
 }
 
 function renderTable() {
+  // 泵参数条只在「设备 → 泵」显示:切到流股 / 对比页必须跟着收,
+  // 否则停留在泵页时那行说明会一直挂在别的页面上。
+  renderPumpBar();
   if (state.tab === "streams") renderStreams();
   else if (state.tab === "blocks") renderBlocks();
   else renderCompare();
@@ -1393,6 +1408,7 @@ function resetTableScroll() {
 
 function setTab(tab) {
   state.tab = tab;
+  renderPumpBar();      // 离开泵页立刻收掉参数条,不等表格重绘
   syncToolbar(tab);
   closeDataDrawers();   // 三个抽屉一起收(原来漏了泵参数)
   renderBanner();
@@ -2670,21 +2686,20 @@ function bindEvents() {
   const pvHelpBtn = document.getElementById("pvHelpBtn");
   const pvHelpBody = document.getElementById("pvHelpBody");
   if (pvHelp && pvHelpBtn && pvHelpBody) {
-    let pinned = false;
     const setPvHelp = (open) => {
       pvHelpBody.classList.toggle("show", open);
       pvHelpBtn.setAttribute("aria-expanded", open ? "true" : "false");
-      if (!open) pinned = false;
+      if (!open) delete pvHelp.dataset.pinned;
     };
     pvHelp.addEventListener("mouseenter", () => setPvHelp(true));
     pvHelp.addEventListener("mouseleave", () => {
-      if (!pinned) setPvHelp(false);
+      if (pvHelp.dataset.pinned !== "1") setPvHelp(false);
     });
     pvHelpBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       const open = !pvHelpBody.classList.contains("show");
       setPvHelp(open);
-      pinned = open;
+      if (open) pvHelp.dataset.pinned = "1";
     });
     document.addEventListener("click", (e) => {
       if (!pvHelp.contains(e.target)) setPvHelp(false);
