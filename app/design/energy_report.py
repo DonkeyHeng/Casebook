@@ -42,7 +42,7 @@ OK, BAD, NO_DATA, SKIP = "ok", "bad", "no_data", "skip"
 STATE_TEXT = {OK: "通过", BAD: "超差", NO_DATA: "无法校验", SKIP: "不校验"}
 
 # 热侧行的说明
-_HOT_NOTE = "热侧 = −冷侧,不单独校验(整体 ΔH 恒约等于 0)"
+_HOT_NOTE = "热侧 = −冷侧，不单独校验（整体 ΔH 恒约等于 0）"
 
 
 def _row_sum(rows, hmap) -> float | None:
@@ -116,7 +116,8 @@ def _device_row(block, in_streams, out_streams, hmap, balance, side="",
 
     if ref_kind == "power":
         dev_kw, dev_kind = block.get("power_kw"), "power"
-    elif ref_kind == "duty":
+    elif ref_kind in ("duty", "hx_cold"):
+        # 换热器的对照值也是热负荷(HX_DUTY),只是校的是冷侧
         dev_kw, dev_kind = block.get("duty_kw"), "duty"
     else:
         dev_kw, dev_kind = None, ""

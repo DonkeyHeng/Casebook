@@ -621,6 +621,8 @@ def test_energy_report() -> None:
     check_eq("energy: HeatX 出两行", len(rep["devices"]), 2)
     check_eq("energy: HeatX 冷侧行", (cold["side"], cold["dh_kw"]),
              ("冷", 1600.0))
+    check_eq("energy: HeatX 冷侧的对照值也是热负荷(HX_DUTY)",
+             (cold["dev_kw"], cold["dev_kind"]), (1600.0, "duty"))
     check_eq("energy: HeatX 冷侧合计只算冷侧", (cold["h_in_kw"], cold["h_out_kw"]),
              (800.0, 2400.0))
     check_eq("energy: HeatX 热侧不判 ΔH", hot["dh_kw"], None)
@@ -691,6 +693,52 @@ def test_energy_report() -> None:
     rep = energy_rules.build(blocks, [], [], {})
     check_eq("energy: 分组顺序按家族表", [g["key"] for g in rep["groups"]],
              ["column", "heat", "mix"])
+
+
+def test_report_export() -> None:
+    """report_export:数据组装 + .docx 渲染(缺 python-docx 时不算失败)。"""
+    from app.api import report_export
+
+    scratch = Path("data/preview/_selftest-report.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copyfile("samples/case-23-error.db", scratch)
+        conn = db.open_db(str(scratch))
+        case_id = db.list_cases(conn)[0]["id"]
+
+        data = report_export.build_data(conn, case_id)
+        check("report: 组装出界区衡算", data["zone"]["summary"]["total"] >= 1)
+        check("report: 组装出逐设备表", data["devices"]["summary"]["total"] >= 1)
+        check("report: 组装出能量表", len(data["energy"]["devices"]) >= 1)
+        check("report: 未给边界时标记为自动草稿", data["auto_boundary"] is True)
+        check_eq("report: 文件名带工况号与 balance",
+                 report_export.filename(case_id).startswith(
+                     f"Casebook_case{case_id}_balance_"), True)
+
+        try:
+            blob = report_export.render(data)
+        except ImportError:
+            print("  (没装 python-docx,跳过渲染用例)")
+            blob = None
+        if blob is not None:
+            check("report: 生成的是 docx(zip 头)", blob[:2] == b"PK")
+            check("report: docx 不是空文件", len(blob) > 10_000,
+                  f"实际 {len(blob)} 字节")
+            from docx import Document
+            import io as _io
+            doc = Document(_io.BytesIO(blob))
+            check("report: 表格数量合理", len(doc.tables) >= 4,
+                  f"实际 {len(doc.tables)} 张")
+            text = "\n".join(p.text for p in doc.paragraphs)
+            check("report: 封面标题在", report_export.TITLE in text)
+            check("report: 附注写了非工程设计依据", "非工程设计依据" in text)
+            check("report: 附注写了数据来源", "数据来源" in text)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------- 报错波及范围
@@ -1832,6 +1880,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("焓平衡 balance.compute()", test_balance),
                      ("物料衡算 mass_balance", test_mass_balance),
                      ("能量衡算 energy_report", test_energy_report),
+                     ("衡算报告 report_export", test_report_export),
                      ("报错波及范围 impact.build()", test_impact),
                      ("管路选型 design.pipe", test_pipe),
                      ("选型校验 validate() V1–V9", test_pipe_checks),

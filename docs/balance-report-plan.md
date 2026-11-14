@@ -285,7 +285,7 @@ README.md                     改    功能表 +1 行
 | 1 | 本方案 | — | 已确认 |
 | 2 | `sections.py`(界区草稿/配置/合并) + `mass_balance.py`(界区 + 逐设备) + 夹具 | `python -m tools.selftest` | 287 → **352 条全过**(已跑,见 §10) |
 | 3 | `energy_report.py` + 塔负荷回退 + 夹具 | `python -m tools.selftest --db data/cases.db` | 352 → **386 条全过**;库内一致性不破(未动 `balance.py`) |
-| 4 | `report_export.py` + `tools/balance_report.py` | `python -m tools.balance_report --db data/cases.db --case 40 --all --out data/preview` | 生成 `Casebook_case40_balance_*.docx` |
+| 4 | `report_export.py` + `tools/balance_report.py` | `python -m tools.balance_report --case 40` | 386 → **398 条全过**;生成 `Casebook_case40_balance_*.docx`(60 KB / 93 张表) |
 | 5 | 路由 + Web 页 | 起服务后手点按钮 | 下载成功;缺 docx 时给提示 |
 
 夹具覆盖(第 2 步,全部离线、不需要 Aspen):
