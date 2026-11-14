@@ -86,17 +86,18 @@ python -m app.api   # 启动后浏览器访问 http://127.0.0.1:8000
 | **物能衡算报告** | 按册或合订导出 `.docx` 格式的《物料衡算报告》与《能量衡算报告》。提供**物料平衡宽表**（流股为列、属性与组分为行）、年消耗/产出量（t/a）、全流程能量汇总及塔负荷明细；支持人工确认工段（界区）边界并附带 $\Sigma\text{进} = \Sigma\text{出}$ 守恒校验。亦支持命令行批量生成：`python -m tools.balance_report --case N`。 |
 | **多格式导出** | 支持导出包含 8 张工作表的完整 Excel 台账（概要 / 流股 / 设备 / 泵 / 连接 / 塔剖面 / 管道 / 管道计算书），或导出包含 Markdown 说明 + CSV + JSON 的结构化数据包（`.zip`）。 |
 
-> **质量保障**：项目内置 **433 条**独立回归测试用例（含 `--db` 库一致性校验共 461 条），运行 `python -m tools.selftest` 即可在无 Aspen 环境下完成全链路逻辑验证。
+> **质量保障**：项目内置 **465 条**独立回归测试用例（含 `--db` 库一致性校验共 493 条），运行 `python -m tools.selftest` 即可在无 Aspen 环境下完成全链路逻辑验证。
 
 ---
 
 ## 版本演进
 
-**当前最新版本：[v1.2.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.2.0)**（完整更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+**当前最新版本：[v1.2.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.2.1)**（完整更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
 
 - **第一期（核心读取与选型）**：完成工况快照存储、流股/设备/塔剖面/流程图展示、多工况对比、管路自动选型及基础导出。
 - **第二期（工程深度与体验）**：新增设备分族视图、泵参数与 $\text{NPSH}_a$ 计算、按分类导出 Excel 及深色主题（全程保持纯只读架构）。
 - **v1.2.0（物能衡算报告）**：新增 Word 版《物料衡算报告》与《能量衡算报告》导出，支持工段界区划分与全流程物料/能量守恒校验，并将塔与反应器纳入焓平衡校验范围。
+- **v1.2.1（健壮性修复）**：按代码审查报告修掉写入路径上的隐患 —— 坏请求不再清空管道等级表、示例库改为一致性备份加原子替换、标准表改版本化目录切换、数值入口统一拒绝 NaN/Inf、安全扫描失败即报错，并拆分四个长函数。
 
 <details>
 <summary><strong>点击查看早期版本号对照表（2026-11 版本号规范化重排）</strong></summary>
