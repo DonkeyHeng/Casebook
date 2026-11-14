@@ -10,7 +10,8 @@
     python -m tools.check_public_safe --all        # 工作区 + 历史
     python -m tools.check_public_safe --strict     # 中危也算失败
 
-退出码:0 = 通过;1 = 有问题(默认只在有高危时);2 = 不在 git 仓库里。
+退出码:0 = 通过;1 = 有问题(默认只在有高危时);2 = 不在 git 仓库里;
+        3 = 扫描失败(git 调用出错,结果不可信)。
 
 只报告**位置与类型**,不回显明文:命中的片段一律打码。
 
@@ -24,6 +25,7 @@ import argparse
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 MAX_BYTES = 2_000_000          # 超过就跳过(多半是模型 / 图片 / 数据库)
@@ -63,9 +65,22 @@ EMAIL_ALLOW = re.compile(
 LEVEL_ORDER = {"高": 0, "中": 1, "低": 2}
 
 
+class ScanError(RuntimeError):
+    """git 调用失败。安全门禁必须"失败关闭":空输出不能被当成"没命中"。"""
+
+
 def sh(*args, **kw):
-    return subprocess.run(["git", *args], capture_output=True, text=True,
+    """跑 git;返回码非 0 直接抛 ScanError。
+
+    以前这里不看返回码:仓库读不到、对象损坏或 git 执行异常时 stdout 是空的,
+    扫描结果会变成"未发现敏感内容" —— 公开前的门禁等于失效。
+    """
+    proc = subprocess.run(["git", *args], capture_output=True, text=True,
                           encoding="utf-8", errors="replace", **kw)
+    if proc.returncode != 0:
+        detail = (proc.stderr or "").strip().replace("\n", " ")[:200]
+        raise ScanError(f"git {' '.join(args)} 失败(返回码 {proc.returncode}):{detail}")
+    return proc
 
 
 def mask(s: str) -> str:
@@ -145,7 +160,11 @@ def iter_staged():
 
 
 def iter_history():
-    """遍历所有可达 blobs,按 sha 去重;每个 blob 只扫一次。"""
+    """遍历所有可达 blobs,按 sha 去重;每个 blob 只扫一次。
+
+    内容用 Popen 流式读:一次性 capture_output 会把全部历史内容读进内存,
+    历史长 / 大文件多时能吃掉几个 GB;流式读只保留当前这一个 blob。
+    """
     listing = sh("rev-list", "--objects", "--all").stdout.splitlines()
     sha2path = {}
     for line in listing:
@@ -154,37 +173,59 @@ def iter_history():
             sha2path[parts[0]] = parts[1]
     if not sha2path:
         return
-    shas = list(sha2path)
-    payload = ("\n".join(shas) + "\n").encode()
+    payload = "\n".join(sha2path) + "\n"
 
-    chk = subprocess.run(["git", "cat-file", "--batch-check"], input=payload,
-                         capture_output=True)
+    chk = sh("cat-file", "--batch-check", input=payload)
     blobs = []
-    for line in chk.stdout.decode("utf-8", "replace").splitlines():
+    for line in chk.stdout.splitlines():
         parts = line.split()
-        if len(parts) == 3 and parts[1] == "blob" and int(parts[2]) <= MAX_BYTES:
+        if len(parts) != 3 or parts[1] != "blob":
+            continue
+        try:
+            size = int(parts[2])
+        except ValueError:
+            continue
+        if size <= MAX_BYTES:
             blobs.append(parts[0])
     if not blobs:
         return
 
     payload = ("\n".join(blobs) + "\n").encode()
-    buf = subprocess.run(["git", "cat-file", "--batch"], input=payload,
-                         capture_output=True).stdout
-    i = 0
-    while i < len(buf):
-        nl = buf.find(b"\n", i)
-        if nl < 0:
-            break
-        header = buf[i:nl].decode("utf-8", "replace")
-        i = nl + 1
-        parts = header.split()
-        if len(parts) != 3:
-            continue
-        sha, _, size = parts[0], parts[1], int(parts[2])
-        data = buf[i:i + size]
-        i += size + 1
-        path = sha2path.get(sha, sha[:8])
-        yield (f"{path} @ 历史 {sha[:7]}", data)
+    # sha 列表走临时文件而不是管道:几百个 sha 就会超过管道缓冲,
+    # 主线程"先写完再读"会和 git 互相等对方,直接死锁(实测 638 个对象必现)。
+    with tempfile.TemporaryFile() as sha_file:
+        sha_file.write(payload)
+        sha_file.seek(0)
+        proc = subprocess.Popen(["git", "cat-file", "--batch"],
+                                stdin=sha_file, stdout=subprocess.PIPE)
+        stdout = proc.stdout
+        if stdout is None:
+            raise ScanError("git cat-file 的管道没建起来")
+        try:
+            while True:
+                header = stdout.readline()
+                if not header:
+                    break
+                parts = header.decode("utf-8", "replace").split()
+                if len(parts) != 3:
+                    raise ScanError(f"cat-file 输出看不懂:{header[:80]!r}")
+                sha, kind, size_text = parts
+                try:
+                    size = int(size_text)
+                except ValueError:
+                    raise ScanError(f"cat-file 长度字段不是数字:{size_text!r}") from None
+                data = stdout.read(size)
+                if len(data) != size:
+                    raise ScanError(f"cat-file 读到一半断了(sha {sha[:7]})")
+                stdout.read(1)                    # 每个对象后面跟着一个换行
+                if kind != "blob":
+                    continue
+                yield (f"{sha2path.get(sha, sha[:8])} @ 历史 {sha[:7]}", data)
+        finally:
+            stdout.close()
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait()
 
 
 # ---- 仓库级检查 --------------------------------------------------------------
@@ -219,7 +260,9 @@ def main() -> int:
     ap.add_argument("--strict", action="store_true", help="中危也算失败")
     args = ap.parse_args()
 
-    if sh("rev-parse", "--is-inside-work-tree").returncode != 0:
+    try:
+        sh("rev-parse", "--is-inside-work-tree")
+    except ScanError:
         print("不在 git 仓库里", file=sys.stderr)
         return 2
 
@@ -233,14 +276,18 @@ def main() -> int:
         if args.history or args.all:
             sources.append(("历史", iter_history))
 
-    for label, gen in sources:
-        n = 0
-        for path, data in gen():
-            scan_bytes(path, data, bans, allows, hits)
-            n += 1
-        print(f"已扫描 {label}:{n} 个文件")
-
-    check_repo_level(hits)
+    try:
+        for label, gen in sources:
+            n = 0
+            for path, data in gen():
+                scan_bytes(path, data, bans, allows, hits)
+                n += 1
+            print(f"已扫描 {label}:{n} 个文件")
+        check_repo_level(hits)
+    except ScanError as exc:
+        print(f"\n✗ 扫描失败:{exc}", file=sys.stderr)
+        print("  门禁失败关闭:这次没扫完,不能当作通过。", file=sys.stderr)
+        return 3
 
     if not hits:
         print("\n✓ 未发现敏感内容")

@@ -18,6 +18,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import os
 import re
 import shutil
@@ -787,7 +788,8 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
         except (TypeError, ValueError):
             errors.append(f"第 {i} 条:腐蚀裕量必须是数字")
             continue
-        if c2 < 0 or c2 > 20:
+        # NaN 能同时骗过 c2 < 0 和 c2 > 20 两个比较,得单独挡
+        if not math.isfinite(c2) or c2 < 0 or c2 > 20:
             errors.append(f"第 {i} 条:腐蚀裕量要在 0–20 mm 之间")
             continue
         rule = {"grade": grade, "corrosion_mm": c2}
@@ -810,6 +812,9 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
             try:
                 c2 = float(raw_default.get("corrosion_mm") or 0.0)
             except (TypeError, ValueError):
+                c2 = 0.0
+            if not math.isfinite(c2):
+                # min/max 对 NaN 不起作用,NaN 会被原样带进配置
                 c2 = 0.0
             default = {"grade": grade, "corrosion_mm": max(0.0, min(c2, 20.0))}
     return {"rules": rules, "default": default}, errors

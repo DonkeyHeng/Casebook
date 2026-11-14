@@ -34,6 +34,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import math
 import mimetypes
 import os
 import sqlite3
@@ -99,6 +100,10 @@ class BadBody(Exception):
     def __init__(self, message: str, status: int = 400) -> None:
         super().__init__(message)
         self.status = status
+
+
+class BadQuery(Exception):
+    """查询参数不合法(不是数字、不是有限值、超范围)—— 回 400,不要静默换默认值。"""
 
 
 def open_ui(url: str, prefer_app_window: bool = True, state: dict | None = None) -> str:
@@ -644,27 +649,44 @@ class Handler(BaseHTTPRequestHandler):
                 return val[0] if val else None
             return val
 
-        def _f(key: str, default: float) -> float:
-            try:
-                return float(_q(key))
-            except (TypeError, ValueError):
+        def _f(key: str, default: float, lo: float, hi: float) -> float:
+            """取一个数字参数:没给 → 默认值;给了但不是有限数或超范围 → 400。
+
+            以前这里把任何解析失败都换成默认值:界面改了流速、结果却不变,
+            用户以为是"算不动",其实是参数被悄悄丢掉了。NaN/Inf 还会一路
+            传进选型计算。
+            """
+            raw = _q(key)
+            if raw is None or str(raw).strip() == "":
                 return default
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                raise BadQuery(f"参数 {key} 必须是数字,收到 {raw!r}") from None
+            if not math.isfinite(value) or not lo <= value <= hi:
+                raise BadQuery(f"参数 {key} 要在 {lo}~{hi} 之间,收到 {raw!r}")
+            return value
 
         material = _q("material") or "S30408"
         if material not in pipe_data.MATERIAL_CODE_BY_GRADE:
             material = "S30408"      # 认不出的牌号不硬套,退回默认并在页面提示
-        options = {
-            "velocity": {
-                "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"]),
-                "gas": _f("gas", pipe_calc.DEFAULT_VELOCITY["gas"]),
-                "two": _f("two", pipe_calc.DEFAULT_VELOCITY["two"]),
-                "pump_inlet": _f("pump_inlet", pipe_calc.DEFAULT_VELOCITY["pump_inlet"]),
-            },
-            "pressure_factor": _f("factor", 1.1),
-            "pressure_floor_mpa": _f("floor", 1.0),
-            "max_dn": int(_f("max_dn", 600)),
-            "material": material,
-        }
+        try:
+            options = {
+                "velocity": {
+                    "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"], 0.01, 100.0),
+                    "gas": _f("gas", pipe_calc.DEFAULT_VELOCITY["gas"], 0.01, 100.0),
+                    "two": _f("two", pipe_calc.DEFAULT_VELOCITY["two"], 0.01, 100.0),
+                    "pump_inlet": _f("pump_inlet",
+                                     pipe_calc.DEFAULT_VELOCITY["pump_inlet"], 0.01, 100.0),
+                },
+                "pressure_factor": _f("factor", 1.1, 0.5, 10.0),
+                "pressure_floor_mpa": _f("floor", 1.0, 0.0, 100.0),
+                "max_dn": int(_f("max_dn", 600, 1, 10000)),
+                "material": material,
+            }
+        except BadQuery as exc:
+            self._error(str(exc), 400)
+            return
 
         streams = [dict(r) for r in db.read_streams(conn, case_id)]
         blocks = [dict(r) for r in db.read_blocks(conn, case_id)]

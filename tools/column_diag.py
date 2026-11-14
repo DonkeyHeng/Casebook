@@ -113,10 +113,12 @@ def check(profile: dict, setup: dict) -> list[dict]:
     hot = max(temps_ok)
     cold = min(temps_ok)
     if hot > 400 or cold < -100:
-        worst = temps_ok.index(hot) + 1 if hot > 400 else temps_ok.index(cold) + 1
+        # 级号与温度都取越界的那一侧:以前两处都格式化 hot,低温越界会显示成最高温
+        bad = hot if hot > 400 else cold
+        worst = temps_ok.index(bad) + 1
         issues.append({
             "level": "error",
-            "title": f"温度超出物理可能范围(第 {worst} 级 {hot:.0f}℃)",
+            "title": f"温度超出物理可能范围(第 {worst} 级 {bad:.0f}℃)",
             "detail": "低压塔里出现这种温度,说明迭代已经发散,当前剖面数值不可用。",
         })
 

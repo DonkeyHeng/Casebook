@@ -17,6 +17,8 @@
 """
 from __future__ import annotations
 
+import math
+
 G = 9.80665              # m/s²
 MOTOR_EFF = 0.95         # 电机效率(默认值,可被调用方覆盖)
 DEFAULT_MARGIN = 1.10    # 电机裕量
@@ -82,7 +84,8 @@ def sanitize_pv_bar(p_v_bar) -> float | None:
         v = float(p_v_bar)
     except (TypeError, ValueError):
         return None
-    if v != v or v <= 0:  # NaN 或 ≤0:都不是有效蒸气压
+    # NaN / ±Inf / ≤0 都不是有效蒸气压:以前只挡了 NaN,正无穷会漏过去
+    if not math.isfinite(v) or v <= 0:
         return None
     return v
 

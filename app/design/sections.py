@@ -207,13 +207,14 @@ def parse_part(raw, key="") -> dict | None:
             "blocks": names("blocks")}
 
 
-def load(data, case_id) -> tuple[dict, dict]:
+def load(data, case_id) -> tuple[dict, dict, list[str]]:
     """从 `sections.json` 的内容取该工况的确认结果。
 
     Returns:
-        (parts, device_overrides)
+        (parts, device_overrides, deleted)
         parts: {工段: {label, in, out, blocks}} —— 用户确认过的边界
         device_overrides: {设备名: 工段} —— 修正「逐设备表」的归堆
+        deleted: 用户明确删掉的工段名 —— 草稿再推出来也要去掉
     """
     if not isinstance(data, dict):
         return {}, {}, []

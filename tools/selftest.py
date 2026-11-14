@@ -1375,6 +1375,16 @@ def test_piping_class() -> None:
         {"rules": [{"medium": ["PL"], "grade": "铝"}]})
     check("piping: 不认识的牌号被拒", any("牌号" in e for e in errors))
 
+    # NaN 能同时骗过 c2 < 0 和 c2 > 20 两个比较,得单独挡
+    _, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"medium": ["PL"], "grade": "20#", "corrosion_mm": float("nan")}]})
+    check("piping: 腐蚀裕量 NaN 被拒", errors != [], f"errors={errors}")
+    cleaned, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"medium": ["PL"], "grade": "20#"}],
+         "default": {"grade": "S30408", "corrosion_mm": float("nan")}})
+    check("piping: 兜底腐蚀裕量 NaN 归零",
+          errors == [] and cleaned["default"]["corrosion_mm"] == 0.0, f"cleaned={cleaned}")
+
     _, errors = pipe_data.validate_piping_classes(
         {"rules": [{"grade": "S30408"}]})
     check("piping: 前缀和介质都不填被拒", any("至少填一个" in e for e in errors))
@@ -1485,6 +1495,8 @@ def test_pump() -> None:
     check_eq("泵:p_v 非数字视为无效", pump.sanitize_pv_bar("abc"), None)
     check_eq("泵:p_v 为 NaN 视为无效", pump.sanitize_pv_bar(float("nan")), None)
     check("泵:p_v 正常值原样返回", pump.sanitize_pv_bar(0.5338) == 0.5338)
+    check_eq("泵:p_v 为正无穷视为无效", pump.sanitize_pv_bar(float("inf")), None)
+    check_eq("泵:p_v 为负无穷视为无效", pump.sanitize_pv_bar(float("-inf")), None)
 
     import math
     zero = pump.npsh_available_m(1.01325, 1.01325, 900.0)
@@ -2039,6 +2051,21 @@ def test_guard() -> None:
           guard(origin, change=True) is False and origin.err == 403, f"err={origin.err}")
 
 
+# ---------------------------------------------------------------- 塔剖面诊断
+
+def test_column_diag() -> None:
+    """塔剖面诊断:低温越界时,标题里的级号与温度都要指向低温那一侧。"""
+    from tools import column_diag
+
+    profile = {"vars": {"B_TEMP": [80.0, 60.0, -120.0, 90.0],
+                        "LIQ_FLOW": [], "VAP_FLOW": []}}
+    titles = [i["title"] for i in column_diag.check(profile, {"feed_info": []})]
+    hit = [t for t in titles if "超出物理可能范围" in t]
+    check("剖面:低温越界会报出来", bool(hit), str(titles))
+    check("剖面:标题指向最低温那一级(第 3 级 -120℃)",
+          any("第 3 级 -120" in t for t in hit), str(hit))
+
+
 # ---------------------------------------------------------------- HTTP 入口
 
 def test_http_entry() -> None:
@@ -2147,6 +2174,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("边界夹具 fixtures", test_fixtures),
                      ("出口一致性 exports", test_export_consistency),
                      ("同源校验 guard", test_guard),
+                     ("塔剖面诊断 column_diag", test_column_diag),
                      ("HTTP 入口 body / 静态路径", test_http_entry)):
         print(f"\n[{name}]")
         fn()

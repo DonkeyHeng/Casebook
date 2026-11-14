@@ -75,9 +75,13 @@ def main() -> int:
     )
     c_case_c = calls["n"]
 
+    # 重复读取取算术平均:以前写 (t_case + t) / 2 是递推加权,
+    # 越新的样本权重越大,外推会被最后一次的抖动带偏
+    case_times = [t_case]
     for _ in range(max(0, args.repeat - 1)):
         _, t = timed("read_case() 重复", lambda: reader.read_case(session))
-        t_case = (t_case + t) / 2
+        case_times.append(t)
+    t_case = sum(case_times) / len(case_times)
 
     print("\n4) 结论")
     per_call = (t_streams + t_blocks) / max(1, c_streams + c_blocks) * 1000
@@ -86,7 +90,8 @@ def main() -> int:
     print(f"  流股读取:{t_streams * 1000:.0f} ms({c_streams / max(1, n_streams):.1f} 次调用/条)")
     print(f"  设备读取:{t_blocks * 1000:.0f} ms({c_blocks / max(1, n_blocks):.1f} 次调用/个)")
     print(f"  组成读取:{t_comp1 * 1000:.0f} ms/条(18 组分 × 2 相)")
-    print(f"  全量(不含组成):{t_case:.2f} s")
+    repeat_note = f"({len(case_times)} 次算术平均)" if len(case_times) > 1 else ""
+    print(f"  全量(不含组成):{t_case:.2f} s{repeat_note}")
     print(f"  全量(含组成):  {t_case_c:.2f} s")
 
     print("\n5) 规模外推(按线性)")
