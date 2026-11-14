@@ -246,6 +246,7 @@
 [data-theme="dark"] .read-close { background: rgba(255, 255, 255, .12); }
 [data-theme="dark"] .column-panel { box-shadow: -10px 0 30px rgba(0, 0, 0, .55); }
 [data-theme="dark"] .chart-tip { box-shadow: 0 10px 28px rgba(0, 0, 0, .6); }
+[data-theme="dark"] .pv-help-body { box-shadow: 0 10px 28px rgba(0, 0, 0, .55); }
 [data-theme="dark"] .chart svg { background: transparent; }
 
 * { box-sizing: border-box; }
@@ -705,27 +706,57 @@ td.changed { color: var(--accent); font-weight: 600; }
 }
 .pump-bar input[type="number"] { width: 76px; }
 
-/* 泵页的 p_v 输入格:居中对齐,不改变行高。
-   之前错位的原因是 td 的 padding(2/6)与其它格(7/12)不一致、
-   输入框又是按基线对齐,整行被拉得上下不齐。 */
-.pv-cell { padding: 4px 8px; text-align: center; vertical-align: middle; }
+/* 泵页的 p_v 输入格:数字必须跟其它数值列落在同一条右边缘上。
+   做法:输入框平时"隐身"(透明底、透明边、右内边距 6px),cell 右内边距也留 6px,
+   数字右边缘 = 6 + 6 = 12px,与邻列的 12px 对齐;hover / 聚焦时才显出方框。
+   之前用居中 + 可见方框,数字看着比别的列靠左,就是这一处没法对齐的根源。 */
+.pv-cell { padding: 4px 6px; text-align: right; vertical-align: middle; }
 .pv-input {
-  width: 76px;
+  width: 92px;
   box-sizing: border-box;
   display: inline-block;
   vertical-align: middle;
   margin: 0;
   font: inherit;
   line-height: 1.2;
-  text-align: center;
+  text-align: right;
   color: inherit;
-  border: 1px solid var(--line);
+  border: 1px solid transparent;
   border-radius: var(--r-sm);
   padding: 4px 6px;
-  background: var(--panel);
+  background: transparent;
 }
-.pv-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.pv-input:hover { border-color: var(--line); background: var(--panel); }
+.pv-input:focus { outline: 2px solid var(--accent); outline-offset: -1px; background: var(--panel); }
 .pv-input.pv-bad { border-color: var(--err-mark); background: var(--err-fill); }
+
+/* 泵参数条上的「?」操作指南:点开/悬浮都能看到让 Aspen 给出 p_v 的五步 */
+.pv-help { position: relative; display: inline-block; }
+.pv-help > summary {
+  list-style: none;
+  cursor: pointer;
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line); border-radius: 50%;
+  font-size: var(--fs-xs); color: var(--muted);
+  user-select: none;
+}
+.pv-help > summary::-webkit-details-marker { display: none; }
+.pv-help > summary:hover { color: var(--text); border-color: var(--muted); }
+.pv-help[open] > summary { color: var(--text); border-color: var(--muted); }
+.pv-help-body {
+  position: absolute; z-index: 20; left: 0; top: 24px;
+  width: 360px; max-width: calc(100vw - 32px);
+  padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  background: var(--panel); box-shadow: 0 10px 28px rgba(15, 23, 42, .18);
+  font-size: var(--fs-sm); line-height: 1.7; text-align: left;
+  white-space: normal;
+}
+.pv-help-body p { margin: 0 0 6px; }
+.pv-help-body ol { margin: 0 0 6px; padding-left: 20px; }
+.pv-help-body li { margin: 2px 0; }
+.pv-help-body code { font-size: var(--fs-xs); padding: 0 3px; border-radius: 3px; background: var(--surface-head); }
 
 /* 泵参数卡(右侧抽屉):把要抄进中联表单的几个数摆出来 */
 .pump-panel-hint { margin: 0 0 10px; font-size: var(--fs-sm); line-height: 1.7; }

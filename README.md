@@ -202,9 +202,10 @@ Casebook/
 1. **旧工况**:泵参数是第二期才加的列,早期读进来的工况没有这些值 —— 重读一次即可
    (不想重读 Aspen 的话,`python -m tools.repair_cases --apply` 能按最新单位表从原始值重算)
 2. **NPSHₐ 那一列**:它需要饱和蒸气压 `p_v`,读取工况时自动取 Aspen 进口流股的泡点压力;
-   模型里没有这个读数时显示 `—`。让 Aspen 给出来只需一次性设置(四步,见
-   [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md) §3.6):物性集加 `PBUB`(单位 bar)
-   → 报告选项 → 流股 → 物性组 选中它 → 运行 → 回本工具重读工况。也可以直接手填
+   模型里没有这个读数时显示 `—`,可以手填。让 Aspen 给出来是一次性设置(五步,见
+   [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md) §3.6):
+   物性组新建 `pv` → 添加物性 `PL`、`PBUB`(单位 bar)→ 报告选项 → 流股 → 物性组 把 `pv` 加到右栏
+   → 重置并重新运行 → 回本工具重读工况。该步骤依据 Aspen Plus V15,其他版本菜单可能不同
 3. **进口是两相**:汽蚀余量的公式前提不成立,该台不给 NPSHₐ,悬浮提示会说明
 
 **泵的汽蚀余量是怎么来的?**

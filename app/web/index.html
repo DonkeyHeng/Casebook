@@ -470,7 +470,21 @@
         <label id="pumpMarginCustomWrap" class="hidden">自定义 ×
           <input id="pumpMarginCustom" type="number" step="0.01" min="1" max="5" value="1.10">
         </label>
-        <span class="muted pump-bar-hint">余量只影响显示 · p_v 自动取泡点压力,缺了可手填</span>
+        <span class="muted pump-bar-hint">p_v 可手动填写,或由 Aspen 自动读取</span>
+        <details class="pv-help">
+          <summary title="怎么让 Aspen 自动给出 p_v(点开看步骤)">?</summary>
+          <div class="pv-help-body">
+            <p><strong>让 Aspen 自动读取 p_v</strong>(一次性设置)</p>
+            <ol>
+              <li>「模拟」页面 → 物性组 → 新建物性组 <code>pv</code></li>
+              <li>添加物性:<code>PL</code>、<code>PBUB</code>,单位都选 <code>bar</code></li>
+              <li>「模拟」页面 → 设置 → 报告选项 → 流股 → 物性组,把 <code>pv</code> 加到右栏</li>
+              <li>重置并重新运行</li>
+              <li>回本工具重新读取工况</li>
+            </ol>
+            <p class="muted">依据 Aspen Plus V15,其他版本菜单可能不同。模型没给读数时也可以直接手填。</p>
+          </div>
+        </details>
         <span class="pump-bar-actions">
           <button id="pumpInherit" class="btn" type="button"
                   title="把同一模型、更早工况里填过的 p_v 按位号搬过来;只填空着的格子,不覆盖手填值">沿用上一工况 p_v</button>

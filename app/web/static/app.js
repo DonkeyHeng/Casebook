@@ -435,7 +435,7 @@ function npshWhy(row) {
   const vap = row.pump_vap_frac;
   if (vap !== null && vap !== undefined && vap > 0.001) return "进口是两相,不计算汽蚀余量";
   if (row.pv_bar === null || row.pv_bar === undefined) {
-    return "缺 p_v:模型没给出泡点压力 —— 可在 Aspen 里把 PBUB 加进物性集并运行一次,或直接在这格手填";
+    return "缺 p_v:模型没给出泡点压力 —— 物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况;也可直接在这格手填";
   }
   return "缺进口压力或密度";
 }
@@ -643,8 +643,8 @@ function renderBlocks() {
         const pv = row[c.key];
         const val = pv === null || pv === undefined ? "" : pv;
         return `<td class="pv-cell"><input class="pv-input" type="number" step="0.1" min="0"
-                   value="${val}" data-pv="${esc(row.name)}" placeholder="填"
-                   title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它,清空则留空。留空时 NPSHₐ 显示「—」"></td>`;
+                   value="${val}" data-pv="${esc(row.name)}"
+                   title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它。模型读不到时:物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况"></td>`;
       }
       if (c.scaled) {
         const raw = row[c.key];
@@ -1108,7 +1108,7 @@ function openPump(block) {
     kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
     kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), pvSourceText(row),
        row.pv_bar == null
-         ? "模型没给出泡点压力:把 PBUB 加进物性集 → 报告选项→流股→物性组 选中 → 运行一次;详见 docs/pump-selection-plan.md §3.6"
+         ? "模型没给出泡点压力:物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况;详见 docs/pump-selection-plan.md §3.6"
          : "单相液相时泡点压力就是蒸气压"),
     kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),
   ];
