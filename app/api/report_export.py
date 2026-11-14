@@ -232,8 +232,15 @@ def _heading(doc, text, level=1):
     """章节标题:黑体,不依赖 docx 内置样式(样式名各版本不一致)。"""
     from docx.shared import Pt
 
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
     sizes = {1: Pt(15), 2: Pt(12.5), 3: Pt(11)}
     para = doc.add_paragraph()
+    level_node = OxmlElement("w:outlineLvl")
+    level_node.set(qn("w:val"), str(max(level - 1, 0)))
+    para._p.get_or_add_pPr().insert_element_before(
+        level_node, "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange")
     para.paragraph_format.space_before = Pt(10)
     para.paragraph_format.space_after = Pt(4)
     _font(para.add_run(text), sizes.get(level, Pt(11)), True, "黑体")
@@ -302,7 +309,7 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
     from docx.oxml.ns import qn
     from docx.shared import Cm, Pt
 
-    size = Pt(font_pt) if font_pt else Pt(9.5)
+    size = Pt(font_pt) if font_pt else Pt(9.0)
     meta = _ACTIVE_KIND
     if caption:
         cap = doc.add_paragraph()
@@ -350,9 +357,17 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         para.alignment = align
         para.paragraph_format.space_after = Pt(0)
         para.paragraph_format.line_spacing = 1.0   # 继承 1.22 会把长表撑高一倍
-        run = _font(para.add_run("" if text is None else str(text)), size, bold)
+        raw = "" if text is None else str(text)
+        # 「ΣHin|kW」这种写法渲染成两行:名称在上、单位在下(7.5pt 灰),
+        # 各列表头等高,不会出现有的折行有的不折
+        name, _, unit = raw.partition("|")
+        run = _font(para.add_run(name), size, bold)
         if color:
             run.font.color.rgb = _rgb(color)
+        if unit:
+            run.add_break()
+            unit_run = _font(para.add_run(unit), Pt(7.5), False)
+            unit_run.font.color.rgb = _rgb("595959")
 
     if header_extra:
         # 分组行(进口 / 出口):整行合并,和列头一起跨页重复 —— 否则续表只看到
@@ -416,7 +431,8 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
             else:
                 align = WD_ALIGN_PARAGRAPH.RIGHT
             # 成片的 0.000 灰化:数字不动,只让眼睛跳过
-            tone = "A6A6A6" if text in ("0.00", "0.0", "0.000", "0.0000") else None
+            # 全零值灰化:太浅(如 A6A6A6)在小字号下会被误当成空白,取 8C8C8C
+            tone = "8C8C8C" if text in ("0.00", "0.0", "0.000", "0.0000") else None
             fill(cells[index], text, bold, align, tone)
 
         if fill_hex:                      # 超差行:灰底 + 首列黑竖边
@@ -633,6 +649,29 @@ def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
                     (f"{ch}.{base + 1} 塔的冷凝器 / 再沸器负荷", 1)]
     entries.append(("附注", 0))
 
+    # TOC 域:Word / WPS 打开时按大纲级别自动生成带页码的目录(field 标了 dirty)。
+    # 下面这段手写条目是**域的占位结果** —— 万一打开时没自动更新,读者仍能看到
+    # 章节清单,而不是一片空白。
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    opener = doc.add_paragraph()
+    opener.paragraph_format.space_after = Pt(0)
+    node = opener.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    begin.set(qn("w:dirty"), "true")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = ' TOC \\o "1-2" \\h \\z \\u '
+    sep = OxmlElement("w:fldChar")
+    sep.set(qn("w:fldCharType"), "separate")
+    node._r.append(begin)
+    node._r.append(instr)
+    node._r.append(sep)
+
+    last = opener
     for text, level in entries:
         para = doc.add_paragraph()
         para.paragraph_format.space_after = Pt(8)
@@ -640,6 +679,12 @@ def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
         run = _font(para.add_run(text), Pt(12 if level == 0 else 11), level == 0)
         if level == 0:
             run.font.color.rgb = _rgb(meta["accent"])
+        last = para
+
+    end_node = last.add_run()
+    ending = OxmlElement("w:fldChar")
+    ending.set(qn("w:fldCharType"), "end")
+    end_node._r.append(ending)
     doc.add_page_break()
 
 
@@ -767,7 +812,7 @@ def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
 
         headers = ["项目", "单位", *[c["stream"] for c in cols]]
         _three_line(doc, headers, rows, _widths(len(cols)), caption,
-                    font_pt=8.0, header_extra=group, span_rows=span_rows)
+                    header_extra=group, span_rows=span_rows)
 
     # 表下给该段的合计与误差(界区校验结论就写在这一行,不再单独出小表)
     state_text = mass_balance.STATE_TEXT.get(table.get("state"), "")
@@ -801,10 +846,11 @@ def _figure_slot(doc, text: str) -> None:
 
     para = doc.add_paragraph()
     para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    para.paragraph_format.space_before = Pt(36)
-    para.paragraph_format.space_after = Pt(36)
+    para.paragraph_format.space_before = Pt(104)   # 上下合计约 8cm
+    para.paragraph_format.space_after = Pt(104)
     run = para.add_run(f"【{text}：图片插入处】")
-    _font(run, Pt(18), True, "黑体")
+    _font(run, Pt(12), True, "黑体")
+    run.font.color.rgb = _rgb("7F7F7F")
     run.font.color.rgb = None
 
     p_pr = para._p.get_or_add_pPr()
@@ -925,15 +971,17 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
             bal = _balance_row(block, row, row)
             state_text = energy_report.STATE_TEXT.get(row["state"], row["state"])
             bad = row["state"] == energy_report.BAD
-            rows.append(([row["block"], row["side"] or "—", row["type"],
+            # 不再单列「类型」:上面的分组标题就是家族(塔 / 换热 / 反应 / 泵…),
+            # 9pt 表体下每省一列,数值列就能宽 0.4cm,不会把 −183,646.07 折成两行
+            rows.append(([row["block"], row["side"] or "—",
                           _num(bal["h_in_kw"], 2), _num(bal["h_out_kw"], 2),
                           _num(bal["q_kw"], 2), _num(bal["w_kw"], 2),
                           _num(bal["error_kw"], 2), state_text],
                          False, "FDE8E8" if bad else None))
-        _three_line(doc, ["设备", "侧", "类型", "ΣHin kW", "ΣHout kW",
-                          "Q 热负荷 kW", "W 机械功 kW", "偏差 kW", "判定"],
-                    rows, (2.1, 0.8, 1.9, 2.1, 2.1, 1.8, 1.8, 1.5, 1.3),
-                    cap.next(f"{group['label']}能量衡算"), font_pt=8.0)
+        _three_line(doc, ["设备", "侧", "ΣHin|kW", "ΣHout|kW",
+                          "Q 热负荷|kW", "W 机械功|kW", "偏差|kW", "判定"],
+                    rows, (2.6, 0.8, 2.5, 2.5, 2.1, 2.1, 1.7, 1.7),
+                    cap.next(f"{group['label']}能量衡算"))
 
     picked = data.get("picked")
     if picked:
@@ -954,14 +1002,13 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
                 body.append((["出口焓流 kW", row["side"] or "—", _num(row["h_out_kw"], 2)],
                              False, None))
             _three_line(doc, ["项目", "侧", "数值"], body, (6.0, 3.0, 6.0),
-                        cap.next(f"{name} 焓流"), font_pt=8.0)
+                        cap.next(f"{name} 焓流"))
             bal = _balance_row(block, rows[0], rows[0])
             _three_line(doc, ["W kW", "Q kW", "ΣHin kW", "ΣHout kW", "偏差 kW"],
                         [[_num(bal["w_kw"], 2), _num(bal["q_kw"], 2),
                           _num(bal["h_in_kw"], 2), _num(bal["h_out_kw"], 2),
                           _num(bal["error_kw"], 2)]],
-                        (3.0, 3.0, 3.4, 3.4, 3.0), cap.next(f"{name} 能量平衡"),
-                        font_pt=8.0)
+                        (3.0, 3.0, 3.4, 3.4, 3.0), cap.next(f"{name} 能量平衡"))
 
     _heading(doc, f"{chapter}.{3 if picked else 2} 全流程能量汇总", 2)
     summary = energy["summary"]
@@ -1056,10 +1103,10 @@ def render(data: dict, kind: str = "all") -> bytes:
 
     # 章号=表号:分册时那一册的正文从「一」起;合订本依次 一 / 二
     if kind in ("mass", "all"):
+        doc.add_page_break()          # 每章另起一页
         _mass_chapter(doc, data, cap, "1")
-        if kind == "all":
-            doc.add_page_break()
     if kind in ("energy", "all"):
+        doc.add_page_break()
         _energy_chapter(doc, data, cap, "2" if kind == "all" else "1")
     doc.add_page_break()
     _notes_chapter(doc, data)
