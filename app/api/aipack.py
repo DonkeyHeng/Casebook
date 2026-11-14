@@ -160,7 +160,8 @@ def _metrics_rows(case, columns, stage_counts, reasons, codes, tears, blocks,
     add("焓平衡", "通过", counts["ok"], "台", "|ΔH − 参照| 在容差内(热负荷 1% 或 0.5 kW 取大)")
     add("焓平衡", "超差", counts["bad"], "台", "超出容差,明细见 blocks.csv 的「平衡说明」列")
     add("焓平衡", "无法校验", counts["no_data"], "台", "有流股没有焓值,或缺热负荷 / 轴功率字段")
-    add("焓平衡", "不校验", counts["skip"], "台", "RadFrac / 反应器:进出口焓差不等于设备热负荷")
+    add("焓平衡", "不校验", counts["skip"], "台",
+        "目前为空:塔按冷凝 + 再沸、反应器按 QCALC 也参与校验了")
     worst = sorted((b for b in blocks if b["balance_state"] == "bad"),
                    key=lambda b: -abs((b["dh_kw"] or 0) - (b["ref_kw"] or 0)))[:5]
     for b in worst:

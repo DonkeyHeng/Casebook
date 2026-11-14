@@ -159,7 +159,14 @@ def repair_case(conn, case, apply: bool) -> dict:
     # ---- 4) 重算焓平衡(只对存了连接的工况;老工况没有拓扑,跳过不动)
     balance_changed = 0
     if connections:
-        results = balance.compute(streams, blocks, connections)
+        # 塔的对照值要用逐级 duty(首级冷凝器 + 末级再沸器);库里已有剖面就直接读
+        stages = {}
+        for b in blocks:
+            if b.get("type") in ("RadFrac", "Absorber", "Extract"):
+                rows = [dict(r) for r in db.read_column_stages(conn, cid, b["name"])]
+                if rows:
+                    stages[b["name"]] = rows
+        results = balance.compute(streams, blocks, connections, stages=stages)
         for b in blocks:
             new = results.get(b["name"]) or {}
             if (b.get("balance_state") != new.get("balance_state")

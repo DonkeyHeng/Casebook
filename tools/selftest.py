@@ -230,14 +230,73 @@ def test_balance() -> None:
     )
     check_eq("balance: Mixer 差 100 kW → 超差", res["M1"]["balance_state"], balance_rules.BAD)
 
-    # ⑨ 塔 / 反应器不校验 —— 否则每座塔都会误报
+    # ⑨ 塔:ΔH 应等于「首级(冷凝器)+ 末级(再沸器)」—— 2026-11-14 起纳入校验
+    t_blocks = _blocks({"name": "T1", "type": "RadFrac"})
+    t_conns = _conns(("T1", "in", "feed", None), ("T1", "out", "top", None),
+                     ("T1", "out", "bottom", None))
+    stages = {"T1": [{"stage": 1, "duty_kw": -60.0}, {"stage": 5, "duty_kw": 0.0},
+                     {"stage": 10, "duty_kw": 160.0}]}
+    res = balance_rules.compute(_streams(feed=0.0, top=80.0, bottom=20.0),
+                               t_blocks, t_conns, stages=stages)
+    check_eq("balance: 塔 ΔH = 冷凝 + 再沸 → ok", res["T1"]["balance_state"],
+             balance_rules.OK)
+    check_eq("balance: 塔的对照值取首末级之和", res["T1"]["ref_kw"], 100.0)
+    check_eq("balance: 塔的参照类型标 stage", res["T1"]["ref_kind"], "stage")
+    res = balance_rules.compute(_streams(feed=0.0, top=80.0, bottom=60.0),
+                                t_blocks, t_conns, stages=stages)
+    check_eq("balance: 塔 ΔH 与净热负荷差太多 → 超差",
+             res["T1"]["balance_state"], balance_rules.BAD)
+    # 没有逐级剖面时退回块上的冷凝 / 再沸负荷
     res = balance_rules.compute(
         _streams(feed=0.0, top=80.0, bottom=20.0),
-        _blocks({"name": "T1", "type": "RadFrac", "duty_kw": 50.0}),
-        _conns(("T1", "in", "feed", None), ("T1", "out", "top", None),
-               ("T1", "out", "bottom", None)),
+        _blocks({"name": "T2", "type": "RadFrac",
+                 "cond_duty_kw": -60.0, "reb_duty_kw": 160.0}),
+        _conns(("T2", "in", "feed", None), ("T2", "out", "top", None),
+               ("T2", "out", "bottom", None)),
     )
-    check_eq("balance: 塔 → 不校验", res["T1"]["balance_state"], balance_rules.SKIP)
+    check_eq("balance: 塔无剖面 → 退回块字段", res["T2"]["balance_state"], balance_rules.OK)
+    # 两者都没有 → 无法校验(不是不校验)
+    res = balance_rules.compute(
+        _streams(feed=0.0, top=80.0, bottom=20.0),
+        _blocks({"name": "T3", "type": "RadFrac"}), t_conns)
+    check_eq("balance: 塔既无剖面也无块字段 → 无法校验",
+             res["T3"]["balance_state"], balance_rules.NO_DATA)
+
+    # ⑨b 反应器:ΔH 应等于反应热 QCALC;带换热伴流的多股反应器判无法校验
+    res = balance_rules.compute(
+        _streams(feed=-10.0, prod=-110.0),
+        _blocks({"name": "R1", "type": "RPlug", "duty_kw": -100.0}),
+        _conns(("R1", "in", "feed", None), ("R1", "out", "prod", None)),
+    )
+    check_eq("balance: 反应器 ΔH = QCALC → ok", res["R1"]["balance_state"],
+             balance_rules.OK)
+    res = balance_rules.compute(
+        _streams(feed=-10.0, prod=-90.0),
+        _blocks({"name": "R2", "type": "RPlug", "duty_kw": -100.0}),
+        _conns(("R2", "in", "feed", None), ("R2", "out", "prod", None)),
+    )
+    check_eq("balance: 反应器 ΔH 与 QCALC 差 20 kW → 超差",
+             res["R2"]["balance_state"], balance_rules.BAD)
+    # 多股反应器:总焓差就够用(实测 2进2出 的反应器总 ΔH 也等于 QCALC)
+    res = balance_rules.compute(
+        _streams(a=-10.0, b=-20.0, c=-130.0),
+        _blocks({"name": "R3", "type": "RCSTR", "duty_kw": -100.0}),
+        _conns(("R3", "in", "a", None), ("R3", "in", "b", None),
+               ("R3", "out", "c", None)),
+    )
+    check_eq("balance: 多股反应器总焓差对上 → ok",
+             res["R3"]["balance_state"], balance_rules.OK)
+    # 带换热伴流:总 ΔH≈0 被伴流抵消,但「过程股对」的焓差等于 QCALC(case 33 R0101 的真实形态)
+    res = balance_rules.compute(
+        _streams(a=-10.0, b=500.0, c=-9528.95, d=10018.95),
+        _blocks({"name": "R4", "type": "RPlug", "duty_kw": -9518.95}),
+        _conns(("R4", "in", "a", None), ("R4", "in", "b", None),
+               ("R4", "out", "c", None), ("R4", "out", "d", None)),
+    )
+    check_eq("balance: 带伴流的反应器靠过程股对判 ok",
+             res["R4"]["balance_state"], balance_rules.OK)
+    check("balance: 带伴流的说明点出过程股",
+          "伴流" in res["R4"]["balance_note"])
 
     # ⑩ 缺焓值(能量流 / 没 Run 过)→ 无法校验,不是失败
     res = balance_rules.compute(
@@ -885,7 +944,15 @@ def test_db(db_path: str) -> None:
 
             # 焓平衡:存下来的逐台判定必须能重算出来(repair_cases 的口径)
             if case["severity"] != "empty":
-                res = balance_rules.compute(streams, blocks, conns)
+                # 与 repair_cases 同一口径:塔的对照值要带逐级 duty(首末级),
+                # 否则库里存的 ok 在这里会被重算成「无法校验」
+                stages = {}
+                for b in blocks:
+                    if b.get("type") in ("RadFrac", "Absorber", "Extract"):
+                        rows = [dict(r) for r in db.read_column_stages(conn, cid, b["name"])]
+                        if rows:
+                            stages[b["name"]] = rows
+                res = balance_rules.compute(streams, blocks, conns, stages=stages)
                 bad = [(b["name"], b["balance_state"], res[b["name"]]["balance_state"])
                        for b in blocks
                        if b["balance_state"] != res[b["name"]]["balance_state"]]

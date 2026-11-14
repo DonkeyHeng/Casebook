@@ -566,6 +566,29 @@ def _first_converted(session, base: str, fields, quantity: str, raw: dict):
 
 # ---------------------------------------------------------------- 塔板剖面
 
+def read_stage_duty_ends(session, blocks: list[dict] | None = None) -> dict[str, list[dict]]:
+    """只读塔的首级与末级 duty —— 给焓平衡做塔的对照值,不做完整剖面。
+
+    为什么不直接读完整剖面:剖面是每级 5 次调用,93 座塔要两千多次;而焓平衡
+    只用到**首级(冷凝器)+ 末级(再沸器)**,每座塔 1 次 find + 2 次取值就够。
+    实测 93 座塔的中间级 duty 全为 0,所以这个口径不丢项。
+    """
+    out: dict[str, list[dict]] = {}
+    for col in [b for b in (blocks or []) if b.get("type") in
+                ("RadFrac", "Absorber", "Extract")]:
+        base = rf"\Data\Blocks\{col['name']}\Output"
+        names = child_names(session.find(rf"{base}\DUTY"))
+        if not names:
+            continue
+        rows = []
+        for stage in (names[0], names[-1]) if len(names) > 1 else (names[0],):
+            value, unit = fetch(session, rf"{base}\DUTY\{stage}")
+            rows.append({"stage": int(stage) if stage.isdigit() else stage,
+                         "duty_kw": units.convert("power", value, unit)})
+        out[col["name"]] = rows
+    return out
+
+
 def read_column_profiles(session, blocks: list[dict] | None = None) -> list[dict]:
     """读所有塔类的逐板剖面(二期功能,数据量很小)。
 
@@ -891,7 +914,8 @@ def read_case(session, include_composition: bool = False,
     phase("读取泵参数")
     read_pump_fields(session, streams, blocks, connections)
     phase("焓平衡自检")
-    results = balance_rules.compute(streams, blocks, connections)
+    stage_ends = read_stage_duty_ends(session, blocks)
+    results = balance_rules.compute(streams, blocks, connections, stages=stage_ends)
     for block in blocks:
         block["balance"] = results.get(block["name"])
     phase("读取塔板剖面")

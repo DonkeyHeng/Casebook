@@ -119,6 +119,12 @@ def _device_row(block, in_streams, out_streams, hmap, balance, side="",
     elif ref_kind in ("duty", "hx_cold"):
         # 换热器的对照值也是热负荷(HX_DUTY),只是校的是冷侧
         dev_kw, dev_kind = block.get("duty_kw"), "duty"
+    elif ref_kind == "stage":
+        # 塔:对照值是首级(冷凝器)+ 末级(再沸器),取塔负荷明细里的合计
+        tw = tower or {}
+        cond, reb = tw.get("cond_kw"), tw.get("reb_kw")
+        dev_kw = None if (cond is None and reb is None) else (cond or 0.0) + (reb or 0.0)
+        dev_kind = "duty"
     else:
         dev_kw, dev_kind = None, ""
 
@@ -205,10 +211,12 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
                 hmap, balance_results.get(name), "", tower_info))
 
         # ---- 汇总:塔以外的设备按热负荷正负与轴功率累加
-        state = (balance_results.get(name) or {}).get("balance_state")
-        if family != "column":
+        # 塔与反应器的热负荷不进「换热设备」的正负 duty 合计:
+        #   塔 → 已按冷凝器 / 再沸器单列在汇总表里;
+        #   反应器 → 反应热,不是换热器给的公用工程负荷,单列一行
+        if family not in ("column", "react"):
             duty = block.get("duty_kw")
-            if duty is not None and state != SKIP:
+            if duty is not None and (balance_results.get(name) or {}).get("balance_state") != SKIP:
                 if duty > 0:
                     heat_pos += float(duty)
                 elif duty < 0:
@@ -219,9 +227,9 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
                 if ref_kind == "power" or family in ("pump", "move"):
                     shaft += float(power)
 
+    # 反应热:按家族统计,不再依赖「不校验」状态(2026-11-14 起反应器也参与校验)
     reaction = sum(float(b.get("duty_kw") or 0.0) for b in blocks or []
-                   if (balance_results.get(b["name"]) or {}).get("balance_state") == SKIP
-                   and block_family.family_of(b.get("type")) != "column")
+                   if block_family.family_of(b.get("type")) == "react")
     tower_reb = sum(t["reb_kw"] for t in towers if t["reb_kw"] is not None)
     tower_cond = sum(t["cond_kw"] for t in towers if t["cond_kw"] is not None)
 

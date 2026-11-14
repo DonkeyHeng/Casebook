@@ -418,11 +418,12 @@ def _summary_chapter(doc, data: dict, cap: "_Captions") -> None:
     _three_line(doc, headers, rows, (4.4, 1.8, 1.8, 2.2, 1.8, 1.8),
                 cap.next("质量守恒校验结果"))
 
-    order = [energy_report.OK, energy_report.BAD, energy_report.NO_DATA,
-             energy_report.SKIP]
+    order = [energy_report.OK, energy_report.BAD, energy_report.NO_DATA]
     by_state = energy["by_state"]
     rows = [[energy_report.STATE_TEXT[s], by_state.get(s, 0)] for s in order]
-    _three_line(doc, ["焓平衡状态", "表内行数"], rows, (6.0, 4.0),
+    rows.append(["不校验（换热器热侧，不单独校验）",
+                 by_state.get(energy_report.SKIP, 0)])
+    _three_line(doc, ["焓平衡状态", "表内行数"], rows, (7.6, 3.2),
                 cap.next("焓平衡结论分布"))
 
     text = (
@@ -621,11 +622,11 @@ def _balance_row(block, energy_row, devices_row) -> dict:
     """一台设备的能量平衡量:W(机械功)、Q(热负荷)、ΣHin、ΣHout、偏差。"""
     h_in = energy_row.get("h_in_kw") if energy_row else None
     h_out = energy_row.get("h_out_kw") if energy_row else None
-    duty = block.get("duty_kw")
-    power = block.get("power_kw")
     ref_kind = (energy_row or {}).get("dev_kind") or ""
-    w = power if ref_kind == "power" else None
-    q = duty if ref_kind == "duty" else None
+    # Q 取表行里已经算好的对照值:塔的对照值是「首级冷凝器 + 末级再沸器」,
+    # 不等于块上的 duty_kw(塔根本没有 duty_kw)
+    q = (energy_row or {}).get("dev_kw") if ref_kind == "duty" else None
+    w = (energy_row or {}).get("dev_kw") if ref_kind == "power" else None
     error = None
     # 塔 / 反应器 / 缺数据的设备不参与校验:它们的 ΔH 本来就不等于 Q+W
     # (塔有冷凝 / 再沸 / 中间回流),算出来只会被误读成"超差",所以留空
@@ -648,7 +649,8 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
                 "焓值与焓平衡判定取自工况库里已有的结论，本报告不重算；"
                 "「偏差」列 = (ΣHout − ΣHin) − (Q + W)，即闭合误差。"
                 "换热器只校冷侧（整体 ΔH 恒约等于 0），故冷、热两侧各一行；"
-                "塔与反应器按约定不校验，Q 列只给库里的冷凝 / 再沸 / 反应热供对照。"),
+                "塔的对照值是首级（冷凝器）+ 末级（再沸器）负荷，反应器的对照值是反应热 QCALC；"
+                "带换热伴流的多股反应器净 ΔH 会被伴流抵消，判「无法校验」而不是超差。"),
           None, False, WD_ALIGN_PARAGRAPH.LEFT)
 
     # 设备 → 能量行(换热器两侧各一行)
@@ -755,9 +757,10 @@ def _notes_chapter(doc, data: dict) -> None:
         f"进、出合计都低于 {mass_balance.MIN_FLOW_KGH:g} kg/h 时记「流量过小」，不做判定。"
         "缺连接或流股缺流量记「无法校验」，不等于通过。",
         "质量守恒是新结论，与焓平衡判定分开记录；本报告不把质量结论写进焓平衡状态。",
-        "能量衡算的 ΔH 与焓平衡状态取自库内已有结论，未重算；"
-        "换热器只校验冷侧，塔与反应器按约定不校验（塔有冷凝器 / 再沸器 / 中间回流，"
-        "反应器的 QCALC 不是换热负荷），不使用「凑平」的数字。",
+        "能量衡算的 ΔH 与焓平衡状态取自库内已有结论，未重算。换热器只校验冷侧；"
+        "塔按「首级冷凝器 + 末级再沸器」的净热负荷校验（93 座塔实测中间级 duty 全为 0，"
+        "遇中间换热器时该口径会偏小）；反应器按反应热 QCALC 校验，只对单进单出成立，"
+        "带换热伴流的多股反应器记「无法校验」。",
         "塔负荷来源：块字段优先，缺失时用逐级剖面首 / 末级回退，"
         "并在明细表的「来源」列标出。",
         "相对误差口径不区分「漏流股」与「求解器残差」，量级小时属于正常收敛误差，"
