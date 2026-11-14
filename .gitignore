@@ -36,6 +36,10 @@ venv/
 *.sqlite3
 *.log
 data/window.json
+# 服务启动时写的 PID 文件(停止脚本用),含本机进程号,不入库
+data/server.pid
+# 换示例库时的临时库文件
+data/*.installing
 
 # 本地配置(工段边界按工况手填,含真实位号,不入库;样例见 samples/sections.example.json)
 data/config/

@@ -36,7 +36,6 @@ import io
 import json
 import mimetypes
 import os
-import shutil
 import sqlite3
 import subprocess
 import sys
@@ -60,6 +59,8 @@ PROJECT_ROOT = str(paths.resource_root())
 DEFAULT_DB = str(paths.data_dir("cases.db"))
 DEFAULT_LOG = str(paths.data_dir("server.log"))
 STATE_PATH = str(paths.data_dir("window.json"))
+# 「停止 Casebook」优先读这个文件定位进程:比"按端口猜哪个 python 是它"可靠
+PID_PATH = str(paths.data_dir("server.pid"))
 
 # 桌面快捷方式用的图标,同时当作网页 favicon —— 应用窗口在任务栏里才会是这张脸
 ICON_PATH = os.path.join(PROJECT_ROOT, "assets", "app-icon.ico")
@@ -78,6 +79,26 @@ BROWSERS = [
 
 DETACHED = 0x00000008
 CREATE_NEW_GROUP = 0x00000200
+
+# POST body 上限:普通 JSON 接口 256 KB;标准表导入要传一份 CSV 全文,单独放宽。
+# 没有上限时,一个写错的 Content-Length 就能让进程先把内存吃光再报错。
+JSON_BODY_LIMIT = 256 * 1024
+STANDARDS_BODY_LIMIT = 16 * 1024 * 1024
+
+# 换示例库是"备份 + 校验 + 原子替换",两个请求同时来会把彼此的临时文件换掉
+_SAMPLE_SWAP_LOCK = threading.Lock()
+
+
+class BadBody(Exception):
+    """请求体不合法(Content-Length 不对 / 超大 / 不是 JSON 对象 / 读到一半断了)。
+
+    单独一类异常,是为了让 do_POST 回 400。以前这里一律退回 `{}`,
+    而空对象在某些保存接口里表示"清空配置" —— 于是坏请求能静默改配置。
+    """
+
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 def open_ui(url: str, prefer_app_window: bool = True, state: dict | None = None) -> str:
@@ -230,20 +251,32 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # 兜底,别让服务挂掉
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
-    def _read_json_body(self) -> dict:
-        """读 POST 的 JSON body;读不到就当空对象(参数校验会兜住)。"""
+    def _read_json_body(self, max_bytes: int = JSON_BODY_LIMIT) -> dict:
+        """读 POST 的 JSON body。
+
+        没有 body(长度 0)仍按空对象处理 —— 有几个接口根本不需要 body。
+        但"body 坏了"必须抛 BadBody 走 400,不能悄悄退回 `{}`:空对象在某些
+        保存接口里表示"清空",一个损坏的请求就能把用户配置改掉。
+        """
+        raw_length = self.headers.get("Content-Length")
         try:
-            length = int(self.headers.get("Content-Length") or 0)
+            length = int(raw_length or 0)
         except (TypeError, ValueError):
-            return {}
+            raise BadBody(f"Content-Length 不是整数:{raw_length!r}") from None
         if length <= 0:
             return {}
+        if length > max_bytes:
+            raise BadBody(f"请求体 {length} 字节超过上限 {max_bytes} 字节", 413)
         raw = self.rfile.read(length)
+        if len(raw) != length:
+            raise BadBody("请求体读到一半就断了")
         try:
             body = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, ValueError):
-            return {}
-        return body if isinstance(body, dict) else {}
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise BadBody(f"请求体不是合法 JSON:{exc}") from None
+        if not isinstance(body, dict):
+            raise BadBody("请求体必须是 JSON 对象")
+        return body
 
     def do_POST(self) -> None:  # noqa: N802
         path = unquote(urlparse(self.path).path)
@@ -271,7 +304,8 @@ class Handler(BaseHTTPRequestHandler):
                 # 导入标准表:校验 → 写 data/preview/std/docx/ → 立即重新加载(不用重启)
                 from app.design import pipe_data
 
-                ok, errors, files = pipe_data.import_standards(self._read_json_body())
+                ok, errors, files = pipe_data.import_standards(
+                    self._read_json_body(STANDARDS_BODY_LIMIT))
                 payload = {"ok": ok, "errors": errors,
                            "dir": files["dir"], "files": files["files"],
                            "status": _pipe_table_status()}
@@ -313,6 +347,8 @@ class Handler(BaseHTTPRequestHandler):
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
+        except BadBody as exc:
+            self._error(str(exc), exc.status)
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
@@ -978,10 +1014,15 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         rel = path.lstrip("/") or "index.html"
-        if rel.startswith("static/"):
-            rel = rel
-        full = os.path.normpath(os.path.join(WEB_DIR, rel))
-        if not full.startswith(os.path.normpath(WEB_DIR)):
+        # 判边界要用 realpath + commonpath:单靠 startswith 时,兄弟目录
+        # `../web-xxx/...` 经 normpath 之后仍以 WEB_DIR 开头,能绕过去。
+        web_root = os.path.realpath(WEB_DIR)
+        full = os.path.realpath(os.path.join(web_root, rel))
+        try:
+            inside = os.path.commonpath([web_root, full]) == web_root
+        except ValueError:      # 跨盘符时 commonpath 直接抛,当越界处理
+            inside = False
+        if not inside:
             self._error("非法路径", 403)
             return
         if os.path.isdir(full):
@@ -1046,6 +1087,7 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
             open_ui(url, app_window, win.load_state(STATE_PATH))
         return
 
+    _write_pid_file(port)
     _say(f"Casebook 已启动:{url}")
     _say(f"工况库:{os.path.abspath(db_path)}")
     if open_browser:
@@ -1063,12 +1105,83 @@ def serve(db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 8000,
         _say("\n已停止")
     finally:
         httpd.server_close()
+        _remove_pid_file()
+
+
+def _sqlite_side_files(db_path: Path) -> list[Path]:
+    """SQLite 的附属文件(-wal / -shm / -journal);换库时要一并处理。"""
+    return [Path(str(db_path) + suffix) for suffix in ("-wal", "-shm", "-journal")]
+
+
+def _sqlite_copy(src: Path, dst: Path) -> None:
+    """用 SQLite 的 backup API 复制数据库。
+
+    直接 copy2 在库正被读写时可能抄到"半提交"状态:主库与 WAL 不是一个时刻
+    的东西。backup API 给的是提交点一致的副本。
+    """
+    src_conn = sqlite3.connect("file:" + src.as_posix() + "?mode=ro", uri=True)
+    dst_conn = sqlite3.connect(str(dst))
+    try:
+        src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+        src_conn.close()
+
+
+def _sqlite_ok(db_path: Path) -> bool:
+    """PRAGMA integrity_check 是不是 ok。"""
+    conn = sqlite3.connect(str(db_path))
+    try:
+        verdict = conn.execute("PRAGMA integrity_check").fetchone()
+    except sqlite3.Error:
+        return False
+    finally:
+        conn.close()
+    return bool(verdict) and str(verdict[0]).lower() == "ok"
+
+
+def _checkpoint_db(db_path: Path) -> None:
+    """把 WAL 合回主库(库不存在或没有 WAL 时什么也不做)。"""
+    if not db_path.is_file():
+        return
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        conn.commit()
+    except sqlite3.Error as exc:
+        _say(f"WAL 合回主库失败(继续):{exc}")
+    finally:
+        conn.close()
+
+
+def _write_pid_file(port: int) -> None:
+    """记下 PID 与端口,给「停止 Casebook」用 —— 比按端口猜进程可靠。"""
+    try:
+        pid_file = Path(PID_PATH)
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(json.dumps({"pid": os.getpid(), "port": port,
+                                        "started": time.strftime("%Y-%m-%d %H:%M:%S")},
+                                       ensure_ascii=False), encoding="utf-8")
+    except OSError as exc:
+        _say(f"写 PID 文件失败(不影响服务):{exc}")
+
+
+def _remove_pid_file() -> None:
+    """退出时删掉自己的 PID 文件;不是自己写的就别动。"""
+    try:
+        pid_file = Path(PID_PATH)
+        data = json.loads(pid_file.read_text(encoding="utf-8"))
+        if int(data.get("pid") or 0) == os.getpid():
+            pid_file.unlink(missing_ok=True)
+    except (OSError, ValueError, TypeError):
+        pass
 
 
 def _install_sample(db_path: str, alert: bool = True) -> tuple[bool, str]:
     """把内置的示例工况库装成当前库(`--sample` 与首页按钮共用)。
 
-    会先把已有的库备份成 `*.bak`,不覆盖掉用户自己的数据。
+    换库走四步:样例库先抄进临时文件 → 校验完整性 → 原库做一致性备份 →
+    os.replace 原子替换。原库备份名带时间戳,不覆盖上一次的备份。
     返回 (是否成功, 给人看的说明)。
     """
     src = paths.resource_root() / "samples" / "case-23-error.db"
@@ -1081,18 +1194,42 @@ def _install_sample(db_path: str, alert: bool = True) -> tuple[bool, str]:
         return False, msg
     dst = Path(db_path)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    backup_note = ""
-    if dst.is_file():
-        backup = dst.with_name(dst.name + ".bak")
-        shutil.copy2(dst, backup)
-        _say(f"已把原工况库备份成:{backup}")
-        backup_note = f";原库已备份成 {backup.name}"
-    # 清掉可能残留的 SQLite 附属文件,避免旧数据页混进新库
-    for suffix in ("-wal", "-shm", "-journal"):
-        side = Path(str(dst) + suffix)
-        if side.is_file():
+    with _SAMPLE_SWAP_LOCK:
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        staging = dst.with_name(f"{dst.name}.installing")
+        for side in _sqlite_side_files(staging):
             side.unlink(missing_ok=True)
-    shutil.copy2(src, dst)
+        backup_note = ""
+        try:
+            # ① 样例库先抄进临时文件:backup API 给的是提交点一致的副本
+            _sqlite_copy(src, staging)
+            # ② 临时库自己先过完整性检查,坏的那份不许取代真库
+            if not _sqlite_ok(staging):
+                staging.unlink(missing_ok=True)
+                msg = "示例库完整性校验没通过,已放弃;原库未改动。"
+                _say(msg)
+                if alert:
+                    _alert(msg)
+                return False, msg
+            # ③ 原库:同样用 backup API 做一致性备份,不覆盖上一次的
+            if dst.is_file():
+                backup = dst.with_name(f"{dst.name}.{stamp}.bak")
+                _sqlite_copy(dst, backup)
+                _say(f"已把原工况库备份成:{backup}")
+                backup_note = f";原库已备份成 {backup.name}"
+            # ④ 先把 WAL 合回主库再删附属文件 —— 顺序反了会丢已提交未落盘的数据
+            _checkpoint_db(dst)
+            for side in _sqlite_side_files(dst):
+                side.unlink(missing_ok=True)
+            # ⑤ 同盘 os.replace 是原子的:页面要么看到旧库,要么看到新库
+            os.replace(staging, dst)
+        except (OSError, sqlite3.Error) as exc:
+            staging.unlink(missing_ok=True)
+            msg = f"装示例库失败:{type(exc).__name__}: {exc}(原库 {dst.name} 未改动)"
+            _say(msg)
+            if alert:
+                _alert(msg)
+            return False, msg
     msg = f"已装入示例工况:121 流股 / 77 模块,含两个塔的报错{backup_note}"
     _say(msg)
     return True, msg

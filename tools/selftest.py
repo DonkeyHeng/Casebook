@@ -1389,7 +1389,7 @@ def test_piping_class() -> None:
 
 
 def test_install_sample() -> None:
-    """内置示例库:能装进空库;覆盖前把原库备份成 .bak。"""
+    """内置示例库:能装进空库;覆盖前把原库备份成带时间戳的 .bak。"""
     from app.api import server
 
     root = Path(__file__).resolve().parents[1]
@@ -1413,7 +1413,17 @@ def test_install_sample() -> None:
 
         ok2, msg2 = server._install_sample(str(db_path), alert=False)
         check_eq("示例:重复装载也成功", ok2, True)
-        check("示例:覆盖前已备份", (tmp / "cases.db.bak").is_file())
+        backups = sorted(tmp.glob("cases.db.*.bak"))
+        check("示例:覆盖前已备份(带时间戳)", len(backups) == 1,
+              f"实际备份 {[b.name for b in backups]}")
+        if backups:
+            # 备份不是"顺手抄的文件",得是能打开的完整库
+            conn = db.open_db(str(backups[0]))
+            try:
+                check_eq("示例:备份是可读的完整库", len(db.list_cases(conn)), 1)
+            finally:
+                conn.close()
+        check("示例:没留下临时文件", not list(tmp.glob("*.installing*")))
         check("示例:提示里写了备份", "备份" in msg2)
         conn = db.open_db(str(db_path))
         try:
@@ -2029,6 +2039,79 @@ def test_guard() -> None:
           guard(origin, change=True) is False and origin.err == 403, f"err={origin.err}")
 
 
+# ---------------------------------------------------------------- HTTP 入口
+
+def test_http_entry() -> None:
+    """POST body 坏掉必须回 400;静态路径不能穿越。
+
+    以前 _read_json_body() 一律退回 `{}`,而空对象在等级表保存里表示"清空配置",
+    一个坏请求就能把用户配的等级表删掉 —— 这几条是那次的回归网。
+    用进程内随机端口起服务,不占固定端口、不留后台进程。
+    """
+    import json as jsonlib
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from app.api import server as srv
+    from app.design import pipe_data
+
+    root = Path(__file__).resolve().parents[1]
+    tmp = root / "data" / "preview" / "_selftest-http"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    cfg = tmp / "piping-classes.json"
+    # 改到临时目录:自测绝不碰用户真实的 data/config/piping-classes.json
+    old_path, old_dir = pipe_data.PIPING_CLASS_PATH, pipe_data._CONFIG_DIR
+    pipe_data.PIPING_CLASS_PATH, pipe_data._CONFIG_DIR = cfg, tmp
+
+    handler_cls = type("SelftestHandler", (srv.Handler,), {"db_path": str(tmp / "none.db")})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    def call(method: str, path: str, body=None, raw: bytes | None = None) -> int:
+        headers = {"X-Casebook-Client": "1"}
+        data = None
+        if raw is not None:
+            data, headers["Content-Type"] = raw, "application/json"
+        elif body is not None:
+            data = jsonlib.dumps(body).encode()
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(base + path, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        except Exception:
+            return 0
+
+    try:
+        check("HTTP:坏 JSON 回 400", call("POST", "/api/piping-classes", raw=b"{oops") == 400)
+        check("HTTP:空对象不再等于清空配置",
+              call("POST", "/api/piping-classes", body={}) == 400 and not cfg.is_file())
+        check("HTTP:数组 body 回 400", call("POST", "/api/piping-classes", raw=b"[1]") == 400)
+        huge = b'{"rules": [], "default": null, "pad": "' + b"x" * (300 * 1024) + b'"}'
+        check("HTTP:超大 body 回 413", call("POST", "/api/piping-classes", raw=huge) == 413)
+        good = {"rules": [{"medium": ["PL"], "grade": "20#", "corrosion_mm": 1.0}], "default": None}
+        check("HTTP:合法等级表仍能保存",
+              call("POST", "/api/piping-classes", body=good) == 200 and cfg.is_file())
+        check("HTTP:显式空表才清空",
+              call("POST", "/api/piping-classes", body={"rules": [], "default": None}) == 200
+              and not cfg.is_file())
+        for probe in ("/../data/cases.db", "/..%2Fdata%2Fcases.db"):
+            check(f"HTTP:静态路径穿越被拒 {probe}", call("GET", probe) == 403)
+        check("HTTP:首页仍可读", call("GET", "/") == 200)
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        pipe_data.PIPING_CLASS_PATH, pipe_data._CONFIG_DIR = old_path, old_dir
+        shutil.rmtree(tmp, ignore_errors=True)
+        pipe_data.reload_piping_classes()
+
+
 # ---------------------------------------------------------------- runner
 
 def main(argv: list[str] | None = None) -> int:
@@ -2063,7 +2146,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("单位表 units", test_units),
                      ("边界夹具 fixtures", test_fixtures),
                      ("出口一致性 exports", test_export_consistency),
-                     ("同源校验 guard", test_guard)):
+                     ("同源校验 guard", test_guard),
+                     ("HTTP 入口 body / 静态路径", test_http_entry)):
         print(f"\n[{name}]")
         fn()
 

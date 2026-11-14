@@ -817,12 +817,19 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
 
 def save_piping_classes(payload) -> tuple[bool, list[str]]:
     """校验 → 写文件 → 重新加载。返回 (是否写入, 错误列表)。"""
+    if not isinstance(payload, dict):
+        return False, ["请求体必须是 JSON 对象"]
+    if "rules" not in payload and "default" not in payload:
+        # "没收到内容"不等于"你要清空":删配置文件必须显式提交空表,
+        # 否则一个缺 body 或字段拼错的请求就能把等级表清掉。
+        return False, ["请求体里没有 rules / default;清空等级表请显式提交 "
+                       '{"rules": [], "default": null}']
     cleaned, errors = validate_piping_classes(payload)
     if errors:
         return False, errors
     _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not cleaned["rules"] and not cleaned["default"]:
-        # 空表 = 清除配置,回到"全部按默认材质"
+        # 空表 = 清除配置,回到"全部按默认材质"(已由上面的显式字段校验把关)
         try:
             PIPING_CLASS_PATH.unlink(missing_ok=True)
         except OSError as exc:
