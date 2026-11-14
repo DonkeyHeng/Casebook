@@ -78,7 +78,8 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | 问题横幅 | 第一行直接给结论(「本次运行有 2 个模块报错,不建议用它算收率」),下面是明细,可收起 |
 
 
-回归自测 **489 条**,`python -m tools.selftest` 不需要 Aspen 就能跑(判定 / 单位 / 焓平衡 / 泵口径 / 三出口一致性)。
+回归自测 **433 条**(带 `--db` 再核库内一致性共 461 条),`python -m tools.selftest` 不需要 Aspen 就能跑
+(判定 / 单位 / 焓平衡 / 物料与能量衡算 / 泵口径 / 三出口一致性)。
 ## 环境要求
 
 | 项 | 要求 |
@@ -86,7 +87,7 @@ Aspen Plus 的界面适合建模,不适合翻数据:想看某条流股的组成�
 | 系统 | Windows 10 / 11(唯一支持平台) |
 | Aspen | Aspen Plus **V15**(实测版本;其它版本未验证),需自备正版许可证 |
 | Python | 3.10 及以上 —— **只有跑源码才需要**;用 Release 的 `Casebook-windows-x64.zip` 时不用装 |
-| 依赖 | `pywin32`、`openpyxl`(源码运行时 `pip install -r requirements.txt`) |
+| 依赖 | `pywin32`、`openpyxl`、`python-docx`(源码运行时 `pip install -r requirements.txt`) |
 | 会话 | 必须在**真实桌面会话**运行,Aspen 与本工具需要同权限级别 |
 | 浏览器 | Edge / Chrome 等现代浏览器(前端零构建,不需要 Node) |
 
@@ -157,6 +158,8 @@ python -m app.api
 | [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) | HG/T 20519.6 管道等级号规则(管路选型用) |
 | [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) | 管路选型口径说明 |
 | [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md) | 选泵方案:泵参数从哪来、NPSHₐ 口径、中联入口与不自动对接的理由 |
+| [`docs/balance-report.md`](docs/balance-report.md) | 衡算报告使用说明:两册怎么导、工段边界怎么确认、哪些数字不能当真 |
+| [`docs/balance-report-plan.md`](docs/balance-report-plan.md) | 衡算报告方案:质量守恒口径、工段(界区)划分、能量汇总不重复计数、表格形态的取舍 |
 | [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) | 管路选型要用的国标表格索引:表 1 / 表 4 / 表 B.1 在第几页、分页结构与数据校验方法 |
 | [`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md) | 标准表录入提示词(可整段交给能看图的 AI) |
 | [`docs/ui-style.md`](docs/ui-style.md) | 界面规范:颜色 / 字号 / 圆角 token、对比度底线、键盘与抽屉约定 |
@@ -168,10 +171,10 @@ python -m app.api
 ```
 Casebook/
   start.cmd      启动入口:双击即起服务(有控制台,方便看日志)
-  requirements.txt  Python 依赖(pywin32、openpyxl)
-  app/           应用代码:aspen(COM 只读)、store(本地库)、design(管路选型 / 泵口径 / 设备家族,纯计算)、api(HTTP)、web(零构建前端)
-  tools/         调试与维护脚本:字段探测、泵字段扫描、示例库生成、回归自测、历史工况重算、发布打包
-  docs/          安装、接口、字段地图与管路选型文档
+  requirements.txt  Python 依赖(pywin32、openpyxl、python-docx)
+  app/           应用代码:aspen(COM 只读)、store(本地库)、design(管路选型 / 泵口径 / 设备家族 / 物料与能量衡算,纯计算)、api(HTTP)、web(零构建前端)
+  tools/         调试与维护脚本:字段探测、泵字段扫描、示例库生成、回归自测、历史工况重算、衡算报告批量导出、发布打包
+  docs/          安装、接口、字段地图、管路选型与衡算报告文档
   assets/        图标
   samples/       公开样本数据(可离线演示)
   standards/     标准 PDF 原文(不入库,需自备)
@@ -189,8 +192,9 @@ Casebook/
 模型已经在 Aspen 里打开。仍不行就用 `tools/probe_aspen.py` 做一次诊断。
 
 **为什么组成要点开流股才读?**
-全量读是每条流股 36 次 COM 调用,121 条流股会从几秒变成几十秒。所以默认按需读、读完缓存;
+全量读是每条流股 54 次 COM 调用(液相 x + 气相 y + 各组分质量流量),121 条流股会从几秒变成几十秒。所以默认按需读、读完缓存;
 侧栏读取按钮下面有个「读全部流股组成」的勾选框,勾上就这次一次读完(默认不勾)。
+勾上才会读到**各组分质量流量**——衡算报告里「组分 · 质量流量」那一段要用它,不勾就只出摩尔流量。
 
 **表格里有些单元格是 `—`?**
 那不是模型没结果,而是单位没被换算表覆盖(多见于老模型的 ENG 单位集)。顶部「单位诊断」会给出计数。
