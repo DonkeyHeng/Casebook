@@ -381,6 +381,10 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
             header_row.cells[index].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
     # 表头跨页重复:表格被分页时,下一页顶部仍有列头(否则读者看不到单位)
     _row_flag(header_row, "tblHeader")
+    # 列头不要单独留在页底(中文报告惯例:题 + 表头 + 至少一行数据同页)
+    for cell in header_row.cells:
+        for para in cell.paragraphs:
+            para.paragraph_format.keep_with_next = True
     # 表头下方的线(三线表的第二条)
     for cell in header_row.cells:
         tc_pr = cell._tc.get_or_add_tcPr()
