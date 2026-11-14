@@ -30,6 +30,7 @@ from pathlib import Path
 from app.aspen import balance as balance_rules
 from app.aspen import reader
 from app.design import energy_report as energy_rules
+from app.design import stream_table as stream_rules
 from app.design import mass_balance as mass_rules
 from app.design import sections as section_rules
 from app.store import db
@@ -739,6 +740,77 @@ def test_report_export() -> None:
             scratch.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------- 物料平衡宽表
+
+def test_stream_table() -> None:
+    """stream_table.build():流股做列、属性与组分做行(设计文档里的「物料平衡书」形态)。"""
+    streams = [
+        {"name": "0101", "temperature_c": 25.0, "pressure_bar": 1.0,
+         "mass_flow_kgh": 100.0, "mole_flow_kmolh": 10.0, "vol_flow_m3h": 0.1,
+         "vap_frac": 0.0},
+        {"name": "0102", "temperature_c": 60.0, "pressure_bar": 1.0,
+         "mass_flow_kgh": 100.0, "mole_flow_kmolh": 10.0, "vol_flow_m3h": 0.2,
+         "vap_frac": 1.0},
+        {"name": "W-1", "temperature_c": 25.0, "pressure_bar": 1.0,
+         "mass_flow_kgh": 50.0, "mole_flow_kmolh": 5.0, "vol_flow_m3h": 0.05,
+         "vap_frac": 0.0},
+    ]
+    conns = _mb_conns(("E1", "in", "0101"), ("E1", "out", "0102"))
+    comp = {
+        "0101": [{"component": "WATER", "x_liq": 1.0, "y_vap": 0.0,
+                  "mass_flow_kgh": 90.0},
+                 {"component": "BEN", "x_liq": 0.0, "y_vap": 0.0,
+                  "mass_flow_kgh": 10.0}],
+        "0102": [{"component": "WATER", "x_liq": 1.0, "y_vap": 1.0,
+                  "mass_flow_kgh": 100.0},
+                 {"component": "BEN", "x_liq": 0.0, "y_vap": 0.0,
+                  "mass_flow_kgh": None}],
+    }
+    parts = {"01": {"label": "01 工段", "in": ["0101"], "out": ["0102"]}}
+    res = stream_rules.build(streams, conns, parts, comp)
+
+    zone = res["zones"][0]
+    check_eq("宽表: 进口列数", len(zone["in_columns"]), 1)
+    check_eq("宽表: 组分顺序按出现顺序", res["components"], ["WATER", "BEN"])
+    check_eq("宽表: 段合计与误差", (zone["mass_in_kgh"], zone["mass_out_kgh"],
+                                  zone["state"]),
+             (100.0, 100.0, mass_rules.PASS))
+    check_eq("宽表: 读到组分质量流量", zone["has_mass_comp"], True)
+
+    col = zone["in_columns"][0]
+    check_eq("宽表: 相态(液相)", col["phase"], "液相")
+    check_eq("宽表: 组分摩尔流量 = 摩尔分率 × 总摩尔流量",
+             round(col["mole_comp"]["WATER"], 3), 10.0)
+    check_eq("宽表: 组分质量流量取库值", col["mass_comp"]["BEN"], 10.0)
+
+    # 气相流股用 y_vap,液相用 x_liq:同一条流股两相时按汽化率加权
+    gas = zone["out_columns"][0]
+    check_eq("宽表: 气相流股用 y_vap", gas["phase"], "气相")
+    check_eq("宽表: 气相的组分摩尔流量", round(gas["mole_comp"]["WATER"], 3), 10.0)
+
+    # 全流程:没有上游的是外部进料、没有下游的是出界流股
+    # W-1 既没有上游也没有下游(孤立流股),两头都会算进去 —— 这是有意的:
+    # 全流程表宁可在两边都列出来,也不要把一股料悄悄丢掉
+    check_eq("宽表: 全流程进口数", len(res["overall"]["in_columns"]), 2)
+    check_eq("宽表: 全流程出口数", len(res["overall"]["out_columns"]), 2)
+    check_eq("宽表: 年量按 8000 h 折算",
+             round(res["summary"]["feed"][0]["t_per_year"], 1), 800.0)
+
+    # 没有组分质量流量(老库)→ 整段不出,并标出来
+    res2 = stream_rules.build(streams, conns, parts, {"0101": [
+        {"component": "WATER", "x_liq": 1.0, "y_vap": 0.0, "mass_flow_kgh": None}]})
+    check_eq("宽表: 老库没有组分质量流量 → 不出质量段",
+             res2["zones"][0]["has_mass_comp"], False)
+    check_eq("宽表: 老库仍能出摩尔段",
+             round(res2["zones"][0]["in_columns"][0]["mole_comp"]["WATER"], 3), 10.0)
+
+    # 相态文字:0/1/中间值/缺失
+    check_eq("宽表: 汽化率 0 → 液相", stream_rules.phase_text(0.0), "液相")
+    check_eq("宽表: 汽化率 1 → 气相", stream_rules.phase_text(1.0), "气相")
+    check_eq("宽表: 汽化率 0.25 → 两相", stream_rules.phase_text(0.25), "两相(0.250)")
+    check_eq("宽表: 汽化率缺失 → —", stream_rules.phase_text(None), "—")
 
 
 # ---------------------------------------------------------------- 报错波及范围
@@ -1880,6 +1952,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("焓平衡 balance.compute()", test_balance),
                      ("物料衡算 mass_balance", test_mass_balance),
                      ("能量衡算 energy_report", test_energy_report),
+                     ("物料平衡宽表 stream_table", test_stream_table),
                      ("衡算报告 report_export", test_report_export),
                      ("报错波及范围 impact.build()", test_impact),
                      ("管路选型 design.pipe", test_pipe),

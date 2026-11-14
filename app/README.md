@@ -25,6 +25,7 @@ app/
     window.py     窗口几何记忆(ctypes)
   design/  纯计算:不碰 Aspen、不读写库
     sections.py    工段(界区)判定:设备名段号推草稿、配置归一化、草稿与确认结果合并
+    stream_table.py 物料平衡宽表:流股做列、属性与组分做行(工段级 + 全流程 + 年量)
     mass_balance.py 物料衡算:界区 Σ进界=Σ出界 + 逐设备 Σ进口=Σ出口(纯函数)
     energy_report.py 能量衡算表与全流程汇总(ΔH 由调用方注入 compute() 的结果)
     pipe_data.py  标准数据表(表 8/9 壁厚偏差、Y 值、PN/材质代号、DN→外径)+ 运行时加载

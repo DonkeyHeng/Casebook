@@ -142,9 +142,12 @@ def main(argv: list[str] | None = None) -> int:
     with open(path, "wb") as handle:
         handle.write(blob)
 
-    n_dev = data["devices"]["summary"]["total"]
+    n_zone = len(data["wide"]["zones"])
+    n_comp = len(data["wide"]["components"])
+    has_mass_comp = any(z["has_mass_comp"] for z in data["wide"]["zones"])
     print(f"已生成:{path}")
-    print(f"  物表 {data['zone']['summary']['total']} 个工段 + {n_dev} 台设备,"
+    print(f"  物料表 {n_zone} 个工段 + 全流程,组分 {n_comp} 个"
+          f"({'含质量段' if has_mass_comp else '只有摩尔段,重读工况可补质量段'}),"
           f"能量表 {len(data['energy']['devices'])} 行,"
           f"塔负荷 {data['energy']['summary']['tower_count']} 座,"
           f"{len(blob) / 1024:.0f} KB")
