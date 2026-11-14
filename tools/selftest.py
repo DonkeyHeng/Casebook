@@ -1092,6 +1092,55 @@ def test_stream_table() -> None:
 # ---------------------------------------------------------------- 报错波及范围
 
 
+def test_report_picked() -> None:
+    """勾选设备后的明细:焓流表与能量平衡表要真的渲染出来。
+
+    这条路径只在页面上勾了设备时才走,长期没有自测覆盖 —— 之前把 rows 按用途
+    改名时漏改了一处引用,只有真勾选才会 NameError,最后是 ruff 的 F821 捞出来的。
+    """
+    import io as _io
+
+    from app.api import report_export
+
+    scratch = Path("data/preview/_selftest-report-picked.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copyfile("samples/case-23-error.db", scratch)
+        conn = db.open_db(str(scratch))
+        try:
+            case_id = db.list_cases(conn)[0]["id"]
+            base = report_export.build_data(conn, case_id)
+            devices = base["energy"]["devices"]
+            check("report-picked: 样本里有能量设备", bool(devices))
+            if not devices:
+                return
+            picked = [devices[0]["block"]]
+            data = report_export.build_data(conn, case_id, picked=picked)
+            check_eq("report-picked: picked 传进数据里", data.get("picked"), picked)
+            try:
+                blob = report_export.render(data, "energy")
+            except ImportError:
+                print("  (没装 python-docx,跳过渲染用例)")
+                return
+            from docx import Document
+
+            doc = Document(_io.BytesIO(blob))
+            texts = [p.text for p in doc.paragraphs]
+            for table in doc.tables:
+                for row in table.rows:
+                    texts.append(" | ".join(cell.text for cell in row.cells))
+            joined = "\n".join(texts)
+            check("report-picked: 有「选中设备的进出口明细」这一节",
+                  "选中设备的进出口明细" in joined)
+            check("report-picked: 明细里有进口焓流表", "进口焓流 kW" in joined)
+            check("report-picked: 明细里有能量平衡表", "ΣHin kW" in joined)
+        finally:
+            conn.close()
+    finally:
+        scratch.unlink(missing_ok=True)
+
+
+
 def test_impact() -> None:
     """impact.build():报错设备 → 哪些流股的数据不能用。"""
     blocks = _blocks(
@@ -2863,6 +2912,7 @@ def main(argv: list[str] | None = None) -> int:
         ("能量衡算 energy_report", test_energy_report),
         ("物料平衡宽表 stream_table", test_stream_table),
         ("衡算报告 report_export", test_report_export),
+        ("衡算报告-勾选设备", test_report_picked),
         ("报错波及范围 impact.build()", test_impact),
         ("管路选型 design.pipe", test_pipe),
         ("选型校验 validate() V1–V9", test_pipe_checks),
