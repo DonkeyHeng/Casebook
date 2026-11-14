@@ -199,8 +199,6 @@ def filename(case_id: int, kind: str = "all") -> str:
 
 def _setup(doc, case: dict, kind: str = "all") -> None:
     """A4 版面 + 页眉(册别/工况)+ 页脚(页码)。"""
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
     from docx.shared import Cm, Pt
 
@@ -322,29 +320,10 @@ def _shade(cell, hex_fill: str) -> None:
     )
 
 
-def _three_line(
-    doc,
-    headers,
-    rows,
-    widths,
-    caption="",
-    font_pt=None,
-    header_extra=None,
-    status_col=None,
-    span_rows=(),
-):
-    """三线表:顶线 1.5 pt、表头下线 0.75 pt、底线 1.5 pt,无竖线无内部横线。
+def _three_line_caption(doc, caption, font_pt):
+    """表题:小色块 + 加粗标题;表题不单独留在页底。"""
+    from docx.shared import Pt
 
-    python-docx 没有内置三线表样式,只能直接写 `w:tblBorders`。
-    `w:sz` 的单位是 1/8 pt,所以 1.5 pt = 12、0.75 pt = 6。
-    """
-    from docx.enum.table import WD_TABLE_ALIGNMENT
-    from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
-    from docx.shared import Cm, Pt
-
-    size = Pt(font_pt) if font_pt else Pt(9.0)
     meta = _ACTIVE_KIND
     if caption:
         cap = doc.add_paragraph()
@@ -355,10 +334,22 @@ def _three_line(
         _font(cap.add_run("■ "), Pt(7), True).font.color.rgb = _rgb(meta["accent"])
         _font(cap.add_run(caption), Pt(10), True)
 
-    head_rows = 2 if header_extra else 1
-    table = doc.add_table(rows=head_rows + len(rows), cols=len(headers))
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.autofit = False
+
+def _row_flag(row, tag: str) -> None:
+    """给整行加一个 w:trPr 开关(tblHeader / cantSplit)。"""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tr_pr = row._tr.get_or_add_trPr()
+    node = OxmlElement(f"w:{tag}")
+    node.set(qn("w:val"), "true")
+    tr_pr.append(node)
+
+
+def _table_borders(table):
+    """三线表的表格边框:顶/底 1.0 pt,无竖线、无内部横线。"""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
 
     borders = OxmlElement("w:tblBorders")
     # 注意:这里别用 size 当循环变量 —— 它会把上面算好的字号覆盖掉,
@@ -391,29 +382,13 @@ def _three_line(
         "w:tblDescription",
     )
 
-    def _row_flag(row, tag: str) -> None:
-        """给整行加一个 w:trPr 开关(tblHeader / cantSplit)。"""
-        tr_pr = row._tr.get_or_add_trPr()
-        node = OxmlElement(f"w:{tag}")
-        node.set(qn("w:val"), "true")
-        tr_pr.append(node)
 
-    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER, color=None):
-        para = cell.paragraphs[0]
-        para.alignment = align
-        para.paragraph_format.space_after = Pt(0)
-        para.paragraph_format.line_spacing = 1.0  # 继承 1.22 会把长表撑高一倍
-        raw = "" if text is None else str(text)
-        # 「ΣHin|kW」这种写法渲染成两行:名称在上、单位在下(7.5pt 灰),
-        # 各列表头等高,不会出现有的折行有的不折
-        name, _, unit = raw.partition("|")
-        run = _font(para.add_run(name), size, bold)
-        if color:
-            run.font.color.rgb = _rgb(color)
-        if unit:
-            run.add_break()
-            unit_run = _font(para.add_run(unit), Pt(7.5), False)
-            unit_run.font.color.rgb = _rgb("595959")
+def _header_block(table, headers, size, header_extra, meta, fill):
+    """表头:可选的合并分组行 + 列头 + 表头下方的线;跨页重复。"""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
 
     if header_extra:
         # 分组行(进口 / 出口):整行合并,和列头一起跨页重复 —— 否则续表只看到
@@ -456,6 +431,13 @@ def _three_line(
         node.set(qn("w:color"), "000000")
         borders_cell.append(node)
         tc_pr.append(borders_cell)
+
+    return header_row
+
+
+def _body_block(table, rows, head_rows, status_col, meta, fill):
+    """表体:逐行填格、斑马纹 / 超差底纹、状态列标记。"""
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     stripe = 0
     for row_index, row in enumerate(rows, start=head_rows):
@@ -507,12 +489,18 @@ def _three_line(
     # 分组行横着合并(组分 · 摩尔流量 / 组分 · 质量流量):合并后要把宽度一起
     # 改成整行宽,否则文字仍在首列那一格里折行。索引是「rows 列表里的下标」,
     # 表格行号要加上表头行数(head_rows):有分组表头时是 2,没有时是 1。
+
+
+def _span_widths(table, widths, span_rows, head_rows):
+    """分组行横向合并 + 逐列宽度(合并行不能按 row.cells 设宽度)。"""
+    from docx.shared import Cm
+
     for index in span_rows or ():
         row = table.rows[head_rows + index]
         cells = row.cells
-        if len({id(c._tc) for c in cells}) != len(headers):
+        if len({id(c._tc) for c in cells}) != len(table.columns):
             continue  # 已经合并过,跳过
-        merged = cells[0].merge(cells[len(headers) - 1])
+        merged = cells[0].merge(cells[len(table.columns) - 1])
         for extra in merged.paragraphs[1:]:
             extra._element.getparent().remove(extra._element)
         merged.width = Cm(sum(widths))
@@ -528,6 +516,59 @@ def _three_line(
             continue
         for index, width in enumerate(widths):
             cells[index].width = Cm(width)
+
+
+def _three_line(
+    doc,
+    headers,
+    rows,
+    widths,
+    caption="",
+    font_pt=None,
+    header_extra=None,
+    status_col=None,
+    span_rows=(),
+):
+    """三线表:顶线 1.5 pt、表头下线 0.75 pt、底线 1.5 pt,无竖线无内部横线。
+
+    python-docx 没有内置三线表样式,只能直接写 `w:tblBorders`。
+    `w:sz` 的单位是 1/8 pt,所以 1.5 pt = 12、0.75 pt = 6。
+    """
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
+
+    size = Pt(font_pt) if font_pt else Pt(9.0)
+    meta = _ACTIVE_KIND
+    _three_line_caption(doc, caption, font_pt)
+    head_rows = 2 if header_extra else 1
+    table = doc.add_table(rows=head_rows + len(rows), cols=len(headers))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+
+    _table_borders(table)
+
+    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER, color=None):
+        para = cell.paragraphs[0]
+        para.alignment = align
+        para.paragraph_format.space_after = Pt(0)
+        para.paragraph_format.line_spacing = 1.0  # 继承 1.22 会把长表撑高一倍
+        raw = "" if text is None else str(text)
+        # 「ΣHin|kW」这种写法渲染成两行:名称在上、单位在下(7.5pt 灰),
+        # 各列表头等高,不会出现有的折行有的不折
+        name, _, unit = raw.partition("|")
+        run = _font(para.add_run(name), size, bold)
+        if color:
+            run.font.color.rgb = _rgb(color)
+        if unit:
+            run.add_break()
+            unit_run = _font(para.add_run(unit), Pt(7.5), False)
+            unit_run.font.color.rgb = _rgb("595959")
+
+    _header_block(table, headers, size, header_extra, meta, fill)
+    _body_block(table, rows, head_rows, status_col, meta, fill)
+
+    _span_widths(table, widths, span_rows, head_rows)
     return table
 
 
@@ -856,7 +897,7 @@ def _wide_table(
     这样任何一块表格横着都读得下去(与设计文档里「全流程物料衡算表(1)(2)」同做法)。
     """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.shared import Cm, Pt
+    from docx.shared import Pt
 
     segments = [("进口", table.get("in_columns") or []), ("出口", table.get("out_columns") or [])]
     blocks = []
@@ -1170,7 +1211,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
             _three_line(
                 doc, ["项目", "侧", "数值"], body, (6.0, 3.0, 6.0), cap.next(f"{name} 焓流")
             )
-            bal = _balance_row(block, rows[0], rows[0])
+            bal = _balance_row(block, device_rows[0], device_rows[0])
             _three_line(
                 doc,
                 ["W kW", "Q kW", "ΣHin kW", "ΣHout kW", "偏差 kW"],
