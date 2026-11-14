@@ -519,96 +519,8 @@ def _case_json(
     return json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
 
 
-def _readme(
-    case,
-    columns,
-    stage_counts,
-    reasons,
-    codes,
-    tears,
-    blocks,
-    composition,
-    connections,
-    metrics_count: int,
-) -> str:
-    severity = case["severity"] or ""
-    severity_text = SEVERITY_TEXT.get(severity, severity or "未知")
-    converged = bool(case["converged"])
-    generated = time.strftime("%Y-%m-%d %H:%M:%S")
-
-    problem_blocks = [b for b in blocks if b["status"] in (1, 2)]
-
-    out: list[str] = []
-    w = out.append
-
-    w("# Casebook · AI 分析包")
-    w("")
-    w("> 本文件是整个数据包的使用说明,给 AI 和人读都行。")
-    w("> 数据来自一次 **Aspen Plus 模拟运行**的读数,只做**分析**,不含任何修改模型的建议。")
-    w("")
-    w("| 项 | 值 |")
-    w("| --- | --- |")
-    w(f"| 模型 | `{_cell(case['model_name'] or case['model_path'])}` |")
-    w(f"| 工况编号 | #{case['id']}(本机工况库) |")
-    w(f"| 采集时间 | {_cell(case['read_at'])} |")
-    w(
-        f"| 规模 | {case['stream_count']} 条流股 / {case['block_count']} 个设备 / {len(columns)} 座塔 |"
-    )
-    w(f"| 收敛判定 | **{severity_text}**(converged = {'true' if converged else 'false'}) |")
-    w(f"| 分析包生成 | {generated} |")
-    w("")
-
-    # --- 1 ---
-    w("## 1. 先读这一节:这份数据能不能用")
-    w("")
-    if severity == "empty":
-        w("**这份工况没有任何结果** —— 读取时 Aspen 里的模型还没有运行过(或结果为空)。")
-        w("")
-        w("> 数据包里的数值列基本全是空的,先别拿它做分析。")
-        w("> 请先在 Aspen 里 Run 一次,再重新读取一次工况。")
-        w("")
-    elif converged:
-        w("这次运行**没有报错**,流股与设备结果可以用于定量分析。")
-    elif severity == "warning":
-        w("这次运行**有告警**(模块本身没有报错)。")
-        if problem_blocks:
-            w("")
-            w("涉及的模块:`" + "`、`".join(b["name"] for b in problem_blocks) + "`")
-        w("")
-        w("> 数值可用,但引用时请说明告警项;本工具仍把它标为不可用于统计对比")
-        w("> (converged = false),因为告警往往意味着该模块的结果需要更谨慎地对待。")
-    else:
-        w(f"这次运行**{severity_text}**。")
-        if problem_blocks:
-            w("")
-            w("Aspen 报告了下列问题:`" + "`、`".join(b["name"] for b in problem_blocks) + "`")
-        w("")
-        w("> **给 AI 的结论:不要用这份数据做定量结论(比值、收率、能耗对比、优化判断)。**")
-        w("> 有问题的塔/模块读到的数值是迭代中途值,不是收敛解;")
-        w("> 其余流股可作定性参考,但引用时要说明工况未收敛。")
-    w("")
-
-    # --- 2 ---
-    w("## 2. 文件清单")
-    w("")
-    w("| 文件 | 内容 | 规模 |")
-    w("| --- | --- | --- |")
-    w(f"| `README.md` | 本文件:说明 + 数据字典 + 运行状态 | — |")
-    w(f"| `metrics.csv` | 精简指标(概览 / 状态码 / 异常清单) | {metrics_count} 行 |")
-    w(f"| `streams.csv` | 流股完整数据 | {case['stream_count']} 行 |")
-    w(f"| `blocks.csv` | 设备完整数据 | {case['block_count']} 行 |")
-    if connections:
-        w(f"| `connections.csv` | 设备 ↔ 流股连接关系(拓扑) | {len(connections)} 行 |")
-    if columns:
-        w(f"| `column_profiles.csv` | 塔逐板剖面 | {sum(stage_counts)} 行 |")
-    if composition["rows"]:
-        w(f"| `composition.csv` | 已读流股的逐组分摩尔分数 | {len(composition['rows'])} 行 |")
-    w(f"| `case.json` | 机器可读元数据(同样的信息,便于程序解析) | — |")
-    w("")
-    w("CSV 一律 **UTF-8 带 BOM、逗号分隔、首行是列名**。")
-    w("")
-
-    # --- 3 ---
+def _readme_units(w, blocks) -> None:
+    """README - _readme_units"""
     w("## 3. 单位约定")
     w("")
     w("所有数值已经换算到固定单位,不要按原始单位理解:")
@@ -637,6 +549,10 @@ def _readme(
     w("")
 
     # --- 4 ---
+
+
+def _readme_fields(w, blocks, composition, connections) -> None:
+    """README - _readme_fields"""
     w("## 4. 字段含义")
     w("")
     w("### 4.1 `streams.csv` —— 流股")
@@ -762,6 +678,100 @@ def _readme(
         w("")
 
     # --- 5 ---
+
+
+def _readme(
+    case,
+    columns,
+    stage_counts,
+    reasons,
+    codes,
+    tears,
+    blocks,
+    composition,
+    connections,
+    metrics_count: int,
+) -> str:
+    severity = case["severity"] or ""
+    severity_text = SEVERITY_TEXT.get(severity, severity or "未知")
+    converged = bool(case["converged"])
+    generated = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    problem_blocks = [b for b in blocks if b["status"] in (1, 2)]
+
+    out: list[str] = []
+    w = out.append
+
+    w("# Casebook · AI 分析包")
+    w("")
+    w("> 本文件是整个数据包的使用说明,给 AI 和人读都行。")
+    w("> 数据来自一次 **Aspen Plus 模拟运行**的读数,只做**分析**,不含任何修改模型的建议。")
+    w("")
+    w("| 项 | 值 |")
+    w("| --- | --- |")
+    w(f"| 模型 | `{_cell(case['model_name'] or case['model_path'])}` |")
+    w(f"| 工况编号 | #{case['id']}(本机工况库) |")
+    w(f"| 采集时间 | {_cell(case['read_at'])} |")
+    w(
+        f"| 规模 | {case['stream_count']} 条流股 / {case['block_count']} 个设备 / {len(columns)} 座塔 |"
+    )
+    w(f"| 收敛判定 | **{severity_text}**(converged = {'true' if converged else 'false'}) |")
+    w(f"| 分析包生成 | {generated} |")
+    w("")
+
+    # --- 1 ---
+    w("## 1. 先读这一节:这份数据能不能用")
+    w("")
+    if severity == "empty":
+        w("**这份工况没有任何结果** —— 读取时 Aspen 里的模型还没有运行过(或结果为空)。")
+        w("")
+        w("> 数据包里的数值列基本全是空的,先别拿它做分析。")
+        w("> 请先在 Aspen 里 Run 一次,再重新读取一次工况。")
+        w("")
+    elif converged:
+        w("这次运行**没有报错**,流股与设备结果可以用于定量分析。")
+    elif severity == "warning":
+        w("这次运行**有告警**(模块本身没有报错)。")
+        if problem_blocks:
+            w("")
+            w("涉及的模块:`" + "`、`".join(b["name"] for b in problem_blocks) + "`")
+        w("")
+        w("> 数值可用,但引用时请说明告警项;本工具仍把它标为不可用于统计对比")
+        w("> (converged = false),因为告警往往意味着该模块的结果需要更谨慎地对待。")
+    else:
+        w(f"这次运行**{severity_text}**。")
+        if problem_blocks:
+            w("")
+            w("Aspen 报告了下列问题:`" + "`、`".join(b["name"] for b in problem_blocks) + "`")
+        w("")
+        w("> **给 AI 的结论:不要用这份数据做定量结论(比值、收率、能耗对比、优化判断)。**")
+        w("> 有问题的塔/模块读到的数值是迭代中途值,不是收敛解;")
+        w("> 其余流股可作定性参考,但引用时要说明工况未收敛。")
+    w("")
+
+    # --- 2 ---
+    w("## 2. 文件清单")
+    w("")
+    w("| 文件 | 内容 | 规模 |")
+    w("| --- | --- | --- |")
+    w(f"| `README.md` | 本文件:说明 + 数据字典 + 运行状态 | — |")
+    w(f"| `metrics.csv` | 精简指标(概览 / 状态码 / 异常清单) | {metrics_count} 行 |")
+    w(f"| `streams.csv` | 流股完整数据 | {case['stream_count']} 行 |")
+    w(f"| `blocks.csv` | 设备完整数据 | {case['block_count']} 行 |")
+    if connections:
+        w(f"| `connections.csv` | 设备 ↔ 流股连接关系(拓扑) | {len(connections)} 行 |")
+    if columns:
+        w(f"| `column_profiles.csv` | 塔逐板剖面 | {sum(stage_counts)} 行 |")
+    if composition["rows"]:
+        w(f"| `composition.csv` | 已读流股的逐组分摩尔分数 | {len(composition['rows'])} 行 |")
+    w(f"| `case.json` | 机器可读元数据(同样的信息,便于程序解析) | — |")
+    w("")
+    w("CSV 一律 **UTF-8 带 BOM、逗号分隔、首行是列名**。")
+    w("")
+
+    # --- 3 ---
+    _readme_units(w, blocks)
+    _readme_fields(w, blocks, composition, connections)
     w("## 5. 这次运行的状态(读自 Aspen 运行状态页)")
     w("")
     w("| 状态码 | 值 | 实测含义 |")
