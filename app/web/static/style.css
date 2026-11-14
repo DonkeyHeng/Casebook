@@ -1050,8 +1050,9 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .side-case { display: flex; flex-direction: column; gap: 6px; padding: 0 6px; }
 .side-label { font-size: var(--fs-xs); color: var(--muted); }
 .side-case select { width: 100%; max-width: 100%; font-size: var(--fs-xs); padding: 4px 6px; }
-/* 读取按钮下的「顺带读组成」勾选:默认不勾,勾了这次读取会明显变慢。
-   勾选框与文字按中线对中(align-items:center),不要顶对齐 —— 顶对齐看着像歪了。 */
+/* 读取按钮下的「读组成」勾选:默认不勾,勾了这次读取会明显变慢。
+   原生 checkbox 各浏览器绘制有偏移、无法保证与文字中线一致,所以自己画:
+   appearance:none 的方框 + ::after 打勾,14px 见方,和文字按 align-items:center 对齐。 */
 .side-check {
   display: flex;
   align-items: center;
@@ -1062,7 +1063,38 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   line-height: 1.5;
   cursor: pointer;
 }
-.side-check input { margin: 0; flex: none; accent-color: var(--accent); }
+.side-check input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid var(--muted);
+  border-radius: 3px;
+  background: var(--panel);
+  cursor: pointer;
+}
+.side-check input[type="checkbox"]:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.side-check input[type="checkbox"]:checked::after {
+  content: "";
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+.side-check input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.side-check input[type="checkbox"]:disabled { opacity: .45; cursor: default; }
 .side-check:hover { color: var(--text); }
 
 .side-meta { font-size: var(--fs-xs); color: var(--muted); line-height: 1.7; }
