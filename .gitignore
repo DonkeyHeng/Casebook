@@ -40,6 +40,8 @@ data/window.json
 data/server.pid
 # 换示例库时的临时库文件
 data/*.installing
+# 本地临时脚本(自查 / 基线对比用,不入库)
+data/_*.py
 
 # 本地配置(工段边界按工况手填,含真实位号,不入库;样例见 samples/sections.example.json)
 data/config/
