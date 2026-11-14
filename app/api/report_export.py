@@ -533,6 +533,37 @@ def _group_row(doc, group: str):
     return group
 
 
+def _figure_slot(doc, text: str) -> None:
+    """图片插入处:一个带虚线框的大空位,人工把流程图贴进来。
+
+    工具不生成流程图(服务端没有 SVG 渲染器,流程图目前由前端画),所以这里
+    留一个显眼的空位 + 一行说明,而不是假装"没有流程图"。
+    """
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Pt
+
+    para = doc.add_paragraph()
+    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    para.paragraph_format.space_before = Pt(36)
+    para.paragraph_format.space_after = Pt(36)
+    run = para.add_run(f"【{text}：图片插入处】")
+    _font(run, Pt(18), True, "黑体")
+    run.font.color.rgb = None
+
+    p_pr = para._p.get_or_add_pPr()
+    borders = OxmlElement("w:pBdr")
+    for edge in ("top", "left", "bottom", "right"):
+        node = OxmlElement(f"w:{edge}")
+        node.set(qn("w:val"), "dashed")
+        node.set(qn("w:sz"), "6")
+        node.set(qn("w:color"), "999999")
+        node.set(qn("w:space"), "12")
+        borders.append(node)
+    p_pr.append(borders)
+
+
 def _mass_chapter(doc, data: dict, cap: "_Captions") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -555,6 +586,7 @@ def _mass_chapter(doc, data: dict, cap: "_Captions") -> None:
         _para(doc, "（该工况没有推出工段，可检查设备命名或手工确认边界流股）")
     for zone in wide["zones"]:
         _heading(doc, zone["label"], 3)
+        _figure_slot(doc, f"{zone['label']}流程图")
         _wide_table(doc, zone, cap, "2", title=f"{zone['label']}物料平衡表")
 
     _heading(doc, "1.2 全流程物料平衡表", 2)
@@ -562,6 +594,7 @@ def _mass_chapter(doc, data: dict, cap: "_Captions") -> None:
                 "出口列 = 没有下游的流股（产品、副产、三废）。"
                 "公用工程流股（冷却水、蒸汽等）也在其中，是否算入原料见 1.3 的说明。"),
           None, False, WD_ALIGN_PARAGRAPH.LEFT)
+    _figure_slot(doc, "全流程图")
     _wide_table(doc, wide["overall"], cap, "2", title="全流程物料平衡表")
 
     _heading(doc, "1.3 物料消耗与产出汇总", 2)
