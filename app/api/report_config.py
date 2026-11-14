@@ -32,22 +32,22 @@ def _norm(value) -> str:
     return str(value).strip()
 
 
-def load(case_id: int) -> tuple[dict, dict, str]:
+def load(case_id: int) -> tuple[dict, dict, list, str]:
     """读该工况的确认结果。
 
     Returns:
-        (parts, device_overrides, error)
+        (parts, device_overrides, deleted, error)
         `error` 非空表示文件读不了 / 解析失败,此时 parts 为空(调用方改用草稿)。
     """
     if not os.path.exists(CONFIG_PATH):
-        return {}, {}, ""
+        return {}, {}, [], ""
     try:
         with open(CONFIG_PATH, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError) as exc:
-        return {}, {}, f"读不了 {CONFIG_PATH}:{exc}"
-    parts, overrides = section_rules.load(data, case_id)
-    return parts, overrides, ""
+        return {}, {}, [], f"读不了 {CONFIG_PATH}:{exc}"
+    parts, overrides, deleted = section_rules.load(data, case_id)
+    return parts, overrides, deleted, ""
 
 
 def _clean_names(value) -> tuple[list[str], list[str]]:
@@ -69,17 +69,17 @@ def _clean_names(value) -> tuple[list[str], list[str]]:
     return names, errors
 
 
-def validate(payload) -> tuple[dict, dict, list[str]]:
-    """校验前端提交的内容,返回 (parts, overrides, errors)。"""
+def validate(payload) -> tuple[dict, dict, list, list[str]]:
+    """校验前端提交的内容,返回 (parts, overrides, deleted, errors)。"""
     errors: list[str] = []
     if not isinstance(payload, dict):
-        return {}, {}, ["提交内容得是 JSON 对象"]
+        return {}, {}, [], ["提交内容得是 JSON 对象"]
 
     raw_parts = payload.get("parts")
     if raw_parts is None:
         raw_parts = payload
     if not isinstance(raw_parts, dict):
-        return {}, {}, ["parts 得是按工段组织的一个对象"]
+        return {}, {}, [], ["parts 得是按工段组织的一个对象"]
 
     parts: dict[str, dict] = {}
     for key, value in raw_parts.items():
@@ -104,6 +104,13 @@ def validate(payload) -> tuple[dict, dict, list[str]]:
         parts[name] = {"label": _norm(value.get("label")) or section_rules.label_for(name),
                        "in": in_names, "out": out_names, "blocks": []}
 
+    deleted: list[str] = []
+    raw_deleted = payload.get("deleted")
+    if isinstance(raw_deleted, (list, tuple)):
+        deleted = [_norm(v) for v in raw_deleted if _norm(v)]
+    elif isinstance(raw_deleted, str):
+        deleted = [_norm(v) for v in re.split(r"[,，\s]+", raw_deleted) if _norm(v)]
+
     overrides: dict[str, str] = {}
     raw_over = payload.get("device_sections")
     if isinstance(raw_over, dict):
@@ -111,12 +118,13 @@ def validate(payload) -> tuple[dict, dict, list[str]]:
             if _norm(block) and _norm(part):
                 overrides[_norm(block)] = _norm(part)
 
-    if not parts and not errors:
+    if not parts and not deleted and not errors:
         errors.append("一个工段都没填,不保存")
-    return parts, overrides, errors
+    return parts, overrides, deleted, errors
 
 
-def save(case_id: int, parts: dict, overrides: dict) -> tuple[bool, list[str]]:
+def save(case_id: int, parts: dict, overrides: dict,
+         deleted=None) -> tuple[bool, list[str]]:
     """把该工况的边界写进配置(其它工况的内容原样保留)。"""
     data: dict = {}
     if os.path.exists(CONFIG_PATH):
@@ -135,6 +143,9 @@ def save(case_id: int, parts: dict, overrides: dict) -> tuple[bool, list[str]]:
                       "out": list(info.get("out") or [])}
     if overrides:
         entry["device_sections"] = dict(overrides)
+    if deleted:
+        # 记住"人工删掉了哪些工段":草稿每次都能把它们推回来,不显式记就删不掉
+        entry["deleted"] = sorted(set(deleted))
     data[str(case_id)] = entry
 
     try:

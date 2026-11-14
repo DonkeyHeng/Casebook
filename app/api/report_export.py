@@ -584,7 +584,8 @@ def _mass_chapter(doc, data: dict, cap: "_Captions") -> None:
 
     _heading(doc, "1.1 各工段物料平衡表", 2)
     if not wide["zones"]:
-        _para(doc, "（该工况没有推出工段，可检查设备命名或手工确认边界流股）")
+        _para(doc, "（本工况没有可出的工段：可能被人工删除，或设备位号里没有段号；"
+                   "此时只出下面的全流程表）")
     for zone in wide["zones"]:
         _heading(doc, zone["label"], 3)
         _figure_slot(doc, f"{zone['label']}流程图")

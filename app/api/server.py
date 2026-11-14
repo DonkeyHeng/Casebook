@@ -761,12 +761,13 @@ class Handler(BaseHTTPRequestHandler):
         blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
         connections = [dict(r) for r in db.read_connections(conn, case_id)]
         draft = section_rules.draft(blocks, connections)
-        confirmed, overrides, error = report_config.load(case_id)
+        confirmed, overrides, deleted, error = report_config.load(case_id)
         self._json({
             "case_id": case_id,
             "draft": draft,
             "confirmed": confirmed,
-            "merged": section_rules.merge(draft, confirmed),
+            "deleted": deleted,
+            "merged": section_rules.merge(draft, confirmed, deleted),
             "auto": not confirmed,
             "device_sections": overrides,
             "config": report_config.status(),
@@ -782,11 +783,11 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._error("工况 id 必须是整数")
             return
-        parts, overrides, errors = report_config.validate(self._read_json_body())
+        parts, overrides, deleted, errors = report_config.validate(self._read_json_body())
         if errors:
             self._json({"ok": False, "errors": errors}, 400)
             return
-        ok, save_errors = report_config.save(case_id, parts, overrides)
+        ok, save_errors = report_config.save(case_id, parts, overrides, deleted)
         payload = {"ok": ok, "errors": save_errors, "config": report_config.status()}
         self._json(payload, 200 if ok else 500)
 
@@ -818,11 +819,11 @@ class Handler(BaseHTTPRequestHandler):
         keys = {b["name"] for b in blocks}
         picked_list = sorted(picked & keys) or None
 
-        confirmed, _overrides, _error = report_config.load(case_id)
+        confirmed, _overrides, deleted, _error = report_config.load(case_id)
         parts = None
-        if confirmed:
+        if confirmed or deleted:
             parts = section_rules.merge(
-                section_rules.draft(blocks, connections), confirmed)
+                section_rules.draft(blocks, connections), confirmed, deleted)
 
         try:
             data, fname = report_export.build_report(conn, case_id, parts, picked_list)

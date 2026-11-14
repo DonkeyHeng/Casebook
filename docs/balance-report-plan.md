@@ -150,12 +150,14 @@
     "01": {"label": "第一工段",
            "in":  ["FEED-BEN", "FEED-CUI", "FEED-H"],
            "out": ["1TO2", "FW-0101"]},
+    "deleted": ["03", "05"],
     "device_sections": {"E0101": "02"}
   }
 }
 ```
 
 * 支持 `{"cases": {"40": …}}` 包装与直接 `{"40": …}` 两种写法;
+* `deleted` 是**人工删掉的工段**:草稿每次都能把它们推回来,不显式记住就删不掉;
 * `in` / `out` 改成空列表是**有效决定**(表示该段没有跨界流股),不回退草稿;
 * `device_sections` 只修正「逐设备表」的归堆,不影响界区;
 * 仓库只提供 `samples/sections.example.json` 样例(对标 `samples/piping-classes.example.json`)。

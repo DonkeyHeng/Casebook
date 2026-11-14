@@ -455,18 +455,27 @@ def test_mass_balance() -> None:
              section_rules.resolve("B5", ["CW1"], ["CK1"]), section_rules.UTILITY_KEY)
 
     # ⑨ 界区配置:按工况 id 读,支持 {"cases": {...}} 包装,坏数据不抛异常
-    parts, devs = section_rules.load(
+    parts, devs, gone = section_rules.load(
         {"40": {"01": {"label": "第一工段", "in": ["FEED-H"], "out": ["1TO2"]}}}, 40)
     check_eq("界区配置: 进/出界流股", (parts["01"]["in"], parts["01"]["out"]),
              (["FEED-H"], ["1TO2"]))
     check_eq("界区配置: 标签", parts["01"]["label"], "第一工段")
-    wrapped, _ = section_rules.load({"cases": {"40": {"02": {"in": ["X"]}}}}, 40)
+    wrapped, _, _ = section_rules.load({"cases": {"40": {"02": {"in": ["X"]}}}}, 40)
     check_eq("界区配置: cases 包装也能读", wrapped["02"]["in"], ["X"])
-    check_eq("界区配置: 别的工况读不到", section_rules.load({"41": {}}, 40), ({}, {}))
-    check_eq("界区配置: 坏数据不抛异常", section_rules.load(["not", "a", "dict"], 40), ({}, {}))
-    _, devs = section_rules.load(
+    check_eq("界区配置: 别的工况读不到", section_rules.load({"41": {}}, 40), ({}, {}, []))
+    check_eq("界区配置: 坏数据不抛异常",
+             section_rules.load(["not", "a", "dict"], 40), ({}, {}, []))
+    _, devs, _ = section_rules.load(
         {"7": {"01": {}, "device_sections": {"E0101": "09", "E0102": ""}}}, 7)
     check_eq("界区配置: 设备归堆覆盖只收非空", devs, {"E0101": "09"})
+    # 人工删掉的工段要能读回来,并且合并不再把它从草稿里长出来
+    parts2, _, gone2 = section_rules.load({"40": {"deleted": ["03", "05"]}}, 40)
+    check_eq("界区配置: 读到删除清单", (parts2, gone2), ({}, ["03", "05"]))
+    merged2 = section_rules.merge(
+        {"01": {"label": "01 工段", "in": ["a"], "out": [], "blocks": []},
+         "03": {"label": "03 工段", "in": ["b"], "out": [], "blocks": []}},
+        {}, ["03"])
+    check_eq("界区合并: 删掉的工段不会从草稿里复活", list(merged2), ["01"])
 
     # ⑩ 草稿推导:按设备名段号切界区(只作起点,真正算的是确认后的边界)
     draft = section_rules.draft(

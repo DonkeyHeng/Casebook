@@ -1129,7 +1129,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   display: flex; flex-direction: column; }
 
 .page { padding: 0 20px 40px; }
-#pageHome, #pageData { height: 100%; overflow-y: auto; }
+#pageHome, #pageData, #pageReport { height: 100%; overflow-y: auto; }
 .page-head {
   display: flex;
   align-items: center;
@@ -1764,12 +1764,13 @@ input:focus-visible {
   border-style: solid; border-color: var(--accent, currentColor); outline: none;
 }
 
-.report-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.report-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 860px) { .report-fields { grid-template-columns: 1fr; } }
 
-.report-fields label { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+.report-fields label { display: grid; gap: 4px; min-width: 0; font-size: 12px; color: var(--muted); }
 
 .report-fields textarea {
+  width: 100%; box-sizing: border-box;
   font: inherit; font-size: 12px; line-height: 1.6;
   min-height: 3.6em; resize: vertical;
   padding: 6px 8px; border-radius: 6px;
@@ -1798,6 +1799,14 @@ input:focus-visible {
   font-size: 12.5px; padding: 2px 0; cursor: pointer;
 }
 .report-blocks label span.ty { color: var(--muted); font-size: 11.5px; }
+
+.report-del {
+  margin-left: auto;
+  font: inherit; font-size: 12px; padding: 2px 8px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.report-del:hover { color: var(--bad, #c0392b); border-color: var(--bad, #c0392b); }
 
 .report-chip {
   display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px;

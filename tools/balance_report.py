@@ -38,13 +38,13 @@ CONFIG_PATH = os.path.join("data", "config", "sections.json")
 def _read_sections(case_id: int):
     """读 data/config/sections.json(没有就返回空;坏文件给一句人话)。"""
     if not os.path.exists(CONFIG_PATH):
-        return {}, {}
+        return {}, {}, []
     try:
         with open(CONFIG_PATH, encoding="utf-8") as handle:
             data = json.load(handle)
     except (OSError, ValueError) as exc:
         print(f"! 读不了 {CONFIG_PATH}:{exc}(改用自动草稿)")
-        return {}, {}
+        return {}, {}, []
     return section_rules.load(data, case_id)
 
 
@@ -112,12 +112,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"! 未知家族 key:{'、'.join(bad)};"
                   f"可用:{'、'.join(block_family.FAMILY_LABELS)}")
 
-    confirmed, overrides = _read_sections(args.case)
-    if confirmed:
+    loaded = _read_sections(args.case)
+    confirmed, overrides, deleted = loaded
+    if confirmed or deleted:
         parts = section_rules.merge(
             section_rules.draft(blocks, [dict(r) for r in
                                          db.read_connections(conn, args.case)]),
-            confirmed)
+            confirmed, deleted)
         print(f"工段边界:{CONFIG_PATH} 里 #%d 的 {len(confirmed)} 个工段已确认"
               % args.case)
     else:

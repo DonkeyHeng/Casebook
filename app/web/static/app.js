@@ -2416,7 +2416,8 @@ async function loadCase(id) {
 /* ------------------------------------------------------------ 衡算报告页 */
 
 /* 勾选状态:空集合 = 全部设备(不逼用户先全选一遍) */
-state.report = { data: null, picked: new Set(), filter: "", busy: false };
+state.report = { data: null, picked: new Set(), filter: "", busy: false,
+                 removed: new Set() };  // 本次人工删掉的工段
 
 function reportNotice(text, kind = "") {
   const el = document.getElementById("reportNotice");
@@ -2526,7 +2527,7 @@ function reportCollectSections() {
       out: outBox ? outBox.value.trim() : "",
     };
   });
-  return { parts };
+  return { parts, deleted: [...state.report.removed] };
 }
 
 function reportRenderSections(payload) {
@@ -2535,6 +2536,9 @@ function reportRenderSections(payload) {
   if (!box) return;
   const parts = (payload && payload.merged) || {};
   const keys = Object.keys(parts);
+  if (payload && payload.deleted && payload.deleted.length) {
+    reportNotice(`已删除的工段:${payload.deleted.join("、")}（保存在 data/config/sections.json）`);
+  }
 
   if (hint) {
     hint.textContent = payload.auto
@@ -2568,6 +2572,22 @@ function reportRenderSections(payload) {
     chip.textContent = `${(info.in || []).length} 进 / ${(info.out || []).length} 出`;
     head.appendChild(input);
     head.appendChild(chip);
+
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "report-del";
+    del.textContent = "删除此工段";
+    del.title = "从本次报告里去掉这个工段;保存后下次也不会再从草稿里冒出来";
+    del.addEventListener("click", () => {
+      state.report.removed.add(key);
+      row.remove();
+      const left = box.querySelectorAll(".report-section").length;
+      reportNotice(left
+        ? `已删除「${key} 工段」，还剩 ${left} 个；记得点「保存工段边界」。`
+        : "所有工段都删掉了。保存后报告只出全流程表；点「重置为草稿」可恢复。");
+      if (hint) hint.textContent = `已删除 ${state.report.removed.size} 个工段（未保存）`;
+    });
+    head.appendChild(del);
 
     const fields = document.createElement("div");
     fields.className = "report-fields";
@@ -2621,6 +2641,7 @@ async function saveReportSections() {
     }
     const fresh = await api(`/api/cases/${c.id}/sections`);
     state.report.data = fresh;
+    state.report.removed = new Set();
     reportRenderSections(fresh);
     reportNotice(`已保存到 ${payload.config.path}(工况 #${c.id})`);
   } catch (err) {
@@ -2650,8 +2671,9 @@ function bindReportPage() {
   if (reset) {
     reset.addEventListener("click", () => {
       const payload = state.report.data || { merged: {}, auto: true };
+      state.report.removed = new Set();
       reportRenderSections({ merged: payload.draft || {}, auto: true });
-      reportNotice("已恢复成自动草稿,还没保存");
+      reportNotice("已恢复成自动草稿(删除过的工段也回来了),还没保存");
     });
   }
 

@@ -216,16 +216,22 @@ def load(data, case_id) -> tuple[dict, dict]:
         device_overrides: {设备名: 工段} —— 修正「逐设备表」的归堆
     """
     if not isinstance(data, dict):
-        return {}, {}
+        return {}, {}, []
     # 支持 {"cases": {"40": {...}}} 与直接 {"40": {...}} 两种写法
     cases = data.get("cases") if isinstance(data.get("cases"), dict) else data
     raw = cases.get(str(case_id))
     if not isinstance(raw, dict):
-        return {}, {}
+        return {}, {}, []
 
     parts: dict[str, dict] = {}
     device_overrides: dict[str, str] = {}
+    deleted: list[str] = []
     for key, value in raw.items():
+        # 人工删掉的工段:草稿推得出来,但用户不要,得记住"删"这个决定
+        if key == "deleted":
+            if isinstance(value, (list, tuple)):
+                deleted = [_norm(v) for v in value if _norm(v)]
+            continue
         if key == "device_sections" and isinstance(value, dict):
             for name, part in value.items():
                 if _norm(name) and _norm(part):
@@ -234,11 +240,12 @@ def load(data, case_id) -> tuple[dict, dict]:
         part = parse_part(value, _norm(key))
         if part:
             parts[_norm(key)] = part
-    return parts, device_overrides
+    return parts, device_overrides, deleted
 
 
-def merge(draft_parts: dict, confirmed: dict) -> dict:
-    """草稿与确认结果合并:确认过的以确认结果为准,草稿多出来的保留。
+def merge(draft_parts: dict, confirmed: dict, deleted=()) -> dict:
+    """草稿与确认结果合并:确认过的以确认结果为准,草稿多出来的保留,
+    `deleted` 里的工段一律去掉(用户明确删掉的,不能再从草稿里长回来)。
 
     确认时把 `in` / `out` 改成空列表是**有效决定**(表示「该工段没有跨界流股」),
     不当成「没配」而回退到草稿 —— 否则用户想把某段清空也做不到。
@@ -251,4 +258,6 @@ def merge(draft_parts: dict, confirmed: dict) -> dict:
                        "in": list(info.get("in") or []),
                        "out": list(info.get("out") or []),
                        "blocks": list(info.get("blocks") or [])}
+    for key in deleted or ():
+        merged.pop(_norm(key), None)
     return dict(sorted(merged.items()))
