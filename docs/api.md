@@ -5,7 +5,7 @@
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
-| POST | `/api/read` | 起一次后台读取;已有任务在跑时返回 409 |
+| POST | `/api/read` | 起一次后台读取;已有任务在跑时返回 409。body 可选 `{"include_composition": true}`,勾选后连流股组成一起读(慢:每条流股 36 次 COM 调用) |
 | GET | `/api/read/status` | 读取进度 / 结果(前端每 0.6 s 轮询) |
 | GET | `/api/compare?base=1&other=2` | 逐流股 + 逐设备对比两个工况(A / B / 差值 / 状态变化) |
 | GET | `/api/cases/{id}/connections` | 设备 ↔ 流股连接关系(方向 / 换热器冷热侧 / 塔进料板 / 来源) |

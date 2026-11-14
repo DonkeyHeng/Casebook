@@ -44,6 +44,7 @@ _IDLE: dict = {
     "finished_at": None,
     "elapsed_sec": 0.0,
     "model_path": "",
+    "with_composition": False,  # 本次读取是否连流股组成一起读
     "stream_count": None,
     "block_count": None,
     "severity": "",
@@ -84,8 +85,10 @@ def _fail(message: str) -> None:
 
 # ---------------------------------------------------------------- 启动
 
-def start(db_path: str) -> tuple[dict, bool]:
+def start(db_path: str, include_composition: bool = False) -> tuple[dict, bool]:
     """开始一次读取。
+
+    include_composition=True 时连流股组成一起读(慢:每条流股 36 次 COM 调用)。
 
     Returns:
         (状态快照, 是否真的启动了新任务)。已有任务在跑时返回 False。
@@ -100,9 +103,10 @@ def start(db_path: str) -> tuple[dict, bool]:
             "phase": "连接 Aspen",
             "started_at": time.time(),
             "started_text": time.strftime("%H:%M:%S"),
+            "with_composition": bool(include_composition),
         })
 
-    thread = threading.Thread(target=_run, args=(db_path,),
+    thread = threading.Thread(target=_run, args=(db_path, bool(include_composition)),
                               name="aspen-read", daemon=True)
     thread.start()
     return snapshot(), True
@@ -110,7 +114,7 @@ def start(db_path: str) -> tuple[dict, bool]:
 
 # ---------------------------------------------------------------- 工作线程
 
-def _run(db_path: str) -> None:
+def _run(db_path: str, include_composition: bool = False) -> None:
     # 延迟导入:没装 pywin32 的机器上服务本身还能起来,只在点按钮时给提示
     try:
         from app.aspen import connect, reader
@@ -133,7 +137,12 @@ def _run(db_path: str) -> None:
         def on_progress(done: int, total: int, label: str) -> None:
             _update(done=done, total=total, label=str(label))
 
-        case = reader.read_case(session, progress=on_progress, on_phase=_phase)
+        def on_phase(name: str) -> None:
+            # 勾了「顺带读组成」时,流股阶段会慢很多,阶段名里说清楚
+            _phase(f"{name}(含组成)" if include_composition and name == "读取流股" else name)
+
+        case = reader.read_case(session, include_composition=include_composition,
+                                progress=on_progress, on_phase=on_phase)
 
         _phase("写入工况库")
         conn = db.open_db(db_path)

@@ -417,7 +417,10 @@ class Handler(BaseHTTPRequestHandler):
         不让请求线程同步等 9–25 s:Aspen 的 COM 调用卡住时页面会一直转圈,
         用户看不出是"在算"还是"死了"。轮询能显示进度,也能显示卡在哪一步。
         """
-        snap, started = read_job.start(self.db_path)
+        snap, started = read_job.start(
+            self.db_path,
+            include_composition=bool(self._read_json_body().get("include_composition")),
+        )
         if not started:
             self._json({
                 "ok": False,

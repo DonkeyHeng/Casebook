@@ -44,6 +44,11 @@
       <label class="side-label" for="caseSelect">当前工况</label>
       <select id="caseSelect"></select>
       <button id="readBtn" class="btn primary block" title="从已经打开的 Aspen 里读一次当前工况(约 10–30 秒)">读取当前工况</button>
+      <label class="side-check" for="readComposition"
+             title="勾选后这次读取会把每条流股的组成一起读完(每条 36 次 COM 调用,总时长大约 10 s → 30–40 s);不勾选也可以之后点开单条流股按需读。">
+        <input type="checkbox" id="readComposition">
+        <span>顺带读全部流股组成(慢)</span>
+      </label>
       <div id="caseInfo" class="side-meta"></div>
     </div>
 

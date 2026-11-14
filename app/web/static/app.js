@@ -1443,6 +1443,8 @@ function setReadBusy(busy) {
   const btn = document.getElementById("readBtn");
   btn.disabled = busy;
   btn.textContent = busy ? "读取中…" : "读取当前工况";
+  const comp = document.getElementById("readComposition");
+  if (comp) comp.disabled = busy;
 }
 
 function hideReadStatus(delay = 0) {
@@ -1535,7 +1537,12 @@ async function startRead() {
 
   let payload;
   try {
-    const res = await fetch("/api/read", writeInit({ method: "POST" }));
+    const withComp = !!(document.getElementById("readComposition") || {}).checked;
+    const res = await fetch("/api/read", writeInit({
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ include_composition: withComp }),
+    }));
     payload = await res.json().catch(() => ({}));
     if (res.status === 409) {
       // 已经有一次读取在跑(比如页面刷新过):接管它的进度,而不是弹个错就完事

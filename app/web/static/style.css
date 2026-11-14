@@ -1050,6 +1050,20 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .side-case { display: flex; flex-direction: column; gap: 6px; padding: 0 6px; }
 .side-label { font-size: var(--fs-xs); color: var(--muted); }
 .side-case select { width: 100%; max-width: 100%; font-size: var(--fs-xs); padding: 4px 6px; }
+/* 读取按钮下的「顺带读组成」勾选:默认不勾,勾了这次读取会明显变慢 */
+.side-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.side-check input { margin: 2px 0 0; flex: none; accent-color: var(--accent); }
+.side-check:hover { color: var(--text); }
+
 .side-meta { font-size: var(--fs-xs); color: var(--muted); line-height: 1.7; }
 .side-meta > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-meta .badge { font-size: var(--fs-xs); padding: 0 6px; }
