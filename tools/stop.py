@@ -243,9 +243,9 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
         import traceback
 
         _log("未捕获异常:\n" + traceback.format_exc())
         _msg("停止脚本出错,详情见 data\\stop.log", 0x10)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

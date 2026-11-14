@@ -703,25 +703,6 @@ def _child_count(session, path: str):
         return 0
 
 
-DISCOVERY_PER_TYPE = 2   # 每种类型枚举几台设备的 Input/Output 子节点(枚举大设备很贵:T0101 有 1266 个)
-KNOWN_CONN_FIELDS = (
-    "FCOLD", "FHOT", "COLDIN", "COLDOUT", "HOTIN", "HOTOUT",
-    "FEED_STAGE", "PROD_STAGE",
-    "UTILITY_ID", "UTILID", "UTIL", "COND_UTIL", "REB_UTIL", "COLD_UTIL", "HOT_UTIL",
-)
-
-
-def _child_count(session, path: str):
-    """只取子节点个数(2 次 COM 调用),不枚举名字 —— 给设备表用。"""
-    node = session.find(path)
-    if node is None:
-        return None
-    try:
-        return int(node.Elements.Count)
-    except Exception:
-        return 0
-
-
 def probe_refs(session, path: str, stream_lower: dict, elems_cap: int = 3) -> list[str]:
     """便宜版"这个字段里有没有流股名":只读 Value,必要时再看前几个元素名/值。
 
@@ -915,13 +896,6 @@ def probe_blocks(session, stream_names: list[str]) -> dict:
         stream_lower[key] for key in stream_lower.keys() - referenced_lower.keys()
     )
     return data
-
-
-def _int_or_none(value):
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
 
 
 # ---------------------------------------------------------------- 探测:公用工程

@@ -185,7 +185,6 @@ def _setup(doc, case: dict, kind: str = "all") -> None:
     from docx.oxml.ns import qn
     from docx.shared import Cm, Pt
 
-    meta = kind_meta(kind)
     section = doc.sections[0]
     section.page_width = Cm(21.0)
     section.page_height = Cm(29.7)
@@ -851,7 +850,6 @@ def _figure_slot(doc, text: str) -> None:
     run = para.add_run(f"【{text}：图片插入处】")
     _font(run, Pt(12), True, "黑体")
     run.font.color.rgb = _rgb("7F7F7F")
-    run.font.color.rgb = None
 
     p_pr = para._p.get_or_add_pPr()
     borders = OxmlElement("w:pBdr")
@@ -965,7 +963,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
 
     _heading(doc, f"{chapter}.1 逐设备能量衡算", 2)
     for group in energy["groups"]:
-        rows = []
+        energy_rows = []
         for row in group["devices"]:
             block = blocks.get(row["block"]) or {}
             bal = _balance_row(block, row, row)
@@ -973,14 +971,14 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
             bad = row["state"] == energy_report.BAD
             # 不再单列「类型」:上面的分组标题就是家族(塔 / 换热 / 反应 / 泵…),
             # 9pt 表体下每省一列,数值列就能宽 0.4cm,不会把 −183,646.07 折成两行
-            rows.append(([row["block"], row["side"] or "—",
+            energy_rows.append(([row["block"], row["side"] or "—",
                           _num(bal["h_in_kw"], 2), _num(bal["h_out_kw"], 2),
                           _num(bal["q_kw"], 2), _num(bal["w_kw"], 2),
                           _num(bal["error_kw"], 2), state_text],
                          False, "FDE8E8" if bad else None))
         _three_line(doc, ["设备", "侧", "ΣHin|kW", "ΣHout|kW",
                           "Q 热负荷|kW", "W 机械功|kW", "偏差|kW", "判定"],
-                    rows, (2.6, 0.8, 2.5, 2.5, 2.1, 2.1, 1.7, 1.7),
+                    energy_rows, (2.6, 0.8, 2.5, 2.5, 2.1, 2.1, 1.7, 1.7),
                     cap.next(f"{group['label']}能量衡算"))
 
     picked = data.get("picked")
@@ -990,13 +988,13 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
                    "再平衡表（W / Q / ΣHin / ΣHout / 偏差），与设计文档的写法一致。",
               None, False, WD_ALIGN_PARAGRAPH.LEFT)
         for name in picked:
-            rows = by_block.get(name) or []
-            if not rows:
+            device_rows = by_block.get(name) or []
+            if not device_rows:
                 continue
             block = blocks.get(name) or {}
             _heading(doc, f"{name}（{block.get('type') or '未知类型'}）", 3)
             body = []
-            for row in rows:
+            for row in device_rows:
                 body.append((["进口焓流 kW", row["side"] or "—", _num(row["h_in_kw"], 2)],
                              False, None))
                 body.append((["出口焓流 kW", row["side"] or "—", _num(row["h_out_kw"], 2)],
@@ -1012,7 +1010,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
 
     _heading(doc, f"{chapter}.{3 if picked else 2} 全流程能量汇总", 2)
     summary = energy["summary"]
-    rows = [
+    summary_rows = [
         (["总加热负荷", _num(summary["heat_total_kw"], 2),
           f"正热负荷合计 {_num(summary['heat_pos_kw'], 2)} kW"
           f" + 塔再沸器 {_num(summary['tower_reb_kw'], 2)} kW"], True, None),
@@ -1027,20 +1025,20 @@ def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> No
           "Pump / Compr / MCompr / Turbine 的轴功率合计"], False, None),
     ]
     if summary.get("reaction_net_kw"):
-        rows.append((["未计入：反应器热负荷", _num(summary["reaction_net_kw"], 2),
+        summary_rows.append((["未计入：反应器热负荷", _num(summary["reaction_net_kw"], 2),
                       "反应热不是换热设备的公用工程负荷，按约定不校验"],
                      False, None))
-    _three_line(doc, ["项目", "数值 kW", "构成与说明"], rows, _W_SUMMARY_3,
+    _three_line(doc, ["项目", "数值 kW", "构成与说明"], summary_rows, _W_SUMMARY_3,
                 cap.next("全流程能量汇总"))
 
     if energy["towers"]:
         _heading(doc, f"{chapter}.{4 if picked else 3} 塔的冷凝器 / 再沸器负荷", 2)
-        rows = []
+        tower_rows = []
         for tower in energy["towers"]:
-            rows.append([tower["block"], tower["type"] or "",
-                         _num(tower["cond_kw"], 2), _num(tower["reb_kw"], 2),
-                         _SOURCE_TEXT.get(tower["source"], tower["source"])])
-        _three_line(doc, ["塔", "类型", "冷凝器 kW", "再沸器 kW", "来源"], rows,
+            tower_rows.append([tower["block"], tower["type"] or "",
+                               _num(tower["cond_kw"], 2), _num(tower["reb_kw"], 2),
+                               _SOURCE_TEXT.get(tower["source"], tower["source"])])
+        _three_line(doc, ["塔", "类型", "冷凝器 kW", "再沸器 kW", "来源"], tower_rows,
                     _W_TOWER_5, cap.next("塔的冷凝器 / 再沸器负荷"))
         _para(doc, ("说明：块字段（COND_DUTY / REB_DUTY）优先；"
                     "取不到时用逐级剖面的首级（冷凝器）与末级（再沸器）回退，"

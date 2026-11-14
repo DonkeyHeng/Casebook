@@ -420,9 +420,6 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
     generated = time.strftime("%Y-%m-%d %H:%M:%S")
 
     problem_blocks = [b for b in blocks if b["status"] in (1, 2)]
-    tear_bad = [t for t in tears
-                if isinstance(t.get("error"), (int, float)) and t.get("tolerance")
-                and t["error"] > t["tolerance"]]
 
     out: list[str] = []
     w = out.append

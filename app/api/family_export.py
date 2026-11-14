@@ -14,6 +14,9 @@
 """
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
+from typing import Any
+
 from app.design import block_family
 from app.store import db
 
@@ -36,7 +39,7 @@ def _num(key: str, digits: int):
 
 
 # (表头, 列宽, 取值)
-_COLS: dict[str, tuple[str, int, object]] = {
+_COLS: dict[str, tuple[str, int, Callable[[Mapping[str, Any]], Any]]] = {
     "name": ("设备", 14, lambda b: b["name"]),
     "type": ("类型", 12, lambda b: b["type"]),
     "status": ("状态", 8, lambda b: STATUS_TEXT.get(b["status"], "")),

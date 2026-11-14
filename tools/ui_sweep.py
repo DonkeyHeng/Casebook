@@ -162,7 +162,7 @@ def main(argv=None) -> int:
     try:
         width, height = (int(v) for v in args.size.lower().split("x"))
     except ValueError:
-        raise SystemExit("--size 要写成 1024x768 这种")
+        raise SystemExit("--size 要写成 1024x768 这种") from None
 
     themes = ["light", "dark"] if args.theme == "both" else [args.theme]
     browser = args.browser or find_browser()
