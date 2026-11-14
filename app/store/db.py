@@ -107,6 +107,13 @@ CREATE TABLE IF NOT EXISTS blocks (
     motor_kw      REAL,   -- 建议电机功率(按默认裕量取的档位值)
     pv_bar        REAL,   -- 饱和蒸气压 bar:读工况时自动取进口流股泡点压力,取不到可由用户手填
     pv_source     TEXT,   -- p_v 来源:aspen(进口流股泡点压力)/ manual(用户手填)
+    -- 设备进出口流股温度(所有设备通用;数据来自 connections + streams,不读块上的 B_TEMP):
+    -- 换热器另有冷侧。塔用 top_temp_c / bottom_temp_c(逐级数组),不用这两列。
+    inlet_temp_c      REAL,
+    outlet_temp_c     REAL,
+    cold_in_temp_c    REAL,
+    cold_out_temp_c   REAL,
+    outlet_vap_frac   REAL,   -- 出口流股汽化率(分离页用)
     dh_kw         REAL,   -- 焓平衡:ΔH = Σ出 − Σ入(流股能量流)
     ref_kw        REAL,   -- 对照值:热负荷 / 轴功率 / 0(绝热)
     ref_kind      TEXT,   -- duty / power / zero / hx_cold
@@ -188,6 +195,13 @@ _BLOCK_ADDED_COLUMNS = (
     ("pv_bar", "REAL"),
     # 来源标记:aspen / manual。老库补列后是 NULL(历史工况没有这个信息)
     ("pv_source", "TEXT"),
+    # 设备进出口温度 / 冷侧温度 / 出口汽化率:老库补列后 NULL,
+    # 可以用 repair_cases 从已存的流股 + 连接关系离线回填,不必回 Aspen
+    ("inlet_temp_c", "REAL"),
+    ("outlet_temp_c", "REAL"),
+    ("cold_in_temp_c", "REAL"),
+    ("cold_out_temp_c", "REAL"),
+    ("outlet_vap_frac", "REAL"),
 )
 
 
@@ -321,8 +335,10 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                             top_temp_c, bottom_temp_c, status, message,
                             head_m, flow_m3h, pump_eff, p_in_bar, p_out_bar, dp_bar,
                             rho_kgm3, pump_vap_frac, motor_kw, pv_bar, pv_source,
+                            inlet_temp_c, outlet_temp_c, cold_in_temp_c, cold_out_temp_c,
+                            outlet_vap_frac,
                             dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -348,6 +364,11 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 b.get("motor_kw"),
                 b.get("pv_bar"),
                 b.get("pv_source"),
+                b.get("inlet_temp_c"),
+                b.get("outlet_temp_c"),
+                b.get("cold_in_temp_c"),
+                b.get("cold_out_temp_c"),
+                b.get("outlet_vap_frac"),
                 (b.get("balance") or {}).get("dh_kw"),
                 (b.get("balance") or {}).get("ref_kw"),
                 (b.get("balance") or {}).get("ref_kind"),

@@ -905,6 +905,34 @@ def test_pump_pv_read() -> None:
     check_eq("泵 p_v:单位认不出时留空", got, None)
 
 
+def test_side_temperatures() -> None:
+    """enrich_side_temperatures():进出/冷侧温度取自连接流股,不需要 Aspen。"""
+    streams = [
+        {"name": "S1", "temperature_c": 120.0, "vap_frac": 0.0},
+        {"name": "S2", "temperature_c": 80.0, "vap_frac": 0.5},
+        {"name": "CW1", "temperature_c": 25.0, "vap_frac": 0.0},
+        {"name": "CW2", "temperature_c": 35.0, "vap_frac": 0.0},
+    ]
+    blocks = [{"name": "HX1"}, {"name": "H1"}, {"name": "ORPHAN"}]
+    connections = [
+        {"block": "HX1", "direction": "in", "stream": "S1", "side": "hot"},
+        {"block": "HX1", "direction": "out", "stream": "S2", "side": "hot"},
+        {"block": "HX1", "direction": "in", "stream": "CW1", "side": "cold"},
+        {"block": "HX1", "direction": "out", "stream": "CW2", "side": "cold"},
+        {"block": "H1", "direction": "in", "stream": "S1", "side": ""},
+        {"block": "H1", "direction": "out", "stream": "S2", "side": ""},
+    ]
+    reader.enrich_side_temperatures(streams, blocks, connections)
+    check_eq("设备温度:换热器热侧进 120 ℃", blocks[0]["inlet_temp_c"], 120.0)
+    check_eq("设备温度:换热器热侧出 80 ℃", blocks[0]["outlet_temp_c"], 80.0)
+    check_eq("设备温度:换热器冷侧进 25 ℃", blocks[0]["cold_in_temp_c"], 25.0)
+    check_eq("设备温度:换热器冷侧出 35 ℃", blocks[0]["cold_out_temp_c"], 35.0)
+    check_eq("设备温度:普通设备进出口温度", blocks[1]["inlet_temp_c"], 120.0)
+    check_eq("设备温度:非换热设备冷侧留空", blocks[1]["cold_in_temp_c"], None)
+    check_eq("设备温度:出口汽化率取主出口流股", blocks[0]["outlet_vap_frac"], 0.5)
+    check_eq("设备温度:没有连接的设备全部留空", blocks[2]["inlet_temp_c"], None)
+
+
 def test_family_export() -> None:
     """设备页「导出 Excel」:单分类工作簿的表名/列/NPSHₐ/未知分类报错。"""
     import io
@@ -986,7 +1014,9 @@ def test_block_columns() -> None:
     from app.store import db
 
     need = {"head_m", "flow_m3h", "pump_eff", "p_in_bar", "p_out_bar",
-            "rho_kgm3", "pump_vap_frac", "motor_kw"}
+            "rho_kgm3", "pump_vap_frac", "motor_kw", "pv_bar", "pv_source",
+            "inlet_temp_c", "outlet_temp_c", "cold_in_temp_c", "cold_out_temp_c",
+            "outlet_vap_frac"}
     # 不用 TemporaryDirectory:这台机器上沙箱化后的系统临时目录 chmod 会被拒,
     # 清理阶段会抛 PermissionError。库文件放项目内的 preview 目录(gitignore 覆盖)。
     scratch = Path("data/preview/_selftest-block-columns.db")
@@ -1364,6 +1394,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("泵口径 design.pump", test_pump),
                      ("泵 p_v 读取", test_pump_pv_read),
                      ("设备表泵列 blocks", test_block_columns),
+                     ("设备进出温度", test_side_temperatures),
                      ("分类导出 excel", test_family_export),
                      ("泵 p_v 存储", test_pump_pv_store),
                      ("泵 p_v 沿用", test_pump_pv_inherit),

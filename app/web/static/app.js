@@ -66,6 +66,12 @@ const BLOCK_COLS = {
   bottom:  { key: "bottom_temp_c", label: "底温 ℃", num: true, digits: 1 },
   note:    { key: "balance_note", label: "平衡说明", cls: "msg" },
   message: { key: "message", label: "说明", cls: "msg" },
+  // 设备进出温度:取自连接流股的实测温度(不读块上的 B_TEMP —— 换热器没有、反应器是标志位)
+  inT:     { key: "inlet_temp_c", label: "进口 ℃", num: true, digits: 1 },
+  outT:    { key: "outlet_temp_c", label: "出口 ℃", num: true, digits: 1 },
+  coldIn:  { key: "cold_in_temp_c", label: "冷侧进 ℃", num: true, digits: 1 },
+  coldOut: { key: "cold_out_temp_c", label: "冷侧出 ℃", num: true, digits: 1 },
+  vapOut:  { key: "outlet_vap_frac", label: "出口汽化率", num: true, digits: 3 },
   // 泵专用:tips 的内容来自 /api/pump-spec,不在这里写死
   flow:    { key: "flow_m3h", label: "流量 m³/h", num: true, digits: 2, scaled: true, unit: "m³/h" },
   head:    { key: "head_m", label: "扬程 m", num: true, digits: 2, scaled: true, unit: "m" },
@@ -78,14 +84,18 @@ const BLOCK_COLS = {
 
 /* 塔页保持原样(用户对塔页满意):只去掉"类型"和"功率"两个恒定/无关列 */
 const FAMILY_COLS = {
-  column: ["name", "status", "duty", "dh", "ref", "balance", "nstage", "top", "bottom", "area", "note", "message"],
-  heat:   ["name", "type", "status", "duty", "area", "top", "bottom", "dh", "ref", "balance", "note", "message"],
-  flash:  ["name", "type", "status", "duty", "top", "dh", "ref", "balance", "note", "message"],
-  react:  ["name", "type", "status", "duty", "top", "message"],
+  // 塔:只有级数与顶/底温是逐塔独有的;热负荷(塔是冷凝+再沸两块)、面积、ΔH 在塔上是恒定空列
+  column: ["name", "status", "nstage", "top", "bottom", "message"],
+  // 换热:热/冷侧进出口温度来自连接流股;面积待探测后再加
+  heat:   ["name", "type", "status", "duty", "inT", "outT", "coldIn", "coldOut",
+           "dh", "ref", "balance", "note", "message"],
+  // 分离:出口温度 + 出口汽化率(Flash/Decanter 最该看的量)
+  flash:  ["name", "type", "status", "duty", "outT", "vapOut", "dh", "ref", "balance", "message"],
+  react:  ["name", "type", "status", "duty", "outT", "message"],
   // 泵页:流量/扬程/效率/轴功率/建议电机/p_v/NPSHₐ;级数和热负荷在这里没有意义
   pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "pv", "npsh", "message"],
-  move:   ["name", "type", "status", "power", "dh", "ref", "balance", "note", "message"],
-  mix:    ["name", "type", "status", "top", "message"],
+  move:   ["name", "type", "status", "power", "inT", "outT", "dh", "ref", "balance", "message"],
+  mix:    ["name", "type", "status", "outT", "message"],
   other:  ["name", "type", "status", "message"],
 };
 

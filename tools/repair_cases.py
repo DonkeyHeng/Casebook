@@ -16,7 +16,9 @@
 (`unit_gaps` / `unit_gaps_json`)、能换算的数值回填、**焓平衡自检**
 (`blocks` 的 `dh_kw` / `ref_kw` / `ref_kind` / `balance_state` / `balance_note`),
 以及**泵参数**(`head_m` / `flow_m3h` / `pump_eff` / `p_in_bar` / `p_out_bar` /
-`dp_bar` / `rho_kgm3` / `pump_vap_frac` / `motor_kw`)。
+`dp_bar` / `rho_kgm3` / `pump_vap_frac` / `motor_kw`)、**设备进出温度**
+(`inlet_temp_c` / `outlet_temp_c` / `cold_in_temp_c` / `cold_out_temp_c` / `outlet_vap_frac`,
+用已存的流股 + 连接关系算,不需要 Aspen)。
 **不碰**流股名、设备名、剖面、组成,也不动用户手填的 `pv_bar`。
 
 焓平衡只在有 `connections` 的工况上重算(2026-11-01 之前读的工况没有拓扑数据)。
@@ -163,6 +165,10 @@ def repair_case(conn, case, apply: bool) -> dict:
                 balance_changed += 1
             b["balance"] = new
 
+    # ---- 5) 补设备进出温度(用已存的流股 + 连接关系,不用回 Aspen)
+    if connections:
+        reader.enrich_side_temperatures(streams, blocks, connections)
+
     changed = []
     if case["severity"] != verdict["severity"]:
         changed.append(f"判定 {case['severity']} → {verdict['severity']}")
@@ -189,7 +195,9 @@ def repair_case(conn, case, apply: bool) -> dict:
             "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?,"
             " dh_kw=?, ref_kw=?, ref_kind=?, balance_state=?, balance_note=?,"
             " head_m=?, flow_m3h=?, pump_eff=?, p_in_bar=?, p_out_bar=?, dp_bar=?,"
-            " rho_kgm3=?, pump_vap_frac=?, motor_kw=?"
+            " rho_kgm3=?, pump_vap_frac=?, motor_kw=?,"
+            " inlet_temp_c=?, outlet_temp_c=?, cold_in_temp_c=?, cold_out_temp_c=?,"
+            " outlet_vap_frac=?"
             " WHERE case_id=? AND name=?",
             [(b["duty_kw"], b["power_kw"], b["area_m2"],
               (b.get("balance") or {}).get("dh_kw"),
@@ -200,6 +208,8 @@ def repair_case(conn, case, apply: bool) -> dict:
               b.get("head_m"), b.get("flow_m3h"), b.get("pump_eff"),
               b.get("p_in_bar"), b.get("p_out_bar"), b.get("dp_bar"),
               b.get("rho_kgm3"), b.get("pump_vap_frac"), b.get("motor_kw"),
+              b.get("inlet_temp_c"), b.get("outlet_temp_c"),
+              b.get("cold_in_temp_c"), b.get("cold_out_temp_c"), b.get("outlet_vap_frac"),
               cid, b["name"]) for b in blocks],
         )
         conn.execute(

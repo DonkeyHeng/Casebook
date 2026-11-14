@@ -724,6 +724,47 @@ def read_stream_vapor_pressure(session, stream_name: str):
     return None
 
 
+def enrich_side_temperatures(streams, blocks, connections) -> None:
+    """给每台设备补 进口/出口流股温度,换热器另补冷侧;**纯数据、不碰 COM**。
+
+    为什么不用设备自己的 `B_TEMP`:
+      * 塔是逐级数组(顶/底温好用,保留在 top/bottom 两列);
+      * 换热器(HeatX)没有 `B_TEMP`;
+      * 反应器 RPlug 的 `B_TEMP` 读出来是标志位 `1.0`(和 `HMX` 读成 `1` 同一类坑)。
+    流股温度是实测值,所有设备通用,所以统一取连接流股的 `temperature_c`。
+
+    口径:
+      * 主进口 / 主出口:换热器优先 `hot` 侧,其余设备取第一个进/出流股;
+      * `cold_*` 两列只有 `side=cold` 的连接才有值;
+      * 出口汽化率同样取主出口流股。
+    """
+    by_stream = {s["name"]: s for s in streams}
+    inflow: dict[str, list] = {}
+    outflow: dict[str, list] = {}
+    for row in connections or []:
+        bucket = inflow if row.get("direction") == "in" else outflow
+        bucket.setdefault(row.get("block"), []).append(row)
+
+    def pick(rows, side=None):
+        for r in rows:
+            sid = r.get("stream")
+            if sid in by_stream and (side is None or (r.get("side") or "") == side):
+                return by_stream[sid]
+        return None
+
+    for block in blocks:
+        name = block["name"]
+        ins, outs = inflow.get(name, []), outflow.get(name, [])
+        main_in = pick(ins, "hot") or pick(ins)
+        main_out = pick(outs, "hot") or pick(outs)
+        cold_in, cold_out = pick(ins, "cold"), pick(outs, "cold")
+        block["inlet_temp_c"] = main_in.get("temperature_c") if main_in else None
+        block["outlet_temp_c"] = main_out.get("temperature_c") if main_out else None
+        block["cold_in_temp_c"] = cold_in.get("temperature_c") if cold_in else None
+        block["cold_out_temp_c"] = cold_out.get("temperature_c") if cold_out else None
+        block["outlet_vap_frac"] = main_out.get("vap_frac") if main_out else None
+
+
 def read_pump_fields(session, streams, blocks, connections) -> None:
     r"""给 Pump 块补 扬程/流量/效率/进口压力/密度/p_v/建议电机 —— **就地写进 blocks**。
 
@@ -830,6 +871,8 @@ def read_case(session, include_composition: bool = False,
     mark_empty(convergence, value_coverage(streams), convergence.get("run", {}).get("RUNID"))
     phase("读取连接关系")
     connections = read_connections(session, streams, blocks)
+    phase("补设备进出温度")
+    enrich_side_temperatures(streams, blocks, connections)
     phase("读取泵参数")
     read_pump_fields(session, streams, blocks, connections)
     phase("焓平衡自检")

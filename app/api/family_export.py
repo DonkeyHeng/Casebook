@@ -51,19 +51,24 @@ _COLS: dict[str, tuple[str, int, object]] = {
     "balance": ("焓平衡", 10, lambda b: BALANCE_TEXT.get(b["balance_state"], "")),
     "note": ("平衡说明", 46, lambda b: b["balance_note"]),
     "message": ("提示", 60, lambda b: b["message"]),
+    "inT": ("进口 ℃", 10, _num("inlet_temp_c", 1)),
+    "outT": ("出口 ℃", 10, _num("outlet_temp_c", 1)),
+    "coldIn": ("冷侧进 ℃", 11, _num("cold_in_temp_c", 1)),
+    "coldOut": ("冷侧出 ℃", 11, _num("cold_out_temp_c", 1)),
+    "vapOut": ("出口汽化率", 11, _num("outlet_vap_frac", 3)),
 }
 
 # 与 app.js 的 FAMILY_COLS 一致(顺序即列序)
 FAMILY_COLUMNS: dict[str, tuple[str, ...]] = {
-    "column": ("name", "status", "duty", "dh", "ref", "balance", "nstage",
-               "top", "bottom", "area", "note", "message"),
-    "heat": ("name", "type", "status", "duty", "area", "top", "bottom",
+    "column": ("name", "status", "nstage", "top", "bottom", "message"),
+    "heat": ("name", "type", "status", "duty", "inT", "outT", "coldIn", "coldOut",
              "dh", "ref", "balance", "note", "message"),
-    "flash": ("name", "type", "status", "duty", "top", "dh", "ref", "balance",
-              "note", "message"),
-    "react": ("name", "type", "status", "duty", "top", "message"),
-    "move": ("name", "type", "status", "power", "dh", "ref", "balance", "note", "message"),
-    "mix": ("name", "type", "status", "top", "message"),
+    "flash": ("name", "type", "status", "duty", "outT", "vapOut",
+              "dh", "ref", "balance", "message"),
+    "react": ("name", "type", "status", "duty", "outT", "message"),
+    "move": ("name", "type", "status", "power", "inT", "outT", "dh", "ref",
+             "balance", "message"),
+    "mix": ("name", "type", "status", "outT", "message"),
     "other": ("name", "type", "status", "message"),
 }
 
