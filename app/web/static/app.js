@@ -418,7 +418,7 @@ function pumpNpsh(row) {
   if (row.p_in_bar === null || row.p_in_bar === undefined) return null;
   if (!row.rho_kgm3) return null;
   const value = ((row.p_in_bar - Number(pv)) * 1e5) / (row.rho_kgm3 * spec.g);
-  return Math.abs(value) < 1e-9 ? 0 : value;
+  return Math.abs(value) < 0.005 ? 0 : value;   // 显示 2 位小数,小于半位就归零
 }
 
 /* p_v 来源:读取工况时取 Aspen 泡点压力(aspen);用户改过就是 manual */

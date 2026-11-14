@@ -836,6 +836,9 @@ def test_pump() -> None:
     zero = pump.npsh_available_m(1.01325, 1.01325, 900.0)
     check("泵:泡点进料 NPSHₐ 归零且不带负号",
           zero == 0.0 and math.copysign(1.0, zero) > 0, f"实际 {zero!r}")
+    tiny = pump.npsh_available_m(1.0, 1.000001, 1000.0)
+    check("泵:极小的负 NPSHₐ 按显示精度归零",
+          tiny == 0.0 and math.copysign(1.0, tiny) > 0, f"实际 {tiny!r}")
 
     kw, note = pump.pick_motor(131.466)
     check_eq("泵:131.47 kW 轴功率 → 160 kW 档", kw, 160.0)

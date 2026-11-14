@@ -98,8 +98,9 @@ def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3) -> float | None:
         value = (float(p_in_bar) - float(p_v_bar)) * 1e5 / (float(rho_kgm3) * G)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
-    # 泡点进料(p_v ≈ p_in)时差值只有浮点噪声,归零,免得表里出现「-0.00」
-    return 0.0 if abs(value) < 1e-9 else value
+    # 泡点进料(p_v ≈ p_in)时差值只有浮点噪声;按显示精度(2 位小数)归零,
+    # 免得表里出现「-0.00」这种看着像算错的值
+    return 0.0 if abs(value) < 0.005 else value
 
 
 def pick_motor(shaft_kw, margin: float = DEFAULT_MARGIN,
