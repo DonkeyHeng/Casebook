@@ -29,6 +29,8 @@ from pathlib import Path
 
 from app.aspen import balance as balance_rules
 from app.aspen import reader
+from app.design import mass_balance as mass_rules
+from app.design import sections as section_rules
 from app.store import db
 from app.store import impact as impact_rules
 
@@ -258,6 +260,316 @@ def test_balance() -> None:
         "c": {"balance_state": balance_rules.SKIP},
     })
     check_eq("balance: summarize 计数", (counts["ok"], counts["skip"]), (2, 1))
+
+
+# ---------------------------------------------------------------- 质量守恒
+
+def _mb_streams(*rows) -> list[dict]:
+    """(名字, 质量流量 kg/h[, 摩尔流量, 温度, 压力]) → streams 表。缺的不补 0。"""
+    out = []
+    for row in rows:
+        name, mass = row[0], row[1]
+        out.append({"name": name, "mass_flow_kgh": mass,
+                    "mole_flow_kmolh": row[2] if len(row) > 2 else None,
+                    "temperature_c": row[3] if len(row) > 3 else None,
+                    "pressure_bar": row[4] if len(row) > 4 else None})
+    return out
+
+
+def _mb_blocks(*rows) -> list[dict]:
+    return [{"name": name, "type": btype} for name, btype in rows]
+
+
+def _mb_conns(*rows) -> list[dict]:
+    """(设备, in/out, 流股[, side]) → connections 表。"""
+    out = []
+    for row in rows:
+        out.append({"block": row[0], "direction": row[1], "stream": row[2],
+                    "side": row[3] if len(row) > 3 else None})
+    return out
+
+
+def test_mass_balance() -> None:
+    """mass_balance.build():质量守恒是新结论,判据是相对 0.5%,不碰焓平衡。"""
+    # ① 单进单出:进 = 出 → 通过
+    res = mass_rules.build(
+        _mb_streams(("0101", 100.0, 5.0, 25.0, 1.0), ("0102", 100.0, 5.0, 60.0, 1.0)),
+        _mb_blocks(("E0101", "Heater")),
+        _mb_conns(("E0101", "in", "0101"), ("E0101", "out", "0102")),
+    )
+    dev = res["devices"][0]
+    check_eq("mass: 单进单出 → pass", dev["state"], mass_rules.PASS)
+    check_eq("mass: 单进单出 相对误差 0", dev["rel_err"], 0.0)
+    check("mass: 质量守恒与焓平衡状态不共用字段",
+          "balance_state" not in dev)
+
+    # ② 多进多出(Mixer 三进一出):合计算对
+    res = mass_rules.build(
+        _mb_streams(("0201", 30.0), ("0202", 20.0), ("0203", 50.0), ("0204", 100.0)),
+        _mb_blocks(("M0201", "Mixer")),
+        _mb_conns(("M0201", "in", "0201"), ("M0201", "in", "0202"),
+                  ("M0201", "in", "0203"), ("M0201", "out", "0204")),
+    )
+    dev = res["devices"][0]
+    check_eq("mass: 多进多出 进料合计", dev["mass_in_kgh"], 100.0)
+    check_eq("mass: 多进多出 出料合计", dev["mass_out_kgh"], 100.0)
+    check_eq("mass: 多进多出 → pass", dev["state"], mass_rules.PASS)
+
+    # ③ 缺失流股:缺出口连接 → 无法校验(不是 fail)
+    res = mass_rules.build(
+        _mb_streams(("0301", 100.0)),
+        _mb_blocks(("E0301", "Heater")),
+        _mb_conns(("E0301", "in", "0301")),
+    )
+    check_eq("mass: 缺出口连接 → 无法校验", res["devices"][0]["state"], mass_rules.NO_DATA)
+    # 流股存在但缺质量流量 → 也是无法校验,不能当 0 加
+    res = mass_rules.build(
+        _mb_streams(("0302", None), ("0303", 100.0)),
+        _mb_blocks(("E0302", "Heater")),
+        _mb_conns(("E0302", "in", "0302"), ("E0302", "out", "0303")),
+    )
+    check_eq("mass: 缺质量流量 → 无法校验", res["devices"][0]["state"], mass_rules.NO_DATA)
+
+    # ④ 误差临界:恰 0.5% 通过,略超 0.5% 超差
+    res = mass_rules.build(
+        _mb_streams(("0401", 1000.0), ("0402", 995.0)),
+        _mb_blocks(("E0401", "Heater")),
+        _mb_conns(("E0401", "in", "0401"), ("E0401", "out", "0402")),
+    )
+    check_eq("mass: 恰 0.5% → pass(≤ 边界)", res["devices"][0]["state"], mass_rules.PASS)
+    res = mass_rules.build(
+        _mb_streams(("0403", 1000.0), ("0404", 994.0)),
+        _mb_blocks(("E0402", "Heater")),
+        _mb_conns(("E0402", "in", "0403"), ("E0402", "out", "0404")),
+    )
+    check_eq("mass: 0.6% → fail", res["devices"][0]["state"], mass_rules.FAIL)
+    check("mass: 超差说明写明疑似漏流股",
+          "漏流股" in res["devices"][0]["note"])
+
+    # ⑤ 小流量豁免:进出都 < 1 kg/h 时不做判定
+    res = mass_rules.build(
+        _mb_streams(("0501", 0.2), ("0502", 0.1)),
+        _mb_blocks(("V0501", "Valve")),
+        _mb_conns(("V0501", "in", "0501"), ("V0501", "out", "0502")),
+    )
+    check_eq("mass: 小流量 → too_small", res["devices"][0]["state"], mass_rules.TOO_SMALL)
+
+    # ⑥ HeatX 冷侧:质量守恒按整体(冷热两侧一起),与焓平衡「只校冷侧」不同
+    res = mass_rules.build(
+        _mb_streams(("0601", 100.0), ("0602", 100.0), ("0603", 50.0), ("0604", 50.0)),
+        _mb_blocks(("EX0601", "HeatX")),
+        _mb_conns(("EX0601", "in", "0601", "hot"), ("EX0601", "out", "0602", "hot"),
+                  ("EX0601", "in", "0603", "cold"), ("EX0601", "out", "0604", "cold")),
+    )
+    dev = res["devices"][0]
+    check_eq("mass: HeatX 整体进料合计(冷+热)", dev["mass_in_kgh"], 150.0)
+    check_eq("mass: HeatX 两侧都算 → pass", dev["state"], mass_rules.PASS)
+
+    # ⑦ 塔:进料 = 顶 + 底
+    res = mass_rules.build(
+        _mb_streams(("0701", 1000.0), ("0702", 400.0), ("0703", 600.0)),
+        _mb_blocks(("T0701", "RadFrac")),
+        _mb_conns(("T0701", "in", "0701"), ("T0701", "out", "0702"),
+                  ("T0701", "out", "0703")),
+    )
+    check_eq("mass: 塔 进=顶+底 → pass", res["devices"][0]["state"], mass_rules.PASS)
+
+    # ⑧ 工段判定四层:配置 > 设备名 > 流股众数 > 公用工程
+    check_eq("工段: 设备名尾四位", section_rules.section_of_block("EX0101"), "01")
+    check_eq("工段: 带后缀的塔名", section_rules.section_of_block("T0202-A"), "02")
+    check_eq("工段: 无段号设备名", section_rules.section_of_block("B3"), None)
+    check_eq("工段: 流股段号", section_rules.section_of_stream("0101"), "01")
+    check_eq("工段: 公用工程流股无段号", section_rules.section_of_stream("CW1"), None)
+    check_eq("工段: 配置覆盖设备名",
+             section_rules.resolve("E0101", ["0101"], ["0102"], {"E0101": "09"}), "09")
+    check_eq("工段: 空配置等于没配",
+             section_rules.resolve("E0101", ["0101"], ["0102"], {"E0101": ""}), "01")
+    check_eq("工段: 设备名优先于流股众数",
+             section_rules.resolve("E0101", ["0201"], ["0202"]), "01")
+    check_eq("工段: 设备名取不到 → 流股众数",
+             section_rules.resolve("B3", ["0301", "0302"], ["0303"]), "03")
+    check_eq("工段: 进口优先于出口(打平时)",
+             section_rules.resolve("B4", ["0401"], ["0501"]), "04")
+    check_eq("工段: 都判不出 → 公用工程",
+             section_rules.resolve("B5", ["CW1"], ["CK1"]), section_rules.UTILITY_KEY)
+
+    # ⑨ 界区配置:按工况 id 读,支持 {"cases": {...}} 包装,坏数据不抛异常
+    parts, devs = section_rules.load(
+        {"40": {"01": {"label": "第一工段", "in": ["FEED-H"], "out": ["1TO2"]}}}, 40)
+    check_eq("界区配置: 进/出界流股", (parts["01"]["in"], parts["01"]["out"]),
+             (["FEED-H"], ["1TO2"]))
+    check_eq("界区配置: 标签", parts["01"]["label"], "第一工段")
+    wrapped, _ = section_rules.load({"cases": {"40": {"02": {"in": ["X"]}}}}, 40)
+    check_eq("界区配置: cases 包装也能读", wrapped["02"]["in"], ["X"])
+    check_eq("界区配置: 别的工况读不到", section_rules.load({"41": {}}, 40), ({}, {}))
+    check_eq("界区配置: 坏数据不抛异常", section_rules.load(["not", "a", "dict"], 40), ({}, {}))
+    _, devs = section_rules.load(
+        {"7": {"01": {}, "device_sections": {"E0101": "09", "E0102": ""}}}, 7)
+    check_eq("界区配置: 设备归堆覆盖只收非空", devs, {"E0101": "09"})
+
+    # ⑩ 草稿推导:按设备名段号切界区(只作起点,真正算的是确认后的边界)
+    draft = section_rules.draft(
+        _mb_blocks(("E0101", "Heater"), ("E0201", "Heater"), ("B9", "Heater")),
+        _mb_conns(("E0101", "in", "FEED"), ("E0101", "out", "1TO2"),
+                  ("E0201", "in", "1TO2"), ("E0201", "out", "WATER"),
+                  ("B9", "in", "JUNK"), ("B9", "out", "JUNK2")),
+    )
+    check_eq("界区草稿: 01 段进界=外部进料", draft["01"]["in"], ["FEED"])
+    check_eq("界区草稿: 01 段出界=去 02 段", draft["01"]["out"], ["1TO2"])
+    check_eq("界区草稿: 02 段进界=来自 01 段", draft["02"]["in"], ["1TO2"])
+    check_eq("界区草稿: 02 段出界=外排", draft["02"]["out"], ["WATER"])
+    check("界区草稿: 无段号的设备不产生工段", "B9" not in draft)
+
+    # ⑪ 合并:确认过的以确认为准,空列表是有效决定(不回退草稿)
+    merged = section_rules.merge(
+        {"01": {"label": "01 工段", "in": ["d1"], "out": ["d2"], "blocks": ["E0101"]},
+         "02": {"label": "02 工段", "in": ["d3"], "out": [], "blocks": []}},
+        {"01": {"label": "反应工段", "in": [], "out": ["c1"], "blocks": []}},
+    )
+    check_eq("界区合并: 确认的空列表不回退草稿", merged["01"]["in"], [])
+    check_eq("界区合并: 确认项覆盖标签", merged["01"]["label"], "反应工段")
+    check_eq("界区合并: 草稿多出来的工段保留", merged["02"]["in"], ["d3"])
+
+    # ⑫ 界区衡算:Σ进界 = Σ出界,容差与逐设备一致
+    res = mass_rules.boundary_build(
+        _mb_streams(("FEED", 100.0, 5.0, 25.0, 1.0), ("1TO2", 100.0, 5.0, 60.0, 1.0),
+                    ("WATER", 100.0, 5.0, 40.0, 1.0)),
+        {"01": {"label": "01 工段", "in": ["FEED"], "out": ["1TO2"]},
+         "02": {"label": "02 工段", "in": ["1TO2"], "out": ["WATER"]}},
+    )
+    check_eq("界区: 两段都闭合 → pass",
+             [p["state"] for p in res["parts"]], [mass_rules.PASS, mass_rules.PASS])
+    check_eq("界区: 进界合计", res["parts"][0]["mass_in_kgh"], 100.0)
+    check_eq("界区: 汇总台数", res["summary"]["total"], 2)
+
+    # 缺口径:配置里写了库里没有的流股 → 无法校验,并列出缺哪股
+    res = mass_rules.boundary_build(
+        _mb_streams(("FEED", 100.0)),
+        {"01": {"in": ["FEED"], "out": ["NOT_THERE"]}},
+    )
+    part = res["parts"][0]
+    check_eq("界区: 配置流股不存在 → 无法校验", part["state"], mass_rules.NO_DATA)
+    check_eq("界区: 记录缺失流股", part["missing"], ["NOT_THERE"])
+    check("界区: 说明里点出缺哪股", "NOT_THERE" in part["note"])
+
+    # 空边界与超差
+    res = mass_rules.boundary_build(_mb_streams(("FEED", 100.0)),
+                                    {"01": {"in": ["FEED"], "out": []}})
+    check_eq("界区: 没有出界流股 → 无法校验",
+             res["parts"][0]["state"], mass_rules.NO_DATA)
+    res = mass_rules.boundary_build(
+        _mb_streams(("FEED", 1000.0), ("1TO2", 990.0)),
+        {"01": {"in": ["FEED"], "out": ["1TO2"]}},
+    )
+    check_eq("界区: 1% 误差 → 超差", res["parts"][0]["state"], mass_rules.FAIL)
+    check("界区: 超差说明写明疑似漏流股", "漏流股" in res["parts"][0]["note"])
+    res = mass_rules.boundary_build(
+        _mb_streams(("FEED", 0.3), ("1TO2", 0.1)),
+        {"01": {"in": ["FEED"], "out": ["1TO2"]}},
+    )
+    check_eq("界区: 极小流量 → too_small", res["parts"][0]["state"], mass_rules.TOO_SMALL)
+
+    # ⑬ 分组顺序:段号升序,公用工程排最后;组内保持传入顺序
+    res = mass_rules.build(
+        _mb_streams(("0801", 10.0), ("0802", 10.0), ("CW1", 5.0), ("CW2", 5.0),
+                    ("0101", 1.0), ("0102", 1.0)),
+        _mb_blocks(("X1", "Welding"), ("E0101", "Heater"), ("H1", "Heater")),
+        _mb_conns(("X1", "in", "CW1"), ("X1", "out", "CW2"),
+                  ("E0101", "in", "0101"), ("E0101", "out", "0102"),
+                  ("H1", "in", "0801"), ("H1", "out", "0802")),
+    )
+    keys = [g["key"] for g in res["groups"]]
+    check_eq("mass: 分组按段号升序、公用工程最后",
+             keys, ["01", "08", section_rules.UTILITY_KEY])
+    check_eq("mass: 设备名取不到时按流股众数落段(08)",
+             [d["block"] for d in res["groups"][1]["devices"]], ["H1"])
+    check_eq("mass: 公用工程分组标签",
+             res["groups"][-1]["label"], section_rules.UTILITY_LABEL)
+
+    # ⑭ 勾选:只算选中的设备;不认识的名字记下来,不抛异常
+    res = mass_rules.build(
+        _mb_streams(("0901", 10.0), ("0902", 10.0), ("0903", 10.0), ("0904", 10.0)),
+        _mb_blocks(("E0901", "Heater"), ("E0902", "Heater")),
+        _mb_conns(("E0901", "in", "0901"), ("E0901", "out", "0902"),
+                  ("E0902", "in", "0903"), ("E0902", "out", "0904")),
+        picked=["E0902", "不存在"],
+    )
+    check_eq("mass: 只算选中的设备", [d["block"] for d in res["devices"]], ["E0902"])
+    check_eq("mass: 不认识的设备名被记录", res["unknown_picked"], ["不存在"])
+    check_eq("mass: 汇总台数随勾选变", res["summary"]["total"], 1)
+
+    # ⑮ 汇总:状态计数 + 最大误差
+    res = mass_rules.build(
+        _mb_streams(("1001", 1000.0), ("1002", 1000.0), ("1003", 1000.0), ("1004", 900.0)),
+        _mb_blocks(("E1001", "Heater"), ("E1002", "Heater")),
+        _mb_conns(("E1001", "in", "1001"), ("E1001", "out", "1002"),
+                  ("E1002", "in", "1003"), ("E1002", "out", "1004")),
+    )
+    check_eq("mass: 汇总 通过/超差 台数",
+             (res["summary"][mass_rules.PASS], res["summary"][mass_rules.FAIL]), (1, 1))
+    check_eq("mass: 汇总记最大误差设备", res["summary"]["worst"]["block"], "E1002")
+
+    # ⑯ 阳性夹具:在样本库副本上删一条进口连接,造出真实的 >0.5% 越界
+    #    真实 9 个工况 0 越界,「标红」路径只能这样撞出来(不需要 Aspen)。
+    scratch = Path("data/preview/_selftest-mass.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copyfile("samples/case-23-error.db", scratch)
+        conn = db.open_db(str(scratch))
+        case_id = db.list_cases(conn)[0]["id"]
+        streams = [dict(r) for r in db.read_streams(conn, case_id)]
+        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
+        conns = [dict(r) for r in db.read_connections(conn, case_id)]
+        before = mass_rules.build(streams, blocks, conns)
+        check("夹具⑯ 样本库基线:没有超差设备",
+              before["summary"][mass_rules.FAIL] == 0,
+              f"实际 {before['summary'][mass_rules.FAIL]} 台")
+
+        # 界区草稿在真实样本上必须是闭合的(草稿只是起点,但起点就得站得住)
+        # 注意在删连接之前算 —— 删连接会真的破坏界区,那是下一步的事
+        draft = section_rules.draft(blocks, conns)
+        check("夹具⑯ 样本库能推出工段草稿", len(draft) >= 1, f"实际 {len(draft)} 个")
+        zone = mass_rules.boundary_build(streams, draft)
+        check("夹具⑯ 样本库界区草稿全部闭合",
+              zone["summary"][mass_rules.FAIL] == 0,
+              f"超差 {zone['summary'][mass_rules.FAIL]} 个工段")
+        check("夹具⑯ 界区草稿每条边界流股都能查到质量流量",
+              all(not p["missing"] for p in zone["parts"]))
+
+        # 挑一台「多进口」设备,删掉流量最大的那条进口 → 误差 = 该股占比
+        mass = {s["name"]: s.get("mass_flow_kgh") or 0.0 for s in streams}
+        by_block: dict[str, list[str]] = {}
+        for row in conns:
+            if row["direction"] == "in":
+                by_block.setdefault(row["block"], []).append(row["stream"])
+        target = None
+        for block, names in by_block.items():
+            if len(names) >= 2 and all(mass.get(n) for n in names):
+                target = (block, max(names, key=lambda n: mass[n]))
+                break
+        check("夹具⑯ 找到可删的进口流股", target is not None)
+        if target:
+            block, drop = target
+            conn.execute("delete from connections where case_id=? and block=? "
+                         "and direction='in' and stream=?", (case_id, block, drop))
+            conn.commit()
+            conns2 = [dict(r) for r in db.read_connections(conn, case_id)]
+            after = mass_rules.build(streams, blocks, conns2)
+            state = {d["block"]: d["state"] for d in after["devices"]}
+            check_eq(f"夹具⑯ 删一条进口({block}/{drop})后 → fail",
+                     state.get(block), mass_rules.FAIL)
+            # 同一条连接删掉后,它所在的界区也必须跟着垮 —— 说明界区表真在读连接
+            zone_after = mass_rules.boundary_build(
+                streams, section_rules.draft(blocks, conns2))
+            check("夹具⑯ 删连接后界区草稿不再全闭合",
+                  zone_after["summary"][mass_rules.FAIL] > 0
+                  or zone_after["summary"][mass_rules.NO_DATA] > 0)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 # ---------------------------------------------------------------- 报错波及范围
@@ -1397,6 +1709,7 @@ def main(argv: list[str] | None = None) -> int:
     for name, fn in (("判定规则 judge()", test_judge),
                      ("空模型 mark_empty()", test_empty),
                      ("焓平衡 balance.compute()", test_balance),
+                     ("物料衡算 mass_balance.build()", test_mass_balance),
                      ("报错波及范围 impact.build()", test_impact),
                      ("管路选型 design.pipe", test_pipe),
                      ("选型校验 validate() V1–V9", test_pipe_checks),
