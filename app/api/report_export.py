@@ -154,9 +154,13 @@ def _r(value, digits: int):
 
 
 def _num(value, digits: int) -> str:
-    """数值 → 文本;None 给空串。"""
+    """数值 → 文本;None 给空串;负零归一成 0(否则表里会出现成片的 -0.00)。"""
     value = _r(value, digits)
-    return "" if value is None else f"{value:,.{digits}f}"
+    if value is None:
+        return ""
+    if abs(value) < 0.5 * 10 ** (-digits):
+        value = 0.0
+    return f"{value:,.{digits}f}"
 
 
 def _percent(rel) -> str:
@@ -196,39 +200,6 @@ def _setup(doc, case: dict, kind: str = "all") -> None:
     style.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
     style.paragraph_format.line_spacing = 1.22
 
-    # 页眉:左「Casebook · 册别」,右「#工况号 模型名」,底边一条主题色细线
-    head = section.header.paragraphs[0]
-    head.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    _font(head.add_run(f"Casebook · {meta['book']}"), Pt(8.5), False)
-    _font(head.add_run(f"　　#{case.get('id')}　{case.get('model_name') or ''}"),
-          Pt(8.5), False).font.color.rgb = _rgb("808080")
-    p_pr = head._p.get_or_add_pPr()
-    borders = OxmlElement("w:pBdr")
-    bottom = OxmlElement("w:bottom")
-    bottom.set(qn("w:val"), "single")
-    bottom.set(qn("w:sz"), "6")
-    bottom.set(qn("w:color"), meta["accent"])
-    bottom.set(qn("w:space"), "2")
-    borders.append(bottom)
-    p_pr.append(borders)
-
-    # 页脚:第 X 页(PAGE 域,Word/WPS 打开自动计算)
-    foot = section.footer.paragraphs[0]
-    foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    _font(foot.add_run("第 "), Pt(8.5), False).font.color.rgb = _rgb("808080")
-    run = foot.add_run()
-    begin = OxmlElement("w:fldChar")
-    begin.set(qn("w:fldCharType"), "begin")
-    instr = OxmlElement("w:instrText")
-    instr.set(qn("xml:space"), "preserve")
-    instr.text = "PAGE"
-    end = OxmlElement("w:fldChar")
-    end.set(qn("w:fldCharType"), "end")
-    run._r.append(begin)
-    run._r.append(instr)
-    run._r.append(end)
-    run.font.size = Pt(8.5)
-    _font(foot.add_run(" 页"), Pt(8.5), False).font.color.rgb = _rgb("808080")
 
 
 def _font(run, size=None, bold=None, name="宋体"):
@@ -286,6 +257,24 @@ def _tint(cell, color=None, bold=None, italic=None) -> None:
                 run.font.italic = italic
 
 
+def _left_bar(cell, eighth_pt: int = 18, color: str = "000000") -> None:
+    """给单元格加一条左侧粗边(超差行用):黑白打印下也一眼看出这一行有问题。"""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = OxmlElement("w:tcBorders")
+    left = OxmlElement("w:left")
+    left.set(qn("w:val"), "single")
+    left.set(qn("w:sz"), str(eighth_pt))     # 1/8 pt 为单位:18 ≈ 2.25 pt
+    left.set(qn("w:color"), color)
+    borders.append(left)
+    # tcBorders 必须排在 shd 之前,否则 Word 宽容、WPS/旧版会丢
+    tc_pr.insert_element_before(borders, "w:shd", "w:noWrap", "w:tcMar",
+                                "w:textDirection", "w:tcFitText", "w:vAlign",
+                                "w:hideMark")
+
+
 def _shade(cell, hex_fill: str) -> None:
     """给单元格铺底色(超差行标红用)。"""
     from docx.oxml import OxmlElement
@@ -295,11 +284,13 @@ def _shade(cell, hex_fill: str) -> None:
     shd.set(qn("w:val"), "clear")
     shd.set(qn("w:color"), "auto")
     shd.set(qn("w:fill"), hex_fill)
-    cell._tc.get_or_add_tcPr().append(shd)
+    tc_pr = cell._tc.get_or_add_tcPr()
+    tc_pr.insert_element_before(shd, "w:noWrap", "w:tcMar", "w:textDirection",
+                                "w:tcFitText", "w:vAlign", "w:hideMark")
 
 
 def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
-                header_extra=None, status_col=None):
+                header_extra=None, status_col=None, span_rows=()):
     """三线表:顶线 1.5 pt、表头下线 0.75 pt、底线 1.5 pt,无竖线无内部横线。
 
     python-docx 没有内置三线表样式,只能直接写 `w:tblBorders`。
@@ -322,14 +313,16 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         _font(cap.add_run("■ "), Pt(7), True).font.color.rgb = _rgb(meta["accent"])
         _font(cap.add_run(caption), Pt(10), True)
 
-    table = doc.add_table(rows=1 + len(rows), cols=len(headers))
+    head_rows = 2 if header_extra else 1
+    table = doc.add_table(rows=head_rows + len(rows), cols=len(headers))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
 
     borders = OxmlElement("w:tblBorders")
     # 注意:这里别用 size 当循环变量 —— 它会把上面算好的字号覆盖掉,
     # 表现是"设了 8pt 却还是默认字号"(踩过一次)
-    for edge, sz in (("top", 12), ("bottom", 12), ("left", 0), ("right", 0),
+    # 8pt 表体配 1.5pt 线太重;顶/底 1.0pt(sz=8)、表头下 0.5pt(sz=4)
+    for edge, sz in (("top", 8), ("bottom", 8), ("left", 0), ("right", 0),
                      ("insideH", 0), ("insideV", 0)):
         node = OxmlElement(f"w:{edge}")
         if sz:
@@ -351,30 +344,56 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         node.set(qn("w:val"), "true")
         tr_pr.append(node)
 
-    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER):
+    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER,
+             color=None):
         para = cell.paragraphs[0]
         para.alignment = align
         para.paragraph_format.space_after = Pt(0)
-        _font(para.add_run("" if text is None else str(text)), size, bold)
+        para.paragraph_format.line_spacing = 1.0   # 继承 1.22 会把长表撑高一倍
+        run = _font(para.add_run("" if text is None else str(text)), size, bold)
+        if color:
+            run.font.color.rgb = _rgb(color)
+
+    if header_extra:
+        # 分组行(进口 / 出口):整行合并,和列头一起跨页重复 —— 否则续表只看到
+        # 一堆流股名,读者不知道这是进口块还是出口块
+        first_row = table.rows[0]
+        merged = first_row.cells[0].merge(first_row.cells[len(headers) - 1])
+        para = merged.paragraphs[0]
+        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        para.paragraph_format.space_after = Pt(0)
+        _font(para.add_run(str(header_extra)), size, True)
+        for extra in merged.paragraphs[1:]:
+            extra._element.getparent().remove(extra._element)
+        for cell in first_row.cells:
+            _shade(cell, meta["light"])
+        _row_flag(first_row, "tblHeader")
+        for cell in first_row.cells:
+            cell.paragraphs[0].paragraph_format.keep_with_next = True
+        header_row = table.rows[1]
+    else:
+        header_row = table.rows[0]
 
     for index, head in enumerate(headers):
-        fill(table.rows[0].cells[index], head, True)
-        _shade(table.rows[0].cells[index], meta["light"])
+        fill(header_row.cells[index], head, True)
+        _shade(header_row.cells[index], meta["light"])
+        if index == 0:
+            header_row.cells[index].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
     # 表头跨页重复:表格被分页时,下一页顶部仍有列头(否则读者看不到单位)
-    _row_flag(table.rows[0], "tblHeader")
+    _row_flag(header_row, "tblHeader")
     # 表头下方的线(三线表的第二条)
-    for cell in table.rows[0].cells:
+    for cell in header_row.cells:
         tc_pr = cell._tc.get_or_add_tcPr()
         borders_cell = OxmlElement("w:tcBorders")
         node = OxmlElement("w:bottom")
         node.set(qn("w:val"), "single")
-        node.set(qn("w:sz"), "6")
+        node.set(qn("w:sz"), "4")
         node.set(qn("w:color"), "000000")
         borders_cell.append(node)
         tc_pr.append(borders_cell)
 
     stripe = 0
-    for row_index, row in enumerate(rows, start=1):
+    for row_index, row in enumerate(rows, start=head_rows):
         _row_flag(table.rows[row_index], "cantSplit")
         cells = table.rows[row_index].cells
         cells_data, bold, fill_hex = (row if isinstance(row, tuple)
@@ -383,13 +402,23 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
         is_group = bool(cells_data) and not any(
             str(v).strip() for v in cells_data[1:])
         for index, value in enumerate(cells_data):
-            align = (WD_ALIGN_PARAGRAPH.LEFT if index == 0
-                     else WD_ALIGN_PARAGRAPH.RIGHT)
-            fill(cells[index], value, bold, align)
+            text = "" if value is None else str(value)
+            # 首列(位号/流股/项目)左对齐;纯文字格(相态、状态)居中;
+            # 其余数值右对齐 —— 否则"液相"贴着右边,看着像数据错位
+            if index == 0:
+                align = WD_ALIGN_PARAGRAPH.LEFT
+            elif text and not any(ch.isdigit() for ch in text):
+                align = WD_ALIGN_PARAGRAPH.CENTER
+            else:
+                align = WD_ALIGN_PARAGRAPH.RIGHT
+            # 成片的 0.000 灰化:数字不动,只让眼睛跳过
+            tone = "A6A6A6" if text in ("0.00", "0.0", "0.000", "0.0000") else None
+            fill(cells[index], text, bold, align, tone)
 
-        if fill_hex:                      # 超差行:整行浅红
+        if fill_hex:                      # 超差行:灰底 + 首列黑竖边
             for cell in cells:
-                _shade(cell, fill_hex)
+                _shade(cell, "E8E8E8")
+            _left_bar(cells[0], 18)
         elif is_group:                    # 分组行:主题浅色带
             for cell in cells:
                 _shade(cell, meta["light"])
@@ -411,11 +440,30 @@ def _three_line(doc, headers, rows, widths, caption="", font_pt=None,
             elif text == "不校验":
                 _tint(cells[status_col], color="7F7F7F")
 
+    # 分组行横着合并(组分 · 摩尔流量 / 组分 · 质量流量):合并后要把宽度一起
+    # 改成整行宽,否则文字仍在首列那一格里折行。索引是「rows 列表里的下标」,
+    # 表格行号要加上表头行数(head_rows):有分组表头时是 2,没有时是 1。
+    for index in span_rows or ():
+        row = table.rows[head_rows + index]
+        cells = row.cells
+        if len({id(c._tc) for c in cells}) != len(headers):
+            continue                       # 已经合并过,跳过
+        merged = cells[0].merge(cells[len(headers) - 1])
+        for extra in merged.paragraphs[1:]:
+            extra._element.getparent().remove(extra._element)
+        merged.width = Cm(sum(widths))
+
     for index, width in enumerate(widths):
         table.columns[index].width = Cm(width)
     for row in table.rows:
+        # 分组行是横向合并的,row.cells 会把同一个单元格返回 N 次 —— 拿它设宽度
+        # 会把最后一列的宽度写满整张表(踩过一次:流股列全变成 4cm)
+        cells = row.cells
+        # 合并行里 row.cells 依然返回 N 个引用,但它们指向同一个 tc
+        if len(cells) != len(widths) or len({id(c._tc) for c in cells}) != len(widths):
+            continue
         for index, width in enumerate(widths):
-            row.cells[index].width = Cm(width)
+            cells[index].width = Cm(width)
     return table
 
 
@@ -436,6 +484,65 @@ class _Captions:
         self.n += 1
         body = f"表 {self.chapter}-{self.n}"
         return f"{body}  {text}" if text else body
+
+def _body_section(doc, case: dict, kind: str = "all"):
+    """正文另起一节:页眉页脚只打在正文,页码从 1 开始(封面/目录不进页码)。"""
+    from docx.enum.section import WD_SECTION
+    from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_TAB_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt
+
+    meta = kind_meta(kind)
+    section = doc.add_section(WD_SECTION.NEW_PAGE)
+
+    # 页码重排:pgNumType start=1(封面/目录那一节没有页码)
+    pg = OxmlElement("w:pgNumType")
+    pg.set(qn("w:start"), "1")
+    section._sectPr.insert_element_before(
+        pg, "w:cols", "w:formProt", "w:vAlign", "w:noEndnote", "w:titlePg",
+        "w:textDirection", "w:bidi", "w:rtlGutter", "w:docGrid",
+        "w:printerSettings", "w:sectPrChange")
+
+    header = section.header
+    header.is_linked_to_previous = False
+    head = header.paragraphs[0]
+    head.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    stops = head.paragraph_format.tab_stops
+    stops.add_tab_stop(Cm(16.0), WD_TAB_ALIGNMENT.RIGHT)
+    _font(head.add_run(f"Casebook · {meta['book']}"), Pt(8.5), False)
+    _font(head.add_run(f"\t#{case.get('id')}　{case.get('model_name') or ''}"),
+          Pt(8.5), False).font.color.rgb = _rgb("808080")
+    p_pr = head._p.get_or_add_pPr()
+    borders = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "4")
+    bottom.set(qn("w:color"), meta["accent"])
+    bottom.set(qn("w:space"), "2")
+    borders.append(bottom)
+    p_pr.append(borders)
+
+    footer = section.footer
+    footer.is_linked_to_previous = False
+    foot = footer.paragraphs[0]
+    foot.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _font(foot.add_run("— "), Pt(8.5), False).font.color.rgb = _rgb("808080")
+    run = foot.add_run()
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = "PAGE"
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    run._r.append(begin)
+    run._r.append(instr)
+    run._r.append(end)
+    run.font.size = Pt(8.5)
+    _font(foot.add_run(" —"), Pt(8.5), False).font.color.rgb = _rgb("808080")
+    return section
+
 
 def _cover(doc, case: dict, kind: str = "all") -> None:
     """封面:主题色带 + 主标题 + 册别 + 工况信息块。"""
@@ -479,13 +586,13 @@ def _cover(doc, case: dict, kind: str = "all") -> None:
     for label, value in rows:
         para = doc.add_paragraph()
         para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        para.paragraph_format.left_indent = Cm(2.6)
         para.paragraph_format.space_after = Pt(5)
         stops = para.paragraph_format.tab_stops
-        stops.add_tab_stop(Cm(9.4), WD_TAB_ALIGNMENT.RIGHT)
-        stops.add_tab_stop(Cm(9.8), WD_TAB_ALIGNMENT.LEFT)
+        stops.add_tab_stop(Cm(8.2), WD_TAB_ALIGNMENT.RIGHT)   # 标签右端
+        stops.add_tab_stop(Cm(8.6), WD_TAB_ALIGNMENT.LEFT)    # 值左端
         _font(para.add_run(label + "\t"), Pt(10.5), False).font.color.rgb = _rgb("595959")
-        _font(para.add_run(value + "\t"), Pt(10.5), True)
+        # 模型名可能很长:让它自然折到第二行,不要撑出右边距(内容不截断)
+        _font(para.add_run(value), Pt(9.5), True)
 
     _para(doc, "", Pt(10), space_after=44)
     _para(doc, f"生成时间:{datetime.now().strftime('%Y-%m-%d %H:%M')}", Pt(9.5),
@@ -512,13 +619,14 @@ def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
                     ("1.2 全流程物料平衡表", 1),
                     ("1.3 物料消耗与产出汇总", 1)]
     if kind in ("energy", "all"):
-        entries.append(("二、能量衡算", 0))
-        entries.append(("2.1 逐设备能量衡算", 1))
+        ch = "2" if kind == "all" else "1"
+        entries.append((("二" if ch == "2" else "一") + "、能量衡算", 0))
+        entries.append((f"{ch}.1 逐设备能量衡算", 1))
         if has_detail:
-            entries.append(("2.2 选中设备的进出口明细", 1))
+            entries.append((f"{ch}.2 选中设备的进出口明细", 1))
         base = 3 if has_detail else 2
-        entries += [(f"2.{base} 全流程能量汇总", 1),
-                    (f"2.{base + 1} 塔的冷凝器 / 再沸器负荷", 1)]
+        entries += [(f"{ch}.{base} 全流程能量汇总", 1),
+                    (f"{ch}.{base + 1} 塔的冷凝器 / 再沸器负荷", 1)]
     entries.append(("附注", 0))
 
     for text, level in entries:
@@ -598,13 +706,14 @@ def _widths(ncols: int):
 
 
 def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
-                max_cols: int = 5, title: str = "") -> None:
+                max_cols: int = 5, title: str = "") -> None:  # noqa: D401
     """一张物料平衡宽表:流股做列、属性与组分做行。
 
     列多的时候按 `max_cols` 拆成「表 x-1（1）（2）…」,进口与出口永不混在同一块,
     这样任何一块表格横着都读得下去(与设计文档里「全流程物料衡算表(1)(2)」同做法)。
     """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Cm, Pt
 
     segments = [("进口", table.get("in_columns") or []),
                 ("出口", table.get("out_columns") or [])]
@@ -653,15 +762,8 @@ def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
                                  for c in cols]))
 
         headers = ["项目", "单位", *[c["stream"] for c in cols]]
-        tbl = _three_line(doc, headers, rows, _widths(len(cols)), caption,
-                          font_pt=8.0, header_extra=group)
-        # 组分分组行横着合并,别让长标签挤在第一列里折行。
-        # 合并会把各单元格的空段落都并进来,段数一多行就虚高 —— 合并后删掉多余段落。
-        for index in span_rows:
-            row_cells = tbl.rows[index + 1].cells
-            merged = row_cells[0].merge(row_cells[len(headers) - 1])
-            for extra in merged.paragraphs[1:]:
-                extra._element.getparent().remove(extra._element)
+        _three_line(doc, headers, rows, _widths(len(cols)), caption,
+                    font_pt=8.0, header_extra=group, span_rows=span_rows)
 
     # 表下给该段的合计与误差(界区校验结论就写在这一行,不再单独出小表)
     state_text = mass_balance.STATE_TEXT.get(table.get("state"), "")
@@ -671,7 +773,10 @@ def _wide_table(doc, table: dict, cap: "_Captions", chapter: str,
             f"（容差 {mass_balance.TOL_REL:.1%}），判定：{state_text}")
     if not table.get("has_mass_comp"):
         note += "。组分质量流量未读取（重读一次工况后自动出现），表中只给摩尔流量"
-    _para(doc, note, None, False, WD_ALIGN_PARAGRAPH.LEFT)
+    para = _para(doc, note, None, False, WD_ALIGN_PARAGRAPH.LEFT,
+                 space_after=8)
+    para.runs[0].font.size = Pt(9)
+    para.runs[0].font.color.rgb = _rgb("595959")
 
 
 def _group_row(doc, group: str):
@@ -710,12 +815,13 @@ def _figure_slot(doc, text: str) -> None:
     p_pr.append(borders)
 
 
-def _mass_chapter(doc, data: dict, cap: "_Captions") -> None:
+def _mass_chapter(doc, data: dict, cap: "_Captions", chapter: str = "1") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    cap.start("2")
+    cap.start(chapter)
+    label = "一" if chapter == "1" else "二"
     wide = data["wide"]
-    _heading(doc, "一、物料衡算", 1)
+    _heading(doc, f"{label}、物料衡算", 1)
     _para(doc, ("表中流股做列、属性与组分做行：进口列组是该工段确认的进界流股，"
                 "出口列组是出界流股。表下给该段 Σ进 / Σ出 与相对误差——"
                 f"相对误差 ≤ {mass_balance.TOL_REL:.1%} 判通过，"
@@ -727,24 +833,24 @@ def _mass_chapter(doc, data: dict, cap: "_Captions") -> None:
                    "建议在「衡算报告」页确认后重新生成。", None, False,
               WD_ALIGN_PARAGRAPH.LEFT)
 
-    _heading(doc, "1.1 各工段物料平衡表", 2)
+    _heading(doc, f"{chapter}.1 各工段物料平衡表", 2)
     if not wide["zones"]:
         _para(doc, "（本工况没有可出的工段：可能被人工删除，或设备位号里没有段号；"
                    "此时只出下面的全流程表）")
     for zone in wide["zones"]:
         _heading(doc, zone["label"], 3)
         _figure_slot(doc, f"{zone['label']}流程图")
-        _wide_table(doc, zone, cap, "2", title=f"{zone['label']}物料平衡表")
+        _wide_table(doc, zone, cap, chapter, title=f"{zone['label']}物料平衡表")
 
-    _heading(doc, "1.2 全流程物料平衡表", 2)
+    _heading(doc, f"{chapter}.2 全流程物料平衡表", 2)
     _para(doc, ("进口列 = 没有上游的流股（外部进料 / 公用工程补水），"
                 "出口列 = 没有下游的流股（产品、副产、三废）。"
                 "公用工程流股（冷却水、蒸汽等）也在其中，是否算入原料见 1.3 的说明。"),
           None, False, WD_ALIGN_PARAGRAPH.LEFT)
     _figure_slot(doc, "全流程图")
-    _wide_table(doc, wide["overall"], cap, "2", title="全流程物料平衡表")
+    _wide_table(doc, wide["overall"], cap, chapter, title="全流程物料平衡表")
 
-    _heading(doc, "1.3 物料消耗与产出汇总", 2)
+    _heading(doc, f"{chapter}.3 物料消耗与产出汇总", 2)
     summary = wide["summary"]
     hours = summary["hours_per_year"]
     _para(doc, f"按年运行 {hours:g} h 折算年量。原料与产品的归类由人确认；"
@@ -783,12 +889,13 @@ def _balance_row(block, energy_row, devices_row) -> dict:
             "error_kw": error}
 
 
-def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
+def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-    cap.start("3")
+    cap.start(chapter)
+    label = "一" if chapter == "1" else "二"
     energy = data["energy"]
-    _heading(doc, "二、能量衡算", 1)
+    _heading(doc, f"{label}、能量衡算", 1)
     _para(doc, ("以设备为基本单位，连续系统的能量平衡写作 Q + W = ΣHout − ΣHin："
                 "Q 是设备热负荷、W 是输入系统的机械功（泵 / 压缩机的轴功率）、"
                 "ΣHin、ΣHout 是进出口各物料焓之和，单位 kW。"
@@ -806,7 +913,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
 
     blocks = {b["name"]: b for b in data["blocks"]}
 
-    _heading(doc, "2.1 逐设备能量衡算", 2)
+    _heading(doc, f"{chapter}.1 逐设备能量衡算", 2)
     for group in energy["groups"]:
         rows = []
         for row in group["devices"]:
@@ -826,7 +933,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
 
     picked = data.get("picked")
     if picked:
-        _heading(doc, "2.2 选中设备的进出口明细", 2)
+        _heading(doc, f"{chapter}.2 选中设备的进出口明细", 2)
         _para(doc, "只对本次勾选的设备出明细：先流股表（进出口流股的温压与流量、焓流），"
                    "再平衡表（W / Q / ΣHin / ΣHout / 偏差），与设计文档的写法一致。",
               None, False, WD_ALIGN_PARAGRAPH.LEFT)
@@ -852,7 +959,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
                         (3.0, 3.0, 3.4, 3.4, 3.0), cap.next(f"{name} 能量平衡"),
                         font_pt=8.0)
 
-    _heading(doc, "2.3 全流程能量汇总", 2)
+    _heading(doc, f"{chapter}.{3 if picked else 2} 全流程能量汇总", 2)
     summary = energy["summary"]
     rows = [
         (["总加热负荷", _num(summary["heat_total_kw"], 2),
@@ -876,7 +983,7 @@ def _energy_chapter(doc, data: dict, cap: "_Captions") -> None:
                 cap.next("全流程能量汇总"))
 
     if energy["towers"]:
-        _heading(doc, "2.4 塔的冷凝器 / 再沸器负荷", 2)
+        _heading(doc, f"{chapter}.{4 if picked else 3} 塔的冷凝器 / 再沸器负荷", 2)
         rows = []
         for tower in energy["towers"]:
             rows.append([tower["block"], tower["type"] or "",
@@ -940,14 +1047,16 @@ def render(data: dict, kind: str = "all") -> bytes:
     _setup(doc, data["case"], kind)
     _cover(doc, data["case"], kind)
     _toc(doc, kind, bool(data.get("picked")))
+    _body_section(doc, data["case"], kind)   # 正文另起一节:页眉页脚只打在正文
     _summary_chapter(doc, data, cap, kind)
 
+    # 章号=表号:分册时那一册的正文从「一」起;合订本依次 一 / 二
     if kind in ("mass", "all"):
-        _mass_chapter(doc, data, cap)
+        _mass_chapter(doc, data, cap, "1")
         if kind == "all":
             doc.add_page_break()
     if kind in ("energy", "all"):
-        _energy_chapter(doc, data, cap)
+        _energy_chapter(doc, data, cap, "2" if kind == "all" else "1")
     doc.add_page_break()
     _notes_chapter(doc, data)
 
