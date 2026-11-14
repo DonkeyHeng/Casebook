@@ -79,6 +79,9 @@ CREATE TABLE IF NOT EXISTS stream_components (
     component TEXT    NOT NULL,
     x_liq     REAL,
     y_vap     REAL,
+    -- 该组分在该流股里的质量流量 kg/h(来自 Aspen Output 下的 MASSFLOW3/<组分>)。
+    -- 老库补列后是 NULL:重读一次工况或单独读一次组成才有值,报告里留空不补 0
+    mass_flow_kgh REAL,
     PRIMARY KEY (case_id, stream, component)
 );
 
@@ -175,6 +178,11 @@ _STREAM_ADDED_COLUMNS = (
     ("enthalpy_flow_kw", "REAL"),
 )
 
+# stream_components 表后加的列(组分质量流量,物料平衡表用)
+_COMPONENT_ADDED_COLUMNS = (
+    ("mass_flow_kgh", "REAL"),
+)
+
 # blocks 表后加的列(焓平衡自检 + 第二期泵参数)
 _BLOCK_ADDED_COLUMNS = (
     ("dh_kw", "REAL"),
@@ -219,6 +227,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for name, ddl in _STREAM_ADDED_COLUMNS:
         if name not in have_stream:
             conn.execute(f"ALTER TABLE streams ADD COLUMN {name} {ddl}")
+    have_comp = {row["name"] for row in conn.execute("PRAGMA table_info(stream_components)")}
+    for name, ddl in _COMPONENT_ADDED_COLUMNS:
+        if name not in have_comp:
+            conn.execute(f"ALTER TABLE stream_components ADD COLUMN {name} {ddl}")
     have_block = {row["name"] for row in conn.execute("PRAGMA table_info(blocks)")}
     for name, ddl in _BLOCK_ADDED_COLUMNS:
         if name not in have_block:
@@ -323,13 +335,15 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     for stream in case.get("streams", []):
         for comp in stream.get("composition") or []:
             comp_rows.append(
-                (case_id, stream["name"], comp["component"], comp.get("x_liq"), comp.get("y_vap"))
+                (case_id, stream["name"], comp["component"], comp.get("x_liq"),
+                 comp.get("y_vap"), comp.get("mass_flow_kgh"))
             )
     if comp_rows:
         conn.executemany(
             """
-            INSERT INTO stream_components (case_id, stream, component, x_liq, y_vap)
-            VALUES (?,?,?,?,?)
+            INSERT INTO stream_components
+                (case_id, stream, component, x_liq, y_vap, mass_flow_kgh)
+            VALUES (?,?,?,?,?,?)
             """,
             comp_rows,
         )
@@ -550,7 +564,7 @@ def read_stream_composition(conn: sqlite3.Connection, case_id: int,
                             stream: str) -> list[sqlite3.Row]:
     """某条流股已存的组成;没读过返回空列表(不区分"0 组分")。"""
     return conn.execute(
-        "SELECT component, x_liq, y_vap FROM stream_components "
+        "SELECT component, x_liq, y_vap, mass_flow_kgh FROM stream_components "
         "WHERE case_id = ? AND stream = ? ORDER BY component",
         (case_id, stream),
     ).fetchall()
@@ -566,10 +580,12 @@ def save_stream_composition(conn: sqlite3.Connection, case_id: int, stream: str,
         return 0
     conn.executemany(
         """
-        INSERT OR REPLACE INTO stream_components (case_id, stream, component, x_liq, y_vap)
-        VALUES (?,?,?,?,?)
+        INSERT OR REPLACE INTO stream_components
+            (case_id, stream, component, x_liq, y_vap, mass_flow_kgh)
+        VALUES (?,?,?,?,?,?)
         """,
-        [(case_id, stream, r["component"], r.get("x_liq"), r.get("y_vap")) for r in rows],
+        [(case_id, stream, r["component"], r.get("x_liq"), r.get("y_vap"),
+          r.get("mass_flow_kgh")) for r in rows],
     )
     conn.commit()
     return len(rows)
@@ -586,7 +602,7 @@ def list_composed_streams(conn: sqlite3.Connection, case_id: int) -> list[str]:
 def read_all_composition(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
     """整个工况已存的组成(按流股、组分排序),给 AI 分析包用。"""
     return conn.execute(
-        "SELECT stream, component, x_liq, y_vap FROM stream_components "
+        "SELECT stream, component, x_liq, y_vap, mass_flow_kgh FROM stream_components "
         "WHERE case_id = ? ORDER BY stream, component",
         (case_id,),
     ).fetchall()

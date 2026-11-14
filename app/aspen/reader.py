@@ -459,14 +459,24 @@ def read_connections(session, streams: list[dict],
     return rows
 
 def read_composition(session, stream: str) -> list[dict]:
-    """液相 X / 气相 Y 摩尔分数(按组分展开)。"""
+    """液相 X / 气相 Y 摩尔分数 + 组分质量流量(按组分展开)。
+
+    质量流量来自 `Output` 下的 `MASSFLOW3/<组分>`(kg/hr,实测见
+    docs/aspen-field-map.md §4.2)。注意别踩同名的标志位:`MASSFRAC` /
+    `MOLEFRAC` 目录下只有 `MIXED` 一个子节点、值恒为 1,那个不是组成。
+
+    取不到就留空(None),不补 0 —— 物料平衡表里「没读到」与「确实是 0」
+    必须能分开,否则表会好看但错。
+    """
     base = rf"\Data\Streams\{stream}\Output"
     comps = child_names(session.find(f"{base}\\X")) or child_names(session.find(f"{base}\\Y"))
     rows = []
     for comp in comps:
         x, _ = fetch(session, f"{base}\\X\\{comp}")
         y, _ = fetch(session, f"{base}\\Y\\{comp}")
-        rows.append({"component": comp, "x_liq": x, "y_vap": y})
+        mass, _ = fetch(session, f"{base}\\MASSFLOW3\\{comp}")
+        rows.append({"component": comp, "x_liq": x, "y_vap": y,
+                     "mass_flow_kgh": mass})
     return rows
 
 
