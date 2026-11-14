@@ -491,10 +491,13 @@ def build(streams: Iterable[Mapping[str, Any]],
               不传则用 `pipe_data` 里的(目前是空的 → 会明确报 TablesNotReady)
     """
     opts = dict(options or {})
+    # 三张表必须来自**同一次**加载:以前分别读三个模块变量,导入进行中可能拿到
+    # 新的壁厚表 + 旧的许用应力表 —— 壁厚"能算出来",口径已经串了。
+    snap = pipe_data.tables_snapshot()
     tbl = dict(tables or {})
     dn_to_od = tbl.get("dn_to_od", pipe_data.DN_TO_OD)
-    od_to_walls = tbl.get("od_to_walls", pipe_data.OD_TO_WALLS)
-    stress = tbl.get("stress", pipe_data.ALLOWABLE_STRESS)
+    od_to_walls = tbl.get("od_to_walls", snap.od_to_walls)
+    stress = tbl.get("stress", snap.stress)
 
     if not dn_to_od or not stress:
         empty = [label for label, tbl in (("DN→外径(T1)", dn_to_od),
@@ -566,7 +569,7 @@ def build(streams: Iterable[Mapping[str, Any]],
         stress_table = dict(stress)
         od_to_walls_used = od_to_walls
         if material.startswith("S3"):
-            od_to_walls_used = tbl.get("od_to_walls_sst", pipe_data.OD_TO_WALLS_SST) or od_to_walls
+            od_to_walls_used = tbl.get("od_to_walls_sst", snap.od_to_walls_sst) or od_to_walls
         sigma = allowable_stress(material, td["design_c"], stress_table)
 
         def _wall_for(od: float, sigma=sigma, pd=pd) -> float | None:

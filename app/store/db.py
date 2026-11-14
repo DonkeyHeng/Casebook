@@ -572,22 +572,34 @@ def read_stream_composition(conn: sqlite3.Connection, case_id: int,
 
 def save_stream_composition(conn: sqlite3.Connection, case_id: int, stream: str,
                             rows: list[dict]) -> int:
-    """把一条流股的组成写进工况库(重复写就覆盖),返回写入条数。
+    """把一条流股的组成整条替换进工况库,返回写入条数。
 
     只有"点开看过"的流股才会走到这里 —— 组成默认不读,全量读会让耗时从 9 s 涨到 41 s。
+
+    先删旧记录再插入,并且同一个事务:只做 INSERT OR REPLACE 时,若这次读出的
+    组分比上次少(fill_composition.py --force 重读就是这样),多出来的旧组分
+    会留在库里,页面和 AI 导出会把新旧两版混在一起。空列表也要清 —— 那表示
+    "这次确实没有组分",不是"别动库里那份"。
     """
-    if not rows:
-        return 0
-    conn.executemany(
-        """
-        INSERT OR REPLACE INTO stream_components
-            (case_id, stream, component, x_liq, y_vap, mass_flow_kgh)
-        VALUES (?,?,?,?,?,?)
-        """,
-        [(case_id, stream, r["component"], r.get("x_liq"), r.get("y_vap"),
-          r.get("mass_flow_kgh")) for r in rows],
-    )
-    conn.commit()
+    try:
+        conn.execute(
+            "DELETE FROM stream_components WHERE case_id = ? AND stream = ?",
+            (case_id, stream),
+        )
+        if rows:
+            conn.executemany(
+                """
+                INSERT INTO stream_components
+                    (case_id, stream, component, x_liq, y_vap, mass_flow_kgh)
+                VALUES (?,?,?,?,?,?)
+                """,
+                [(case_id, stream, r["component"], r.get("x_liq"), r.get("y_vap"),
+                  r.get("mass_flow_kgh")) for r in rows],
+            )
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise
     return len(rows)
 
 

@@ -2051,6 +2051,108 @@ def test_guard() -> None:
           guard(origin, change=True) is False and origin.err == 403, f"err={origin.err}")
 
 
+# ---------------------------------------------------------------- 组成整条替换
+
+def test_composition_replace() -> None:
+    """组成写入是"整条替换":新结果组分更少时,旧组分不能留在库里。
+
+    以前只做 INSERT OR REPLACE,fill_composition.py --force 重读出更少的组分后,
+    多出来的旧组分仍留在库中,页面与 AI 导出会混用新旧两版。
+    """
+    import shutil
+    from pathlib import Path
+
+    from app.store import db
+
+    root = Path(__file__).resolve().parents[1]
+    src = root / "samples" / "case-23-error.db"
+    if not src.is_file():
+        check("组成替换: 跳过(仓库里没有内置示例库)", True)
+        return
+    tmp = root / "data" / "preview" / "_selftest-comp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, tmp / "c.db")
+    conn = db.open_db(str(tmp / "c.db"))
+    try:
+        case_id = db.list_cases(conn)[0]["id"]
+        stream = "SELFTEST-STREAM"
+        before = conn.execute("SELECT COUNT(*) FROM stream_components WHERE case_id=?",
+                              (case_id,)).fetchone()[0]
+        db.save_stream_composition(
+            conn, case_id, stream,
+            [{"component": "A", "x_liq": 0.5, "y_vap": None, "mass_flow_kgh": 1.0},
+             {"component": "B", "x_liq": 0.3, "y_vap": None, "mass_flow_kgh": 1.0},
+             {"component": "C", "x_liq": 0.2, "y_vap": None, "mass_flow_kgh": 1.0}])
+        db.save_stream_composition(
+            conn, case_id, stream,
+            [{"component": "A", "x_liq": 1.0, "y_vap": None, "mass_flow_kgh": 2.0}])
+        left = [r["component"] for r in db.read_stream_composition(conn, case_id, stream)]
+        check_eq("组成替换: 旧组分被清掉,只剩新的一条", left, ["A"])
+        after = conn.execute("SELECT COUNT(*) FROM stream_components WHERE case_id=?",
+                             (case_id,)).fetchone()[0]
+        check_eq("组成替换: 其它流股的行数不受影响", after, before + 1)
+        db.save_stream_composition(conn, case_id, stream, [])
+        check_eq("组成替换: 空结果也清空",
+                 db.read_stream_composition(conn, case_id, stream), [])
+    finally:
+        conn.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# ---------------------------------------------------------------- 标准表版本化
+
+def test_std_versioning() -> None:
+    """标准表版本化:导入先在 versions/ 拼完整一套,校验通过才原子切指针。
+
+    以前是逐个 CSV 覆盖生效目录:第二个文件失败时第一个已经生效,页面会拿到
+    新的壁厚表配旧的许用应力表。
+    """
+    import shutil
+    from pathlib import Path
+
+    from app.design import pipe_data
+
+    root = Path(__file__).resolve().parents[1] / "data" / "preview" / "_selftest-vers"
+    shutil.rmtree(root, ignore_errors=True)
+    versions = root / "versions"
+    pointer = root / "current.txt"
+    base = root / "docx"
+    base.mkdir(parents=True)
+
+    old = (pipe_data._STD_ROOT, pipe_data._VERSIONS_DIR, pipe_data._POINTER_PATH,
+           pipe_data._CURATED_DIR)
+    pipe_data._STD_ROOT = root
+    pipe_data._VERSIONS_DIR = versions
+    pipe_data._POINTER_PATH = pointer
+    pipe_data._CURATED_DIR = base
+    try:
+        size_csv = "D_mm,S_mm\n" + "\n".join(f"{d},2.5" for d in range(6, 30))
+        ok, errs, _ = pipe_data.import_standards(
+            {"files": {"t1-17395-table1.csv": size_csv}}, reload=False)
+        check_eq("标准表版本: 导入成功", (ok, errs), (True, []))
+        name = pipe_data._read_pointer()
+        check("标准表版本: 指针指向新版本目录",
+              bool(name) and (versions / name).is_dir(), f"pointer={name!r}")
+        check("标准表版本: 版本目录里放的是新表",
+              bool(name) and (versions / name / "t1-17395-table1.csv").is_file())
+        check("标准表版本: 生效目录切到新版本",
+              pipe_data._resolve_active_dir() == versions / name,
+              str(pipe_data._resolve_active_dir()))
+
+        before = sorted(p.name for p in versions.iterdir())
+        ok2, errs2, _ = pipe_data.import_standards(
+            {"files": {"t1-17395-table1.csv": "foo,bar\n1,2\n"}}, reload=False)
+        check_eq("标准表版本: 不合格导入被拒", ok2, False)
+        check("标准表版本: 失败不留版本目录",
+              sorted(p.name for p in versions.iterdir()) == before, str(before))
+        check("标准表版本: 失败不改指针", pipe_data._read_pointer() == name)
+    finally:
+        (pipe_data._STD_ROOT, pipe_data._VERSIONS_DIR, pipe_data._POINTER_PATH,
+         pipe_data._CURATED_DIR) = old
+        shutil.rmtree(root, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- 塔剖面诊断
 
 def test_column_diag() -> None:
@@ -2174,6 +2276,8 @@ def main(argv: list[str] | None = None) -> int:
                      ("边界夹具 fixtures", test_fixtures),
                      ("出口一致性 exports", test_export_consistency),
                      ("同源校验 guard", test_guard),
+                     ("组成整条替换 stream_components", test_composition_replace),
+                     ("标准表版本化", test_std_versioning),
                      ("塔剖面诊断 column_diag", test_column_diag),
                      ("HTTP 入口 body / 静态路径", test_http_entry)):
         print(f"\n[{name}]")

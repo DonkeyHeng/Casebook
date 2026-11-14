@@ -22,7 +22,9 @@ import math
 import os
 import re
 import shutil
+import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 from app import paths
@@ -292,6 +294,86 @@ def minimum_wall(dn: int | None) -> float | None:
 
 _CURATED_DIR = paths.data_dir("preview", "std", "docx")
 
+# 标准表改成"版本化目录 + 原子切换":
+#   data/preview/std/versions/<时间戳>/   每个版本一整套 CSV
+#   data/preview/std/current.txt          当前生效的是哪个版本(一行)
+# 导入时先在 versions/ 里拼一份完整目录、试加载通过,再改指针 —— 不再逐个
+# CSV 覆盖到老位置,不会出现"新的壁厚表配旧的许用应力表"。
+# 没有指针时退回老位置 docx/,已有安装不用迁移。
+_STD_ROOT = paths.data_dir("preview", "std")
+_LEGACY_DIR = _CURATED_DIR
+_VERSIONS_DIR = _STD_ROOT / "versions"
+_POINTER_PATH = _STD_ROOT / "current.txt"
+
+#: 导入与计算共用一把锁:导入过程中不许有另一次导入,也不许读到半套表
+_STANDARDS_LOCK = threading.RLock()
+
+
+@dataclass(frozen=True)
+class StandardsSnapshot:
+    """三张表的**一次性**快照 —— 计算侧只认这个,不零散地读模块变量。"""
+
+    od_to_walls: dict[float, tuple[float, ...]]
+    od_to_walls_sst: dict[float, tuple[float, ...]]
+    stress: dict[str, dict[float, float]]
+    source: str = ""
+
+
+def _read_pointer() -> str:
+    try:
+        return _POINTER_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _write_pointer(name: str) -> None:
+    """原子切换版本:写临时文件再 os.replace(同目录、同盘)。"""
+    _STD_ROOT.mkdir(parents=True, exist_ok=True)
+    tmp = _POINTER_PATH.with_name(_POINTER_PATH.name + ".tmp")
+    tmp.write_text(name + "\n", encoding="utf-8")
+    os.replace(tmp, _POINTER_PATH)
+
+
+def _resolve_active_dir() -> Path:
+    """当前生效的标准表目录:有版本指针用版本目录,否则退回 docx/。"""
+    name = _read_pointer()
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return _LEGACY_DIR
+    candidate = _VERSIONS_DIR / name
+    return candidate if candidate.is_dir() else _LEGACY_DIR
+
+
+def _refresh_active_dir() -> None:
+    global _CURATED_DIR
+    _CURATED_DIR = _resolve_active_dir()
+
+
+def _fill_staging(staging: Path, base: Path, accepted: dict[str, str]) -> None:
+    """拼出"导入后长什么样":给了新内容的用新的,没给的从当前版本复制。"""
+    for spec in STD_FILES:
+        name = spec["name"]
+        if name in accepted:
+            (staging / name).write_text(accepted[name].lstrip("\ufeff"),
+                                        encoding="utf-8-sig")
+        elif (base / name).is_file():
+            shutil.copy2(base / name, staging / name)
+
+
+def _check_staged(staging: Path, accepted: dict[str, str]) -> list[str]:
+    """照真实逻辑把 staging 试加载一遍;返回错误列表(空 = 通过)。"""
+    errors: list[str] = []
+    od, sst = _load_od_to_walls(staging)
+    stress = _stress_from_rows(_read_csv(staging / "t3-20801-tableB1.csv"))
+    if "t1-17395-table1.csv" in accepted and not od:
+        errors.append("表 1 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
+    if "t4-17395-table4.csv" in accepted and not sst:
+        errors.append("表 4 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
+    if "t3-20801-tableB1.csv" in accepted and not stress:
+        errors.append("表 B.1 里没有本工具用到的牌号:「标准」+「牌号」两列要能对上 "
+                      "GB/T 8163、GB/T 6479、GB/T 14976 里的 20# / Q345A / Q345B / "
+                      "S30408 / S31603")
+    return errors
+
 #: 表 B.1 里每个本项目牌号**取哪一行**(同一牌号有多个标准/尺寸档时)
 _STRESS_PICK = {
     "20#": ("GB/T 8163", ""),                      # 流体输送用无缝钢管
@@ -435,8 +517,27 @@ def _load_stress(dir_: Path | None = None) -> dict[str, dict[float, float]]:
 
 OD_TO_WALLS: dict[float, tuple[float, ...]]
 OD_TO_WALLS_SST: dict[float, tuple[float, ...]]
+_refresh_active_dir()
 OD_TO_WALLS, OD_TO_WALLS_SST = _load_od_to_walls()
 ALLOWABLE_STRESS: dict[str, dict[float, float]] = _load_stress()
+
+_CURRENT_SNAPSHOT = StandardsSnapshot(OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS,
+                                      str(_CURATED_DIR))
+
+
+def tables_snapshot() -> StandardsSnapshot:
+    """取当前这一套三张表(同一次加载的结果)。"""
+    with _STANDARDS_LOCK:
+        return _CURRENT_SNAPSHOT
+
+
+def _apply_snapshot(snap: StandardsSnapshot) -> None:
+    """一次性替换三张表与快照。调用方必须持 _STANDARDS_LOCK。"""
+    global OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS, _CURRENT_SNAPSHOT
+    OD_TO_WALLS = snap.od_to_walls
+    OD_TO_WALLS_SST = snap.od_to_walls_sst
+    ALLOWABLE_STRESS = snap.stress
+    _CURRENT_SNAPSHOT = snap
 
 
 # --------------------------------------------------------------------------
@@ -555,19 +656,22 @@ def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
 
 
 def reload_standards(dir_: Path | None = None) -> dict:
-    """重新读三个 CSV 并替换模块里的表 —— 导入后立即生效,不用重启服务。"""
-    global OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS
+    """重新读三个 CSV,并**一次性**替换模块里的三张表 —— 导入后立即生效,不用重启。"""
     base = Path(dir_) if dir_ else _CURATED_DIR
-    old = (OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS)
+    with _STANDARDS_LOCK:
+        old = _CURRENT_SNAPSHOT
     try:
         od, sst = _load_od_to_walls(base)
         stress = _load_stress(base)
     except Exception:
-        OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS = old   # 读坏了保留旧的,别把页面打空
+        with _STANDARDS_LOCK:      # 读坏了保留旧的,别把页面打空
+            _apply_snapshot(old)
         raise
-    OD_TO_WALLS, OD_TO_WALLS_SST, ALLOWABLE_STRESS = od, sst, stress
+    snap = StandardsSnapshot(od, sst, stress, str(base))
+    with _STANDARDS_LOCK:
+        _apply_snapshot(snap)
     return {"od_to_walls": len(od), "od_to_walls_sst": len(sst),
-            "stress_grades": sorted(stress)}
+            "stress_grades": sorted(stress), "source": str(base)}
 
 
 def import_standards(payload, *, target_dir: Path | str | None = None,
@@ -600,39 +704,69 @@ def import_standards(payload, *, target_dir: Path | str | None = None,
     if errors:
         return False, errors, standards_status(base)
 
-    # 先拼一份"导入后长什么样"的临时目录,照真实逻辑试加载一遍
-    # (用自己 mkdir 的目录而不是 tempfile.mkdtemp:后者建出来的目录在沙箱/受限
-    #  ACL 下不可写,踩过)
-    base.mkdir(parents=True, exist_ok=True)
+    # 自测走 target_dir:直接写那个临时目录,不建版本、不动指针
+    if target_dir is not None:
+        return _import_into_dir(base, accepted, reload=reload)
+
+    # 正式路径:先在 versions/ 下拼一份**完整**目录,试加载通过再原子切指针。
+    # 以前是逐个 CSV 覆盖到生效目录:第二个文件失败时第一个已经生效,页面就会
+    # 拿到新的壁厚表配旧的许用应力表。
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    staging = _VERSIONS_DIR / stamp
+    seq = 1
+    while staging.exists():
+        seq += 1
+        staging = _VERSIONS_DIR / f"{stamp}-{seq}"
+    try:
+        staging.mkdir(parents=True)
+        _fill_staging(staging, base, accepted)
+        errors = _check_staged(staging, accepted)
+    except OSError as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        return False, [f"写入失败:{exc}"], standards_status(base)
+    if errors:
+        shutil.rmtree(staging, ignore_errors=True)
+        return False, errors, standards_status(base)
+
+    previous = _read_pointer()
+    try:
+        _write_pointer(staging.name)
+        _refresh_active_dir()
+        if reload:
+            reload_standards()
+    except Exception as exc:
+        # 指针切过去之后读不起来 → 退回上一个版本,别让页面拿到空表
+        try:
+            if previous:
+                _write_pointer(previous)
+            else:
+                _POINTER_PATH.unlink(missing_ok=True)
+        except OSError:
+            pass
+        _refresh_active_dir()
+        shutil.rmtree(staging, ignore_errors=True)
+        return False, [f"导入后加载失败,已回退:{exc}"], standards_status()
+    return True, [], standards_status()
+
+
+def _import_into_dir(base: Path, accepted: dict[str, str], *, reload: bool
+                     ) -> tuple[bool, list[str], dict]:
+    """自测路径:直接写进指定目录(不建版本、不动指针)。"""
     staging = base.parent / f".std-import-{os.getpid()}-{time.time_ns()}"
     try:
+        base.mkdir(parents=True, exist_ok=True)
         staging.mkdir()
-        for spec in STD_FILES:
-            name = spec["name"]
-            if name in accepted:
-                (staging / name).write_text(accepted[name].lstrip("\ufeff"),
-                                            encoding="utf-8-sig")
-            elif (base / name).is_file():
-                shutil.copy2(base / name, staging / name)
-        od, sst = _load_od_to_walls(staging)
-        stress = _stress_from_rows(_read_csv(staging / "t3-20801-tableB1.csv"))
-        if "t1-17395-table1.csv" in accepted and not od:
-            errors.append("表 1 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
-        if "t4-17395-table4.csv" in accepted and not sst:
-            errors.append("表 4 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
-        if "t3-20801-tableB1.csv" in accepted and not stress:
-            errors.append("表 B.1 里没有本工具用到的牌号:「标准」+「牌号」两列要能对上 "
-                          "GB/T 8163、GB/T 6479、GB/T 14976 里的 20# / Q345A / Q345B / "
-                          "S30408 / S31603")
-        if errors:
-            return False, errors, standards_status(base)
-        for name in accepted:
-            (staging / name).replace(base / name)
+        try:
+            _fill_staging(staging, base, accepted)
+            errors = _check_staged(staging, accepted)
+            if errors:
+                return False, errors, standards_status(base)
+            for name in accepted:
+                (staging / name).replace(base / name)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
     except OSError as exc:
         return False, [f"写入失败:{exc}"], standards_status(base)
-    finally:
-        shutil.rmtree(staging, ignore_errors=True)
-
     if reload:
         reload_standards(base)
     return True, [], standards_status(base)

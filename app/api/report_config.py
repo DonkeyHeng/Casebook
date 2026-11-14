@@ -17,10 +17,14 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 
 from app.design import sections as section_rules
 
 CONFIG_PATH = os.path.join("data", "config", "sections.json")
+
+# 保存是"读—改—写",两个请求同时来会互相覆盖,必须串行
+_SAVE_LOCK = threading.Lock()
 
 # 工段 key:两个字母数字以内(01、02、A1 都行),避免把整句标题当 key
 _KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,15}$")
@@ -125,7 +129,17 @@ def validate(payload) -> tuple[dict, dict, list, list[str]]:
 
 def save(case_id: int, parts: dict, overrides: dict,
          deleted=None) -> tuple[bool, list[str]]:
-    """把该工况的边界写进配置(其它工况的内容原样保留)。"""
+    """把该工况的边界写进配置(其它工况的内容原样保留)。
+
+    读取时支持 {"cases": {...}} 与直接 {"40": {...}} 两种写法,保存必须回到
+    它原来那一层:包装格式下按顶层写,下次读出来就看不到这次保存的内容。
+    """
+    with _SAVE_LOCK:
+        return _save_locked(case_id, parts, overrides, deleted)
+
+
+def _save_locked(case_id: int, parts: dict, overrides: dict,
+                 deleted=None) -> tuple[bool, list[str]]:
     data: dict = {}
     if os.path.exists(CONFIG_PATH):
         try:
@@ -135,6 +149,9 @@ def save(case_id: int, parts: dict, overrides: dict,
                 data = loaded
         except (OSError, ValueError) as exc:
             return False, [f"现有配置读不了,没有覆盖:{exc}"]
+
+    # 保留原有包装层级:{"cases": {...}} 就写进 cases,否则写顶层
+    container = data["cases"] if isinstance(data.get("cases"), dict) else data
 
     entry: dict = {}
     for key, info in parts.items():
@@ -146,16 +163,25 @@ def save(case_id: int, parts: dict, overrides: dict,
     if deleted:
         # 记住"人工删掉了哪些工段":草稿每次都能把它们推回来,不显式记就删不掉
         entry["deleted"] = sorted(set(deleted))
-    data[str(case_id)] = entry
+    container[str(case_id)] = entry
 
+    # 先写同目录临时文件再 os.replace:进程被杀也不会留下截断的 JSON
+    tmp_path = CONFIG_PATH + ".tmp"
     try:
         directory = os.path.dirname(CONFIG_PATH)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        with open(CONFIG_PATH, "w", encoding="utf-8", newline="\n") as handle:
+        with open(tmp_path, "w", encoding="utf-8", newline="\n") as handle:
             json.dump(data, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, CONFIG_PATH)
     except OSError as exc:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
         return False, [f"写不了 {CONFIG_PATH}:{exc}"]
     return True, []
 
