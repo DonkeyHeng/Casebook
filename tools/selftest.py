@@ -905,6 +905,80 @@ def test_pump_pv_read() -> None:
     check_eq("泵 p_v:单位认不出时留空", got, None)
 
 
+def test_family_export() -> None:
+    """设备页「导出 Excel」:单分类工作簿的表名/列/NPSHₐ/未知分类报错。"""
+    import io
+    from pathlib import Path
+
+    import openpyxl
+
+    from app.api import family_export
+    from app.store import db
+
+    scratch = Path("data/preview/_selftest-family-export.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = db.open_db(str(scratch))
+        case = {
+            "model": {"path": "x.apw", "name": "x.apw", "read_at": "2026-11-14 00:00:00"},
+            "convergence": {}, "streams": [], "columns": [], "connections": [],
+            "blocks": [
+                {"name": "P1", "type": "Pump", "status": 0, "message": "",
+                 "flow_m3h": 8.5, "head_m": 41.5, "pump_eff": 0.4, "power_kw": 131.466,
+                 "motor_kw": 160.0, "p_in_bar": 1.8, "p_out_bar": 2.1, "dp_bar": 0.3,
+                 "rho_kgm3": 900.0, "pump_vap_frac": 0.0, "pv_bar": 0.3,
+                 "raw": {}, "balance": {}},
+                {"name": "E1", "type": "Heater", "status": 1, "message": "测试",
+                 "duty_kw": 12.5, "area_m2": 3.2, "top_temp_c": 80.0,
+                 "dh_kw": 12.4, "ref_kw": 12.5, "balance_state": "ok",
+                 "balance_note": "通过", "raw": {}, "balance": {}},
+            ],
+            "stats": {"stream_count": 0, "block_count": 2, "column_count": 0,
+                      "connection_count": 0, "elapsed_sec": 0},
+            "unit_gaps": {},
+        }
+        cid = db.save_case(conn, case)
+
+        data, label, fname = family_export.build_family_workbook(conn, cid, "pump")
+        check_eq("分类导出:泵页表名", label, "泵")
+        check("分类导出:文件名带分类", "_pump_" in fname, fname)
+        ws = openpyxl.load_workbook(io.BytesIO(data)).active
+        head = [c.value for c in ws[1]]
+        check("分类导出:泵表头含 NPSHₐ", "NPSHₐ m" in head, str(head))
+        row = [c.value for c in ws[2]]
+        npsh_col = head.index("NPSHₐ m")
+        check("分类导出:NPSHₐ = (1.8-0.3)/(900g) ≈ 17.0 m",
+              row[npsh_col] == 17.0, f"实际 {row[npsh_col]!r}")
+        check_eq("分类导出:泵行 p_v 取 4 位", row[head.index("p_v bar")], 0.3)
+
+        data, label, _ = family_export.build_family_workbook(conn, cid, "heat")
+        ws = openpyxl.load_workbook(io.BytesIO(data)).active
+        head = [c.value for c in ws[1]]
+        check_eq("分类导出:换热页表名", label, "换热")
+        check("分类导出:换热表头含热负荷与状态", "热负荷 kW" in head and "状态" in head, str(head))
+        check_eq("分类导出:换热只导本分类(1 行)", ws.max_row, 2)
+
+        try:
+            family_export.build_family_workbook(conn, cid, "nope")
+            ok = False
+        except ValueError:
+            ok = True
+        check("分类导出:未知分类抛 ValueError", ok)
+
+        try:
+            family_export.build_family_workbook(conn, 999999, "pump")
+            ok = False
+        except LookupError:
+            ok = True
+        check("分类导出:不存在的工况抛 LookupError", ok)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def test_block_columns() -> None:
     """blocks 表:新库建表必须带第二期泵列(老库补列在同一条 _BLOCK_ADDED_COLUMNS 上)。"""
     from pathlib import Path
@@ -1290,6 +1364,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("泵口径 design.pump", test_pump),
                      ("泵 p_v 读取", test_pump_pv_read),
                      ("设备表泵列 blocks", test_block_columns),
+                     ("分类导出 excel", test_family_export),
                      ("泵 p_v 存储", test_pump_pv_store),
                      ("泵 p_v 沿用", test_pump_pv_inherit),
                      ("单位表 units", test_units),

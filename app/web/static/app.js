@@ -850,6 +850,8 @@ function renderTable() {
   // 泵参数条只在「设备 → 泵」显示:切到流股 / 对比页必须跟着收,
   // 否则停留在泵页时那行说明会一直挂在别的页面上。
   renderPumpBar();
+  const exportBtn = document.getElementById("exportFamily");
+  if (exportBtn) exportBtn.disabled = !state.current;
   if (state.tab === "streams") renderStreams();
   else if (state.tab === "blocks") renderBlocks();
   else renderCompare();
@@ -1437,6 +1439,12 @@ function syncToolbar(tab) {
   document.getElementById("filter").classList.toggle("hidden", isCompare || isBlocks);
   document.getElementById("blockFamilies").classList.toggle("hidden", !isBlocks);
   document.getElementById("count").classList.toggle("hidden", isCompare);
+  // 设备页右上角「导出 Excel」:只导当前分类;没有工况时禁用
+  const exportBtn = document.getElementById("exportFamily");
+  if (exportBtn) {
+    exportBtn.classList.toggle("hidden", !isBlocks);
+    exportBtn.disabled = !state.current;
+  }
 }
 
 /* ------------------------------------------------------------ 读取当前工况 */
@@ -2706,6 +2714,38 @@ function bindEvents() {
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") setPvHelp(false);
+    });
+  }
+
+  // 设备页右上角「导出 Excel」:当前分类的设备明细(泵分类 = 选型要抄的那几列)
+  const exportFamily = document.getElementById("exportFamily");
+  if (exportFamily) {
+    exportFamily.addEventListener("click", async () => {
+      if (!state.current) return;
+      const family = state.family || "column";
+      const url = `/api/cases/${state.current.id}/export-family.xlsx?family=${encodeURIComponent(family)}`;
+      exportFamily.disabled = true;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error || `HTTP ${res.status}`);
+        }
+        const blob = await res.blob();
+        const cd = res.headers.get("Content-Disposition") || "";
+        const m = /filename="([^"]+)"/.exec(cd);
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = m ? m[1] : `Casebook_${family}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      } catch (err) {
+        alert(`导出失败:${err.message}`);
+      } finally {
+        exportFamily.disabled = false;
+      }
     });
   }
 

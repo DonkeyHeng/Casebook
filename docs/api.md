@@ -19,6 +19,7 @@
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股 / 设备 / 连接 / 塔剖面 / 组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |
+| GET | `/api/cases/{id}/export-family.xlsx?family=pump` | 设备页右上角「导出 Excel」:只导**当前分类**的设备明细;分类键见 `/api/block-families`,泵分类含 p_v / NPSHₐ / 建议电机 |
 | GET | `/api/cases/{id}/export.ai.zip` | 导出 AI 分析包(给 AI 读);多一份 `pipe_schedule.csv` |
 
 ## 管路选型 `/api/cases/{id}/pipes`

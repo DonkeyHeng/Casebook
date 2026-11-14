@@ -565,6 +565,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts[3] == "export.xlsx":
                 self._export(conn, case_id)
                 return
+            if parts[3] == "export-family.xlsx":
+                self._export_family(conn, case_id, query)
+                return
             if parts[3] == "export.ai.zip":
                 self._export_ai(conn, case_id)
                 return
@@ -687,6 +690,43 @@ class Handler(BaseHTTPRequestHandler):
 
         stamp = time.strftime("%Y%m%d_%H%M")
         fname = f"Casebook_case{case_id}_{stamp}.xlsx"
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _export_family(self, conn, case_id: int, query: dict) -> None:
+        """GET /api/cases/{id}/export-family.xlsx?family=pump —— 单分类设备表。
+
+        设备页右上角「导出 Excel」用它:只导当前分类,泵分类就是选型要抄的那几列。
+        """
+        from app.api import family_export
+
+        raw = query.get("family")
+        if isinstance(raw, (list, tuple)):
+            raw = raw[0] if raw else None
+        family = str(raw or "").strip()
+        if not family:
+            self._error("需要 family 参数,例如 ?family=pump", 400)
+            return
+        try:
+            data, _label, fname = family_export.build_family_workbook(conn, case_id, family)
+        except ValueError:
+            self._error(f"未知分类:{family}", 400)
+            return
+        except LookupError:
+            self._error(f"没有 id={case_id} 的工况", 404)
+            return
+        except ImportError:
+            self._error("服务器没有安装 openpyxl,无法导出 Excel。请先 pip install openpyxl", 500)
+            return
+
         self.send_response(200)
         self.send_header(
             "Content-Type",
