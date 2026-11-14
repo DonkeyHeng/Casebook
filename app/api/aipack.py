@@ -587,7 +587,7 @@ def _readme(case, columns, stage_counts, reasons, codes, tears, blocks,
         w("| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |")
         w("| 密度kg/m³ | `RHO_LIQ`(摩尔密度)× `MW_LIQ` |")
         w("| 进口汽化率 | 进口流股的汽化率;> 0 视为两相,不给 NPSHa |")
-        w("| p_v bar | 饱和蒸气压,**用户逐台手填**,程序不估算 |")
+        w("| p_v bar | 进口流股的泡点压力(读取工况时取 Aspen 值);读不到时可由用户手填 |")
         w("| NPSHa m | **算的**:`(进口压力 − p_v)×10⁵ ÷ (ρ·g)`。**空 = 没算,不等于「不会汽蚀」** |")
         w("")
     w("### 4.3 `column_profiles.csv` —— 塔逐板剖面")

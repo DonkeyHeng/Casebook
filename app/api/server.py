@@ -312,7 +312,8 @@ class Handler(BaseHTTPRequestHandler):
     def _set_pump_pv(self, raw_id: str, block: str) -> None:
         """保存一台泵的饱和蒸气压(bar);body 里 pv_bar 为 null 表示清空。
 
-        这个值是 NPSHₐ 唯一的输入来源:程序不估、不猜,宁可空着。
+        读取工况时会自动填 Aspen 进口流股的泡点压力,这里只用于**覆盖 / 补空**:
+        例如 Aspen 没给读数,或用户要改用厂家实测值。程序本身不估算 p_v。
         """
         try:
             case_id = int(raw_id)
@@ -333,12 +334,13 @@ class Handler(BaseHTTPRequestHandler):
                 return
         conn = db.open_db(self.db_path)
         try:
-            if not db.set_pump_pv(conn, case_id, block, pv):
+            if not db.set_pump_pv(conn, case_id, block, pv, source="manual"):
                 self._error(f"没有设备 {block}(工况 {case_id})", 404)
                 return
         finally:
             conn.close()
-        self._json({"ok": True, "case_id": case_id, "block": block, "pv_bar": pv})
+        self._json({"ok": True, "case_id": case_id, "block": block, "pv_bar": pv,
+                    "pv_source": "manual" if pv is not None else None})
 
     def _inherit_pump_pv(self, raw_id: str) -> None:
         """把同一模型更早工况填过的 p_v 按位号沿用过来(只填空行,不覆盖手填值)。"""

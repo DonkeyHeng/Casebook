@@ -825,6 +825,18 @@ def test_pump() -> None:
     check("泵:NPSHₐ ≈ 3.22 m", npsh is not None and abs(npsh - 3.22) < 0.02, f"实际 {npsh}")
     check_eq("泵:缺 p_v 时 NPSHₐ 为 None", pump.npsh_available_m(0.5, None, 950.0), None)
 
+    # p_v 闸门:0 / 负数 / 非数字都不是有效蒸气压(防止把目录标志位 1 当读数)
+    check_eq("泵:p_v 为 0 视为无效", pump.sanitize_pv_bar(0), None)
+    check_eq("泵:p_v 为负视为无效", pump.sanitize_pv_bar(-1.0), None)
+    check_eq("泵:p_v 非数字视为无效", pump.sanitize_pv_bar("abc"), None)
+    check_eq("泵:p_v 为 NaN 视为无效", pump.sanitize_pv_bar(float("nan")), None)
+    check("泵:p_v 正常值原样返回", pump.sanitize_pv_bar(0.5338) == 0.5338)
+
+    import math
+    zero = pump.npsh_available_m(1.01325, 1.01325, 900.0)
+    check("泵:泡点进料 NPSHₐ 归零且不带负号",
+          zero == 0.0 and math.copysign(1.0, zero) > 0, f"实际 {zero!r}")
+
     kw, note = pump.pick_motor(131.466)
     check_eq("泵:131.47 kW 轴功率 → 160 kW 档", kw, 160.0)
     check("泵:推导说明里带档位数字", "160" in note, note)
@@ -833,6 +845,61 @@ def test_pump() -> None:
     check_eq("泵:缺轴功率", pump.pick_motor(None)[0], None)
     check("泵:超出档位表给出说明",
           pump.pick_motor(1000.0)[0] is None and "超出" in pump.pick_motor(1000.0)[1])
+
+
+def test_pump_pv_read() -> None:
+    r"""reader.read_stream_vapor_pressure():p_v 的取法,不需要 Aspen。
+
+    背景(2026-11-14 实测):`Output\PL` 是**目录节点**,读出来是标志位 `1` 且带 bar 单位;
+    混合物泡点压力在 `STRM_UPP\PBUB\MIXED\TOTAL`。所以规则是:
+    有子节点的节点跳过 → 必须有单位 → 换算成 bar → 必须 > 0。
+    """
+
+    class _Kid:
+        def __init__(self, name):
+            self.Name = name
+
+    class _Elements:
+        def __init__(self, kids):
+            self._kids = kids
+            self.Count = len(kids)
+
+        def Item(self, i):
+            return self._kids[i]
+
+    class _Node:
+        def __init__(self, value=None, unit="", kids=()):
+            self.Value = value
+            self.UnitString = unit
+            self.Elements = _Elements(list(kids))
+
+    class _Session:
+        def __init__(self, nodes):
+            self._nodes = nodes
+
+        def find(self, path):
+            return self._nodes.get(path)
+
+    base = r"\Data\Streams\0133\Output"
+    pv_path = base + r"\STRM_UPP\PBUB\MIXED\TOTAL"
+
+    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.53383137, "bar")}), "0133")
+    check("泵 p_v:泡点压力叶子读出 0.5338 bar",
+          got is not None and abs(got - 0.5338) < 1e-3, f"实际 {got}")
+
+    got = reader.read_stream_vapor_pressure(
+        _Session({base + r"\PL": _Node(1, "bar", [_Kid("MIXED")])}), "0133")
+    check_eq("泵 p_v:目录节点(PL 值恒 1)不当读数", got, None)
+
+    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.0, "bar")}), "0133")
+    check_eq("泵 p_v:读数为 0 视为没有", got, None)
+
+    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(50.0, "kpa")}), "0133")
+    check("泵 p_v:单位按 pressure 换算(50 kPa → 0.5 bar)",
+          got is not None and abs(got - 0.5) < 1e-9, f"实际 {got}")
+
+    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.5, "")}), "0133")
+    check_eq("泵 p_v:单位认不出时留空", got, None)
 
 
 def test_block_columns() -> None:
@@ -863,7 +930,7 @@ def test_block_columns() -> None:
 
 
 def test_pump_pv_store() -> None:
-    """pv_bar:逐台存、读得回、清得掉。口径是"只认用户手填",程序不估算。"""
+    """pv_bar / pv_source:逐台存、读得回、清得掉,来源分得清。"""
     from pathlib import Path
 
     from app.store import db
@@ -879,18 +946,26 @@ def test_pump_pv_store() -> None:
                         "head_m": 41.5, "flow_m3h": 8.5, "pump_eff": 0.4,
                         "p_in_bar": 1.8, "p_out_bar": 2.1, "rho_kgm3": 947.0,
                         "pump_vap_frac": 0.0, "motor_kw": 160.0,
-                        "status": 0, "message": "", "raw": {}, "balance": {}}],
+                        "status": 0, "message": "", "raw": {}, "balance": {}},
+                       {"name": "P2", "type": "Pump", "status": 0, "message": "",
+                        "pv_bar": 0.5338, "pv_source": "aspen", "raw": {}, "balance": {}}],
             "stats": {"stream_count": 0, "block_count": 1, "column_count": 0,
                       "connection_count": 0, "elapsed_sec": 0},
             "unit_gaps": {},
         }
         cid = db.save_case(conn, case)
         check_eq("pv:初始为空", dict(db.read_blocks(conn, cid)[0])["pv_bar"], None)
+        check("pv:读入时来源记为 aspen",
+              dict(db.read_blocks(conn, cid)[1])["pv_source"] == "aspen")
         check("pv:写入返回 True", db.set_pump_pv(conn, cid, "P1", 3.2) is True)
         check_eq("pv:读回 3.2", dict(db.read_blocks(conn, cid)[0])["pv_bar"], 3.2)
+        check_eq("pv:手填来源记为 manual",
+                 dict(db.read_blocks(conn, cid)[0])["pv_source"], "manual")
         check_eq("pv:设备名写错返回 False", db.set_pump_pv(conn, cid, "NOPE", 1.0), False)
         db.set_pump_pv(conn, cid, "P1", None)
         check_eq("pv:可以清空", dict(db.read_blocks(conn, cid)[0])["pv_bar"], None)
+        check_eq("pv:清空时来源一并清掉",
+                 dict(db.read_blocks(conn, cid)[0])["pv_source"], None)
         conn.close()
     finally:
         try:
@@ -1210,6 +1285,7 @@ def main(argv: list[str] | None = None) -> int:
                      ("内置示例库 install_sample()", test_install_sample),
                      ("设备家族 block_family", test_block_family),
                      ("泵口径 design.pump", test_pump),
+                     ("泵 p_v 读取", test_pump_pv_read),
                      ("设备表泵列 blocks", test_block_columns),
                      ("泵 p_v 存储", test_pump_pv_store),
                      ("泵 p_v 沿用", test_pump_pv_inherit),

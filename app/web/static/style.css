@@ -686,6 +686,14 @@ td.changed { color: var(--accent); font-weight: 600; }
   font-size: var(--fs-sm);
 }
 .pump-bar label { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+/* 右侧动作组:沿用 p_v / 打开中联选型 靠右,左边留给出参数与说明,避免挤成一行 */
+.pump-bar-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
 .pump-bar select,
 .pump-bar input {
   font: inherit;

@@ -72,7 +72,7 @@ const BLOCK_COLS = {
   eff:     { key: "pump_eff", label: "效率 %", num: true, digits: 1, percent: true },
   motor:   { key: "motor_kw", label: "建议电机 kW", num: true, digits: 1, tip: "motor" },
   npsh:    { key: "npsh", label: "NPSHₐ m", num: true, digits: 2, npsh: true, tip: "npsh" },
-  // p_v 逐台手填:精度优先,程序不估算(见 docs/aspen-field-map.md §13.2)
+  // p_v:读取工况时自动取 Aspen 进口流股的泡点压力;空着才需手填(见 docs/aspen-field-map.md §13.2)
   pv:      { key: "pv_bar", label: "p_v bar", num: true, pvInput: true },
 };
 
@@ -406,7 +406,9 @@ async function loadPumpSpec() {
 }
 
 /* NPSHₐ = (p_进口 − p_v) × 10⁵ ÷ (ρ·g)
-   p_v 只认这台泵自己填的值;缺、进口两相、缺密度 → 返回 null(显示「—」),绝不拿 0 顶替 */
+   p_v 优先用 Aspen 进口流股的泡点压力(读取工况时已填进 pv_bar),手填值覆盖它;
+   缺 p_v、进口两相、缺密度 → 返回 null(显示「—」),绝不拿 0 顶替。
+   泡点进料时 p_v ≈ p_in,结果会有 -0.0 这种浮点噪声,归零免得显示成「-0.00」。 */
 function pumpNpsh(row) {
   const spec = state.pumpSpec;
   const pv = row.pv_bar;
@@ -415,7 +417,16 @@ function pumpNpsh(row) {
   if (vap !== null && vap !== undefined && vap > 0.001) return null;
   if (row.p_in_bar === null || row.p_in_bar === undefined) return null;
   if (!row.rho_kgm3) return null;
-  return ((row.p_in_bar - Number(pv)) * 1e5) / (row.rho_kgm3 * spec.g);
+  const value = ((row.p_in_bar - Number(pv)) * 1e5) / (row.rho_kgm3 * spec.g);
+  return Math.abs(value) < 1e-9 ? 0 : value;
+}
+
+/* p_v 来源:读取工况时取 Aspen 泡点压力(aspen);用户改过就是 manual */
+function pvSourceText(row) {
+  if (row.pv_bar === null || row.pv_bar === undefined) return "—";
+  if (row.pv_source === "aspen") return "Aspen 泡点压力";
+  if (row.pv_source === "manual") return "手填";
+  return "老工况未标注";
 }
 
 /* 为什么这格是「—」:直接写在悬浮提示里,别让人猜 */
@@ -424,7 +435,7 @@ function npshWhy(row) {
   const vap = row.pump_vap_frac;
   if (vap !== null && vap !== undefined && vap > 0.001) return "进口是两相,不计算汽蚀余量";
   if (row.pv_bar === null || row.pv_bar === undefined) {
-    return "缺 p_v:在这台泵的 p_v 格子里填饱和蒸气压后才算 NPSHₐ";
+    return "缺 p_v:模型没给出泡点压力 —— 可在 Aspen 里把 PBUB 加进物性集并运行一次,或直接在这格手填";
   }
   return "缺进口压力或密度";
 }
@@ -454,6 +465,7 @@ async function savePv(block, text) {
     );
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     row.pv_bar = pv;
+    row.pv_source = pv === null ? null : "manual";
     updateNpshCell(block);
   } catch (err) {
     // 存不上就把格子标红,别让人以为已经存进去了
@@ -632,7 +644,7 @@ function renderBlocks() {
         const val = pv === null || pv === undefined ? "" : pv;
         return `<td class="pv-cell"><input class="pv-input" type="number" step="0.1" min="0"
                    value="${val}" data-pv="${esc(row.name)}" placeholder="填"
-                   title="这台泵的饱和蒸气压(bar),必须与进口压力同基准;留空则 NPSHₐ 显示「—」"></td>`;
+                   title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它,清空则留空。留空时 NPSHₐ 显示「—」"></td>`;
       }
       if (c.scaled) {
         const raw = row[c.key];
@@ -1094,7 +1106,10 @@ function openPump(block) {
     kv("压升 bar", fmt(row.dp_bar, 3), "Aspen", "IN_PRES"),
     kv("密度 kg/m³", fmt(row.rho_kgm3, 1), "计算", "进口流股 m/V;两相或缺流量时用 RHO_LIQ×MW_LIQ"),
     kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
-    kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), "手填"),
+    kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), pvSourceText(row),
+       row.pv_bar == null
+         ? "模型没给出泡点压力:把 PBUB 加进物性集 → 报告选项→流股→物性组 选中 → 运行一次;详见 docs/pump-selection-plan.md §3.6"
+         : "单相液相时泡点压力就是蒸气压"),
     kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),
   ];
   document.querySelector("#pumpTable thead").innerHTML =

@@ -105,7 +105,8 @@ CREATE TABLE IF NOT EXISTS blocks (
     rho_kgm3      REAL,   -- RHO_LIQ × MW_LIQ,质量密度 kg/m³
     pump_vap_frac REAL,   -- 进口汽化率;>0 视为两相,NPSHₐ 不计算
     motor_kw      REAL,   -- 建议电机功率(按默认裕量取的档位值)
-    pv_bar        REAL,   -- 饱和蒸气压 bar:**用户逐台手填**,程序不估算
+    pv_bar        REAL,   -- 饱和蒸气压 bar:读工况时自动取进口流股泡点压力,取不到可由用户手填
+    pv_source     TEXT,   -- p_v 来源:aspen(进口流股泡点压力)/ manual(用户手填)
     dh_kw         REAL,   -- 焓平衡:ΔH = Σ出 − Σ入(流股能量流)
     ref_kw        REAL,   -- 对照值:热负荷 / 轴功率 / 0(绝热)
     ref_kind      TEXT,   -- duty / power / zero / hx_cold
@@ -182,8 +183,11 @@ _BLOCK_ADDED_COLUMNS = (
     ("rho_kgm3", "REAL"),
     ("pump_vap_frac", "REAL"),
     ("motor_kw", "REAL"),
-    # 饱和蒸气压:用户逐台手填(精度优先,不做估算);重新读工况后回空
+    # 饱和蒸气压 bar:读取工况时自动取进口流股的泡点压力(Aspen 现算值);
+    # 读不到才留空,页面可逐台手填 —— 程序自己不做估算
     ("pv_bar", "REAL"),
+    # 来源标记:aspen / manual。老库补列后是 NULL(历史工况没有这个信息)
+    ("pv_source", "TEXT"),
 )
 
 
@@ -316,9 +320,9 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
         INSERT INTO blocks (case_id, name, type, duty_kw, power_kw, area_m2, nstage,
                             top_temp_c, bottom_temp_c, status, message,
                             head_m, flow_m3h, pump_eff, p_in_bar, p_out_bar, dp_bar,
-                            rho_kgm3, pump_vap_frac, motor_kw, pv_bar,
+                            rho_kgm3, pump_vap_frac, motor_kw, pv_bar, pv_source,
                             dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -343,6 +347,7 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 b.get("pump_vap_frac"),
                 b.get("motor_kw"),
                 b.get("pv_bar"),
+                b.get("pv_source"),
                 (b.get("balance") or {}).get("dh_kw"),
                 (b.get("balance") or {}).get("ref_kw"),
                 (b.get("balance") or {}).get("ref_kind"),
@@ -403,14 +408,15 @@ def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
         return {"source_case_id": None, "source_read_at": None, "copied": 0, "skipped": 0}
 
     rows = conn.execute(
-        "SELECT name, pv_bar FROM blocks WHERE case_id=? AND pv_bar IS NOT NULL",
+        "SELECT name, pv_bar, pv_source FROM blocks WHERE case_id=? AND pv_bar IS NOT NULL",
         (source["id"],),
     ).fetchall()
     copied = skipped = 0
     for row in rows:
         cur = conn.execute(
-            "UPDATE blocks SET pv_bar=? WHERE case_id=? AND name=? AND pv_bar IS NULL",
-            (row["pv_bar"], case_id, row["name"]),
+            "UPDATE blocks SET pv_bar=?, pv_source=? "
+            "WHERE case_id=? AND name=? AND pv_bar IS NULL",
+            (row["pv_bar"], row["pv_source"], case_id, row["name"]),
         )
         if cur.rowcount:
             copied += 1
@@ -427,16 +433,20 @@ def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
 
 # ---------------------------------------------------------------- 查询
 
-def set_pump_pv(conn: sqlite3.Connection, case_id: int, block: str, pv_bar) -> bool:
-    """写入一台泵的饱和蒸气压(bar)。传 None 表示清空。
+def set_pump_pv(conn: sqlite3.Connection, case_id: int, block: str, pv_bar,
+                source: str | None = "manual") -> bool:
+    """写入一台泵的饱和蒸气压(bar)与来源。传 None 表示清空(来源一并清空)。
 
-    精度口径:p_v 由用户**逐台手填**,程序不做估算(见 docs/aspen-field-map.md §13.2);
+    口径:p_v 优先取 Aspen 进口流股的泡点压力(见 docs/aspen-field-map.md §13.2);
+    这里只处理**手填补位**——Aspen 没给出读数、或用户要改用厂家实测值时才写,
+    来源记为 manual,页面参数卡上会标出来。重新读取工况会用 Aspen 的值覆盖手填值。
     NPSHₐ 直接拿它与 Aspen 的进口压力相减,所以两者必须同基准。
     返回是否真的更新到了行(设备名写错时返回 False,不静默成功)。
     """
+    src = source if pv_bar is not None else None
     cur = conn.execute(
-        "UPDATE blocks SET pv_bar=? WHERE case_id=? AND name=?",
-        (pv_bar, case_id, block),
+        "UPDATE blocks SET pv_bar=?, pv_source=? WHERE case_id=? AND name=?",
+        (pv_bar, src, case_id, block),
     )
     conn.commit()
     return cur.rowcount > 0

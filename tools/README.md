@@ -8,6 +8,7 @@
 | `probe_topology.py` | 上面 bat 的本体,支持 `--model` / `--out` | ✅ | 同上 |
 | `probe_aspen.py` | COM 诊断:注册表、附着、字段全名(`--attach --deep`) | ✅ | 写 `--out` 指定目录 |
 | `probe_pump.py` | 泵字段探测:泵块 Output 全节点、进出口流股的蒸气压/密度、Input 里的曲线 | ✅ | 只打印(`--save` 写 `probe_out/`) |
+| `probe_pv.py` | 蒸气压 p_v 探测:逐台泵进口流股试候选节点、扫子树、按数值反查,定 p_v 到底在哪个节点 | ✅ 模型已打开且跑过 | 只打印(`--save` 写 `probe_out/`) |
 | `build_sample.py` | 从当前打开的模型重读一份工况,生成**脱敏**的公开示例库 `samples/case-23-error.db` | ✅ 模型已打开 | 写 `samples/` |
 | `bench.py` | 性能基准:COM 调用成本与规模曲线 | ✅ | 只打印 |
 | `column_diag.py` | 塔逐板剖面 + 异常标记(只标记,不给修复建议) | ✅ | 只打印 |

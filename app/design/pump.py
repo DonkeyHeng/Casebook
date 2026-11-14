@@ -68,6 +68,25 @@ def head_from_dp(p_in_bar, p_out_bar, rho_kgm3) -> float | None:
         return None
 
 
+def sanitize_pv_bar(p_v_bar) -> float | None:
+    """p_v 只认「有限、> 0」的读数,其余一律 None。
+
+    为什么要有这一层(2026-11-14 实测):
+      Aspen 结果树里 `Output\\PL` 是**目录节点**,读出来是标志位 `1`(还带 bar 单位);
+      分压在各组分叶子上,混合物总压只在 `STRM_UPP\\PBUB\\MIXED\\TOTAL`。
+      不设这道闸,PL 的 1 bar 会被当成真实蒸气压,把 NPSHₐ 算成负数。
+    """
+    if p_v_bar is None:
+        return None
+    try:
+        v = float(p_v_bar)
+    except (TypeError, ValueError):
+        return None
+    if v != v or v <= 0:  # NaN 或 ≤0:都不是有效蒸气压
+        return None
+    return v
+
+
 def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3) -> float | None:
     """有效汽蚀余量(m)。
 
@@ -76,9 +95,11 @@ def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3) -> float | None:
     if p_in_bar is None or p_v_bar is None or not rho_kgm3:
         return None
     try:
-        return (float(p_in_bar) - float(p_v_bar)) * 1e5 / (float(rho_kgm3) * G)
+        value = (float(p_in_bar) - float(p_v_bar)) * 1e5 / (float(rho_kgm3) * G)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
+    # 泡点进料(p_v ≈ p_in)时差值只有浮点噪声,归零,免得表里出现「-0.00」
+    return 0.0 if abs(value) < 1e-9 else value
 
 
 def pick_motor(shaft_kw, margin: float = DEFAULT_MARGIN,

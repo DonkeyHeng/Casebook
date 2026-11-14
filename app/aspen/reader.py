@@ -695,12 +695,42 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- 泵参数
 
-def read_pump_fields(session, streams, blocks, connections) -> None:
-    """给 Pump 块补 扬程/流量/效率/进口压力/密度/建议电机 —— **就地写进 blocks**。
+# 进口流股 p_v(蒸气压)的读取路径,实测 2026-11-14(华东理工模型,Aspen Plus V12.1):
+#   `Output\STRM_UPP\PBUB\MIXED\TOTAL` = 泡点压力(bar)。单相液相时它就是蒸气压,
+#   正好是 NPSHₐ 公式里的 p_v;20/20 台泵进口流股都有值。
+# ⚠️ 不要读 `Output\PL`:它是**目录节点**(值恒为 1,还带单位,极像读数);
+#   真正的分压在 `PL\MIXED\LIQUID\<组分>`,没有混合物总压叶子。
+#   所以读取时必须跳过有子节点的节点,再用 pump.sanitize_pv_bar 挡住 0/负值。
+PV_STREAM_PATHS = (
+    r"STRM_UPP\PBUB\MIXED\TOTAL",
+    r"PBUB\MIXED\TOTAL",
+    r"STRM_UPP\PL\MIXED\TOTAL",
+)
 
-    实测(2026-11-08,V12.1,见 docs/aspen-field-map.md §13):
+
+def read_stream_vapor_pressure(session, stream_name: str):
+    """进口流股的 p_v(bar)。读不到返回 None —— 绝不拿 0 或进口压力顶替。"""
+    from app.design import pump as pump_rules
+
+    base = rf"\Data\Streams\{stream_name}\Output"
+    for rel in PV_STREAM_PATHS:
+        node = session.find(rf"{base}\{rel}")
+        if node is None or child_names(node):  # 目录节点(PL)的值是标志位,不是读数
+            continue
+        value, unit = fetch(session, rf"{base}\{rel}")
+        pv = pump_rules.sanitize_pv_bar(units.convert("pressure", value, unit))
+        if pv is not None:
+            return pv
+    return None
+
+
+def read_pump_fields(session, streams, blocks, connections) -> None:
+    r"""给 Pump 块补 扬程/流量/效率/进口压力/密度/p_v/建议电机 —— **就地写进 blocks**。
+
+    实测(2026-11-08 / 11-14,V12.1,见 docs/aspen-field-map.md §13):
       `HEAD_CAL`(meter) / `VFLOW`(cum/hr) / `CEFF` / `IN_PRES`(bar) /
-      `RHO_LIQ`(kmol/cum) + `MW_LIQ`(kg/kmol)
+      `RHO_LIQ`(kmol/cum) + `MW_LIQ`(kg/kmol);
+      进口流股 `STRM_UPP\PBUB\MIXED\TOTAL` = 泡点压力(bar),当 p_v 用。
 
     读不到的一律留 None,不拿计算值顶替 —— 页面显示「—」比编一个数好。
     只对 Pump 块多花这几次 COM 调用,不扩大全表读取成本。
@@ -752,6 +782,10 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
         block["dp_bar"] = dp
         block["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
         block["p_out_bar"] = outlet.get("pressure_bar") if outlet else None
+        # p_v:直接取进口流股的泡点压力(实测 20/20 有值);读不到才留 None,页面可手填。
+        pv = read_stream_vapor_pressure(session, inlet["name"]) if inlet else None
+        block["pv_bar"] = pv
+        block["pv_source"] = "aspen" if pv is not None else None
         # 密度口径(2026-11-08 定):**优先用进口流股的质量流量÷体积流量** ——
         # 单相时它就是实测密度,与流量守恒自洽。实测有一台泵的 RHO_LIQ×MW 与它差 24%,
         # 说明泵块那个值不是按进口条件给的。两相时 m/V 是混合密度,不能用,退回泵块值。
