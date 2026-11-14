@@ -54,7 +54,7 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.2 源码压缩包(有 Python 的同学)
 
 1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
-2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.4.zip`(约 0.7 MB)
+2. 下载 **Source code (zip)** 资产,例如 `Casebook-1.1.3.zip`(约 0.7 MB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
    - 解压后是一个 `Casebook` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
      `安装说明.txt`、`app`
@@ -251,7 +251,7 @@ Windows 包(exe,示例库已经打进程序里):双击 `Casebook.exe` 打开界�
 
 ## 10. 实测记录
 
-- 2026-11-07:把 Release 的 `Casebook-1.0.3.zip` 解压到干净目录,按 §3 装好依赖后
+- 2026-11-07:把 Release 的 `Casebook-1.0.3.zip`(该版本现已按新编号并入 v1.0.1,资产名不变)解压到干净目录,按 §3 装好依赖后
   `python -m app.api` 启动成功;首次启动自动创建 `data/cases.db`,首页返回 200,
   `/api/cases` 返回 `[]`(空库),`/api/pipe-standards` 正常返回三张表的状态 ——
   与 §4.3、§7 的描述一致。
