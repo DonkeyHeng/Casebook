@@ -478,6 +478,7 @@ class Handler(BaseHTTPRequestHandler):
                 None,
             )
             dn = od = wall = id_mm = None
+            id_note = ""
             if inlet:
                 try:
                     result = pipe_calc.build(
@@ -492,6 +493,21 @@ class Handler(BaseHTTPRequestHandler):
                         dn, od, wall = row.get("dn"), row.get("od_mm"), row.get("wall_mm")
                         if od and wall:
                             id_mm = round(od - 2 * wall, 2)
+                        else:
+                            # 标准档位里没有合适规格(内径超 DN600 等),管道页也是这么记的
+                            id_note = str(row.get("reason") or "")
+                    else:
+                        miss = result.get("missing") or []
+                        hit = next(
+                            (
+                                m
+                                for m in miss
+                                if isinstance(m, dict) and m.get("stream") == inlet
+                            ),
+                            None,
+                        )
+                        if hit:
+                            id_note = str(hit.get("reason") or "")
                 except Exception:
                     pass  # 标准表没录全 / 缺数据:不给默认内径,前端手填
         finally:
@@ -508,6 +524,7 @@ class Handler(BaseHTTPRequestHandler):
                 "od_mm": od,
                 "wall_mm": wall,
                 "id_mm": id_mm,
+                "id_note": id_note,
                 "eps_default_mm": hydraulics.EPS_DEFAULT_MM,
             }
         )

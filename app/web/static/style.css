@@ -1055,6 +1055,30 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   width: 84px;
   min-width: 0;
 }
+.pump-design-fits {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.pump-design-fits label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.pump-design-fits input {
+  width: 52px;
+  min-width: 0;
+}
+.pump-design-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--warn, #b26a00);
+  line-height: 1.5;
+}
 .pump-design-actions {
   display: flex;
   align-items: baseline;

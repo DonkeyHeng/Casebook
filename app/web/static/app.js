@@ -22,6 +22,7 @@ const state = {
   // 设计扬程辅助:位压头 ΔZ 与管路阻力 Σhf(米),按模型+位号存,由用户手填
   pumpDesign: {
     dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
+    idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
   },
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
@@ -456,7 +457,7 @@ function npshWhy(row) {
   const vap = row.pump_vap_frac;
   if (vap !== null && vap !== undefined && vap > 0.001) return "进口是两相,不计算汽蚀余量";
   if (row.pv_bar === null || row.pv_bar === undefined) {
-    return "缺 p_v:模型没给出泡点压力 —— 物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况;也可直接在这格手填";
+    return "缺 p_v:模型没给出泡点压力 —— 物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况;也可直接在这格手填";
   }
   return "缺进口压力或密度";
 }
@@ -680,7 +681,7 @@ function renderBlocks() {
         const val = pv === null || pv === undefined ? "" : fmt(pv, 3);
         return `<td class="pv-cell"><input class="pv-input" type="number" step="0.001" min="0"
                    value="${val}" data-pv="${esc(row.name)}"
-                   title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它。模型读不到时:物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况"></td>`;
+                   title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它。模型读不到时:物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况"></td>`;
       }
       if (c.scaled) {
         const raw = row[c.key];
@@ -1186,7 +1187,7 @@ function openPump(block) {
     kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
     kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), pvSourceText(row),
        row.pv_bar == null
-         ? "模型没给出泡点压力:物性组新建 pv → 加 PL、PBUB(bar)→ 报告选项→流股→物性组 选中 pv → 重置并运行,再重读工况;详见 docs/pump-selection-plan.md §3.6"
+         ? "模型没给出泡点压力:物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况;详见 docs/pump-selection-plan.md §3.6"
          : "单相液相时泡点压力就是蒸气压"),
     kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),
   ];
@@ -1216,6 +1217,29 @@ function openPump(block) {
      Σhf 管路阻力 —— 要管长/管件/λ,属于水力计算
    两项都只能人工给,工具只做加法与 1.1 取整,不估算(项目一贯口径)。 */
 const PUMP_DESIGN_MARGIN = 1.1; // 手册惯例;两处设计算例都用 1.1
+
+/* 常用管件的局部阻力系数 ζ。数值取自设计手册的常用值(同一份算例里两种取法并存),
+   只作为"数管件"的辅助,勾完仍可手改 Σζ —— 不给任何默认数量,没勾就是 0。 */
+const PUMP_FITTINGS = [
+  { key: "el90", label: "90° 弯头", zeta: 0.75 },
+  { key: "gate", label: "闸阀", zeta: 0.9 },
+  { key: "globe", label: "截止阀", zeta: 9.5 },
+  { key: "check", label: "止回阀", zeta: 2.0 },
+  { key: "reducer", label: "变径管", zeta: 0.04 },
+];
+
+function fittingsZeta() {
+  const picks = state.pumpDesign.fittings || {};
+  return PUMP_FITTINGS.reduce((sum, f) => sum + (picks[f.key] || 0) * f.zeta, 0);
+}
+
+/* 把勾出来的管件合计算进 Σζ。手改 Σζ 之后不会被覆盖,除非再动一次管件数量。 */
+function applyFittings() {
+  const total = fittingsZeta();
+  state.pumpDesign.zeta = total > 0 ? Math.round(total * 100) / 100 : null;
+  const zetaInput = document.querySelector('[data-key="zeta"]');
+  if (zetaInput) zetaInput.value = state.pumpDesign.zeta === null ? "" : state.pumpDesign.zeta;
+}
 
 function pumpDesignTotal(row) {
   const head = typeof row.head_m === "number" ? row.head_m : null;
@@ -1274,9 +1298,23 @@ function renderPumpDesign(row) {
     <div class="pump-design-inputs">
       <label>管长 L m ${val("l", "如 40")}</label>
       <label>Σζ ${val("zeta", "如 17.43")}</label>
-      <label>内径 mm ${val("idMm", "自动")}</label>
+      <label${state.pumpDesign.idNote ? ` title="${esc(state.pumpDesign.idNote)}"` : ""}>内径 mm ${
+        val("idMm", state.pumpDesign.idNote ? "超档,手填" : "自动")}</label>
       <label>粘度 cP ${val("muCp", "自动")}</label>
       <label>粗糙度 mm ${val("epsMm", "0.05")}</label>
+    </div>
+    ${state.pumpDesign.idNote
+      ? `<p class="pump-design-note">内径没给:${esc(state.pumpDesign.idNote)}</p>`
+      : ""}
+    <div class="pump-design-fits">
+      <span class="muted">常用管件(填数量,自动求和)</span>
+      ${PUMP_FITTINGS.map((f) => {
+        const n = state.pumpDesign.fittings[f.key] || 0;
+        return `<label title="ζ = ${f.zeta}">${f.label} ×${f.zeta}
+          <input class="pump-fit-input" data-fit="${f.key}" type="number" min="0" step="1"
+                 inputmode="numeric" value="${n}" aria-label="${f.label} 数量"></label>`;
+      }).join("")}
+      <span class="muted">合计 Σζ = ${fmt(fittingsZeta(), 2)}</span>
     </div>
     <div class="pump-design-actions">
       <button class="link-btn" id="pumpCalcHf">按管路算 Σhf</button>
@@ -1293,6 +1331,15 @@ function renderPumpDesign(row) {
       refreshPumpDesignSum(row);
     });
     input.addEventListener("change", () => savePumpDesign(row));
+  });
+  box.querySelectorAll(".pump-fit-input").forEach((input) => {
+    input.addEventListener("change", (e) => {
+      const key = e.target.dataset.fit;
+      const count = Math.floor(Number(e.target.value));
+      state.pumpDesign.fittings[key] = Number.isFinite(count) && count > 0 ? count : 0;
+      applyFittings();
+      renderPumpDesign(row);
+    });
   });
   const calcBtn = document.getElementById("pumpCalcHf");
   if (calcBtn) calcBtn.onclick = () => computeHeadLoss(row);
@@ -1356,6 +1403,7 @@ async function loadPumpDesign(row) {
     if (state.pumpDesign.epsMm === null && typeof h.eps_default_mm === "number") {
       state.pumpDesign.epsMm = h.eps_default_mm;
     }
+    state.pumpDesign.idNote = typeof h.id_note === "string" ? h.id_note : "";
     renderPumpDesign(row);
   } catch (err) {
     // 标准表没录全 / 老服务:内径与粘度留给手填
