@@ -1055,6 +1055,16 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   width: 84px;
   min-width: 0;
 }
+.pump-design-actions {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pump-design-calc {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
 .pump-design-sum {
   margin: 0;
   font-size: var(--fs-sm);

@@ -20,6 +20,8 @@
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成(含 CAS / 中文名);没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | POST | `/api/cases/{id}/sections/inherit` | **沿用上一工况**的工段(界区)边界:取同一模型(文件名)更早的工况已保存的结果,写进当前工况;同模型没有更早工况或那边没保存过 → 404 |
 | POST | `/api/cases/{id}/components/cas` | **手填组分 CAS**(body `{component, cas}`,`cas` 为空表示清除);按**模型**保存,重读工况不丢 |
+| GET | `/api/cases/{id}/pumps/{位号}/hydraulics` | 算 Σhf 需要的默认输入:进口流股、流量、密度、粘度、管道选型 DN 与内径、默认粗糙度 |
+| POST | `/api/cases/{id}/pumps/{位号}/head-loss` | 按管路参数算 Σhf(body `{l_m, zeta_sum, d_mm?, eps_mm?, mu_cp?, method?}`);返回 u / Re / λ / Σhf 与缺失项,**只算不存** |
 | GET | `/api/cases/{id}/pumps/{位号}/design-head` | 该泵手填的位压头 ΔZ / 管路阻力 Σhf(米);没填过返回两个 `null` |
 | POST | `/api/cases/{id}/pumps/{位号}/design-head` | 存这两项(body `{dz_m, hf_m}`,都为空表示清除);按模型+位号保存 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |

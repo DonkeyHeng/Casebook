@@ -253,6 +253,8 @@ _BLOCK_ADDED_COLUMNS = (
     ("outlet_vap_frac", "REAL"),
     # 塔的冷凝器 / 再沸器负荷:老库补列后 NULL,重读工况才有值
     ("cond_duty_kw", "REAL"),
+    # 泵进口流股粘度 cP:算 Re 用。模型物性集里没挂 VISC 时读不到(NULL),页面手填
+    ("mu_cp", "REAL"),
     ("reb_duty_kw", "REAL"),
 )
 
@@ -415,11 +417,11 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
         INSERT INTO blocks (case_id, name, type, duty_kw, power_kw, area_m2, nstage,
                             top_temp_c, bottom_temp_c, status, message,
                             head_m, flow_m3h, pump_eff, p_in_bar, p_out_bar, dp_bar,
-                            rho_kgm3, pump_vap_frac, motor_kw, pv_bar, pv_source,
+                            rho_kgm3, pump_vap_frac, mu_cp, motor_kw, pv_bar, pv_source,
                             inlet_temp_c, outlet_temp_c, cold_in_temp_c, cold_out_temp_c,
                             outlet_vap_frac, cond_duty_kw, reb_duty_kw,
                             dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -442,6 +444,7 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 b.get("dp_bar"),
                 b.get("rho_kgm3"),
                 b.get("pump_vap_frac"),
+                b.get("mu_cp"),
                 b.get("motor_kw"),
                 b.get("pv_bar"),
                 b.get("pv_source"),

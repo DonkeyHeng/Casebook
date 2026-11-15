@@ -347,6 +347,9 @@ class Handler(BaseHTTPRequestHandler):
             # /api/cases/{id}/pumps/{设备}/pv —— 逐台保存饱和蒸气压(精度优先,不做估算)
             if path.startswith("/api/cases/"):
                 seg = [p for p in path.split("/") if p]
+                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "head-loss":
+                    self._pump_head_loss(seg[2], seg[4])
+                    return
                 if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "design-head":
                     self._set_pump_design(seg[2], seg[4])
                     return
@@ -442,6 +445,144 @@ class Handler(BaseHTTPRequestHandler):
                 **(data or {"dz_m": None, "hf_m": None}),
             }
         )
+
+    def _pump_hydraulics(self, raw_id: str, block_name: str) -> None:
+        """GET …/pumps/{位号}/hydraulics —— 手算 Σhf 需要的输入(含管道选型内径)。
+
+        内径优先取「管道」页同一套选型结果(od − 2×wall);标准表没录全时给空,
+        让用户手填 —— 不做假设性默认值。
+        """
+        from app.design import hydraulics
+        from app.design import pipe as pipe_calc
+
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            block = next(
+                (dict(b) for b in db.read_blocks(conn, case_id) if b["name"] == block_name), None
+            )
+            if block is None:
+                self._error(f"没有设备 {block_name}(工况 {case_id})", 404)
+                return
+            conns = [dict(c) for c in db.read_connections(conn, case_id)]
+            inlet = next(
+                (
+                    c["stream"]
+                    for c in conns
+                    if c["block"] == block_name and str(c.get("direction")) == "in"
+                ),
+                None,
+            )
+            dn = od = wall = id_mm = None
+            if inlet:
+                try:
+                    result = pipe_calc.build(
+                        [dict(r) for r in db.read_streams(conn, case_id)],
+                        [dict(b) for b in db.read_blocks(conn, case_id)],
+                        conns,
+                    )
+                    row = next(
+                        (r for r in result.get("rows", []) if r.get("stream") == inlet), None
+                    )
+                    if row:
+                        dn, od, wall = row.get("dn"), row.get("od_mm"), row.get("wall_mm")
+                        if od and wall:
+                            id_mm = round(od - 2 * wall, 2)
+                except Exception:
+                    pass  # 标准表没录全 / 缺数据:不给默认内径,前端手填
+        finally:
+            conn.close()
+        self._json(
+            {
+                "ok": True,
+                "block": block_name,
+                "inlet_stream": inlet,
+                "flow_m3h": block.get("flow_m3h"),
+                "rho_kgm3": block.get("rho_kgm3"),
+                "mu_cp": block.get("mu_cp"),
+                "dn": dn,
+                "od_mm": od,
+                "wall_mm": wall,
+                "id_mm": id_mm,
+                "eps_default_mm": hydraulics.EPS_DEFAULT_MM,
+            }
+        )
+
+    def _pump_head_loss(self, raw_id: str, block_name: str) -> None:
+        """POST …/pumps/{位号}/head-loss —— 按管路参数算 Σhf(只算,不存)。
+
+        需要 body 至少给 `l_m` 与 `zeta_sum`;内径/粘度/粗糙度可覆盖。返回 u / Re / λ / Σhf。
+        缺什么就在 `missing` 里列出来,不返回半真半假的结果。
+        """
+        from app.design import hydraulics
+
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        body = self._read_json_body()
+
+        def pick(key: str, lo: float, hi: float):
+            raw = body.get(key)
+            if raw in (None, ""):
+                return None
+            try:
+                val = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key} 必须是数字") from exc
+            if not lo <= val <= hi:
+                raise ValueError(f"{key} 超出合理范围({lo}~{hi})")
+            return val
+
+        try:
+            l_m = pick("l_m", 0.0, 100000.0)
+            zeta = pick("zeta_sum", 0.0, 10000.0)
+            d_mm = pick("d_mm", 1.0, 5000.0)
+            eps = pick("eps_mm", 0.0, 50.0)
+            mu = pick("mu_cp", 0.0001, 1e6)
+            lam_manual = pick("lam", 0.0001, 1.0)
+        except ValueError as exc:
+            self._error(str(exc))
+            return
+        method = str(body.get("method") or hydraulics.METHOD_COLEBROOK).strip().lower()
+        if method not in (
+            hydraulics.METHOD_COLEBROOK,
+            hydraulics.METHOD_GU,
+            hydraulics.METHOD_MANUAL,
+        ):
+            self._error("method 只能是 colebrook / gu / manual")
+            return
+
+        conn = db.open_db(self.db_path)
+        try:
+            block = next(
+                (dict(b) for b in db.read_blocks(conn, case_id) if b["name"] == block_name), None
+            )
+        finally:
+            conn.close()
+        if block is None:
+            self._error(f"没有设备 {block_name}(工况 {case_id})", 404)
+            return
+
+        result = hydraulics.solve(
+            vol_m3h=block.get("flow_m3h"),
+            rho_kgm3=block.get("rho_kgm3"),
+            mu_cp=mu if mu is not None else block.get("mu_cp"),
+            id_mm=d_mm,
+            l_m=l_m,
+            zeta_sum=zeta,
+            eps_mm=eps,
+            method=method,
+            lam_manual=lam_manual,
+        )
+        # 缺项由 hydraulics.solve 统一报(它同时知道流量/密度/粘度/内径缺不缺),
+        # 这里不再重复 append,否则同一个缺失项会出现两次
+        self._json({"ok": True, "block": block_name, **result})
 
     def _set_pump_design(self, raw_id: str, block: str) -> None:
         """POST …/pumps/{位号}/design-head —— 存位压头 ΔZ 与管路阻力 Σhf(米)。
@@ -811,6 +952,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts[3] == "pipes":
                 self._pipes(conn, case_id, query)
+                return
+            if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "hydraulics":
+                self._pump_hydraulics(parts[2], parts[4])
                 return
             if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "design-head":
                 self._pump_design(parts[2], parts[4])

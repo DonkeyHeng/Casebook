@@ -20,7 +20,9 @@ const state = {
   pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
   pump: { margin: 1 },  // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
   // 设计扬程辅助:位压头 ΔZ 与管路阻力 Σhf(米),按模型+位号存,由用户手填
-  pumpDesign: { dz: null, hf: null },
+  pumpDesign: {
+    dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
+  },
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
   impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
@@ -1223,61 +1225,140 @@ function pumpDesignTotal(row) {
   return head + dz + hf;
 }
 
+/* 只刷新结果那一行:输入时不重画整块,避免光标被踢走 */
+function refreshPumpDesignSum(row) {
+  const el = document.getElementById("pumpDesignSum");
+  if (!el) return;
+  const head = typeof row.head_m === "number" ? row.head_m : null;
+  const total = pumpDesignTotal(row);
+  if (head === null) {
+    el.textContent = "压升扬程没读到,算不了";
+    return;
+  }
+  if (total === null) {
+    el.innerHTML = `${fmt(head, 2)} m + 待填 = 待算`;
+    return;
+  }
+  const padded = Math.ceil(total * PUMP_DESIGN_MARGIN);
+  el.innerHTML =
+    `${fmt(head, 2)} + ${fmt(state.pumpDesign.dz, 2)} + ${fmt(state.pumpDesign.hf, 2)}` +
+    ` = <b>${fmt(total, 2)} m</b> · ×${PUMP_DESIGN_MARGIN} 取整 <b>${padded} m</b>`;
+}
+
 function renderPumpDesign(row) {
   const box = document.getElementById("pumpDesign");
   if (!box) return;
   const head = typeof row.head_m === "number" ? row.head_m : null;
   const total = pumpDesignTotal(row);
   const padded = total === null ? null : Math.ceil(total * PUMP_DESIGN_MARGIN);
-  const val = (v, ph) =>
-    `<input class="pump-design-input" data-field="${v}" inputmode="decimal" placeholder="${ph}"
-            value="${state.pumpDesign[v] === null ? "" : state.pumpDesign[v]}"
-            aria-label="${v === "dz" ? "位压头 ΔZ" : "管路阻力 Σhf"}(米)">`;
+  const val = (key, ph) =>
+    `<input class="pump-design-input" data-key="${key}" inputmode="decimal" placeholder="${ph}"
+            value="${state.pumpDesign[key] === null || state.pumpDesign[key] === undefined ? "" : state.pumpDesign[key]}"
+            aria-label="${key}">`;
+  const calc = state.pumpDesign.calc;
+  const calcLine = !calc
+    ? "填管长与 Σζ 后可自动算 Re / λ / Σhf"
+    : calc.missing && calc.missing.length
+      ? `缺:${calc.missing.join("、")}`
+      : `u = ${fmt(calc.u_ms, 2)} m/s · Re = ${fmt(calc.re, 0)} · λ = ${fmt(calc.lam, 4)}` +
+        ` · ε/d = ${calc.eps_d === null ? "—" : (calc.eps_d * 1000).toFixed(2) + "‰"}`;
   box.innerHTML = `
     <div class="pump-design-head">
       <span>设计扬程</span>
-      <span class="muted">ΔZ 与 Σhf 由你填,工具不估算</span>
+      <span class="muted">ΔZ / L / Σζ 由你填,工具不估算</span>
     </div>
     <div class="pump-design-inputs">
       <label>ΔZ m ${val("dz", "如 9.45")}</label>
       <label>Σhf m ${val("hf", "如 5.93")}</label>
     </div>
-    <p class="pump-design-sum">${head === null
-      ? "压升扬程没读到,算不了"
-      : total === null
-        ? `${fmt(head, 2)} m + 待填 = 待算`
-        : `${fmt(head, 2)} + ${fmt(state.pumpDesign.dz, 2)} + ${fmt(state.pumpDesign.hf, 2)}
-           = <b>${fmt(total, 2)} m</b> · ×${PUMP_DESIGN_MARGIN} 取整 <b>${padded} m</b>`}</p>`;
+    <div class="pump-design-inputs">
+      <label>管长 L m ${val("l", "如 40")}</label>
+      <label>Σζ ${val("zeta", "如 17.43")}</label>
+      <label>内径 mm ${val("idMm", "自动")}</label>
+      <label>粘度 cP ${val("muCp", "自动")}</label>
+      <label>粗糙度 mm ${val("epsMm", "0.05")}</label>
+    </div>
+    <div class="pump-design-actions">
+      <button class="link-btn" id="pumpCalcHf">按管路算 Σhf</button>
+      <span class="muted pump-design-calc" id="pumpCalcLine">${calcLine}</span>
+    </div>
+    <p class="pump-design-sum" id="pumpDesignSum"></p>`;
 
   box.querySelectorAll(".pump-design-input").forEach((input) => {
     input.addEventListener("input", (e) => {
-      const field = e.target.dataset.field;
+      const key = e.target.dataset.key;
       const raw = e.target.value.trim();
       const parsed = raw === "" ? null : Number(raw);
-      state.pumpDesign[field] = parsed !== null && isFinite(parsed) ? parsed : null;
-      renderPumpDesign(row); // 只重画这一块,不动上面的表
-      e.target.focus();
-      const again = box.querySelector(`[data-field="${field}"]`);
-      if (again) again.setSelectionRange(again.value.length, again.value.length);
+      state.pumpDesign[key] = parsed !== null && isFinite(parsed) ? parsed : null;
+      refreshPumpDesignSum(row);
     });
     input.addEventListener("change", () => savePumpDesign(row));
   });
+  const calcBtn = document.getElementById("pumpCalcHf");
+  if (calcBtn) calcBtn.onclick = () => computeHeadLoss(row);
+  refreshPumpDesignSum(row);
+}
+
+/* 按管路参数算 Σhf:人只给 L 与 Σζ(内径/粘度/粗糙度可覆盖),公式部分交给后端 */
+async function computeHeadLoss(row) {
+  const d = state.pumpDesign;
+  const line = document.getElementById("pumpCalcLine");
+  if (d.l === null) {
+    if (line) line.textContent = "先填管长 L";
+    return;
+  }
+  if (d.zeta === null) {
+    if (line) line.textContent = "先填 Σζ(弯头/阀门的局部阻力之和)";
+    return;
+  }
+  if (line) line.textContent = "计算中…";
+  try {
+    const res = await apiPost(
+      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/head-loss`,
+      { l_m: d.l, zeta_sum: d.zeta, d_mm: d.idMm, eps_mm: d.epsMm, mu_cp: d.muCp }
+    );
+    d.calc = res;
+    if (typeof res.hf_m === "number") {
+      d.hf = Math.round(res.hf_m * 100) / 100;
+      const hfInput = document.querySelector('[data-key="hf"]');
+      if (hfInput) hfInput.value = d.hf;
+      savePumpDesign(row);
+    }
+    renderPumpDesign(row);
+  } catch (err) {
+    if (line) line.textContent = err.message;
+  }
 }
 
 async function loadPumpDesign(row) {
-  state.pumpDesign = { dz: null, hf: null };
+  state.pumpDesign = {
+    dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
+  };
   renderPumpDesign(row);
+  const cid = state.current.id;
+  const name = encodeURIComponent(row.name);
   try {
-    const data = await api(
-      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/design-head`
-    );
-    state.pumpDesign = {
-      dz: typeof data.dz_m === "number" ? data.dz_m : null,
-      hf: typeof data.hf_m === "number" ? data.hf_m : null,
-    };
+    const saved = await api(`/api/cases/${cid}/pumps/${name}/design-head`);
+    state.pumpDesign.dz = typeof saved.dz_m === "number" ? saved.dz_m : null;
+    state.pumpDesign.hf = typeof saved.hf_m === "number" ? saved.hf_m : null;
     renderPumpDesign(row);
   } catch (err) {
     // 读不到就是没填过 / 老服务:保持空,不影响主功能
+  }
+  try {
+    const h = await api(`/api/cases/${cid}/pumps/${name}/hydraulics`);
+    if (state.pumpDesign.idMm === null && typeof h.id_mm === "number") {
+      state.pumpDesign.idMm = h.id_mm;
+    }
+    if (state.pumpDesign.muCp === null && typeof h.mu_cp === "number") {
+      state.pumpDesign.muCp = h.mu_cp;
+    }
+    if (state.pumpDesign.epsMm === null && typeof h.eps_default_mm === "number") {
+      state.pumpDesign.epsMm = h.eps_default_mm;
+    }
+    renderPumpDesign(row);
+  } catch (err) {
+    // 标准表没录全 / 老服务:内径与粘度留给手填
   }
 }
 

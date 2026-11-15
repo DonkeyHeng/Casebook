@@ -2720,6 +2720,42 @@ def test_composition_replace() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------- 管路阻力(Re / λ / Σhf)
+
+
+def test_hydraulics() -> None:
+    """hydraulics:Re / λ / Σhf。用设计算例 P0216 反算,口径见 pump-selection-plan §3.1。
+
+    算例(设计文件 4.1.2):V=4.32 m³/h、ρ=723.007、μ=1.23 cP、d=32 mm、
+    L=40 m、Σζ=17.43,顾毓珍公式得 λ≈0.028、Σhf≈5.93 m。
+    """
+    from app.design import hydraulics as h
+
+    check_eq("管路: 流速(算例)", round(h.velocity_ms(4.32, 32), 2), 1.49)
+    check_eq("管路: 缺流量返回 None", h.velocity_ms(None, 32), None)
+    re = h.reynolds(32, 1.49, 723.007, 1.23)
+    check_eq("管路: Re(算例约 28000)", round(re, -2), 28000)
+    check_eq("管路: 缺粘度返回 None", h.reynolds(32, 1.49, 723.007, None), None)
+
+    lam_gu = h.friction_factor(re, 0.05, 32, h.METHOD_GU)
+    check_eq("管路: 顾毓珍 λ≈0.028", round(lam_gu, 3), 0.028)
+    check("管路: 顾毓珍超出 Re 范围返回 None", h.gu_yuzhen(1e7) is None)
+
+    lam = h.friction_factor(1e5, 0.05, 100, h.METHOD_COLEBROOK)
+    check("管路: Colebrook 在 1e5 给 0.016~0.024", lam is not None and 0.016 < lam < 0.024, str(lam))
+    check_eq("管路: 层流一律 64/Re", round(h.friction_factor(1000, 0.05, 100), 6), 0.064)
+
+    hf = h.head_loss_m(40, 32, 17.43, lam_gu, 1.49)
+    check_eq("管路: Σhf(算例约 5.9 m)", round(hf, 1), 5.9)
+    check_eq("管路: 缺 λ 返回 None", h.head_loss_m(40, 32, 17.43, None, 1.49), None)
+
+    out = h.solve(4.32, 723.007, 1.23, 32, 40, 17.43, method=h.METHOD_GU)
+    check_eq("管路: solve 汇总 Σhf", round(out["hf_m"], 1), 5.9)
+    check_eq("管路: solve 报出缺失项", h.solve(4.32, 723.007, 1.23, 32, None, None)["missing"],
+             ["管长 L", "管件系数 Σζ"])
+    check_eq("管路: 粘度缺失也报出来", "粘度" in h.solve(4.32, 723.007, None, 32, 40, 1)["missing"], True)
+
+
 # ---------------------------------------------------------------- 组分字典(CAS / 中文名)
 
 
@@ -3267,6 +3303,7 @@ def main(argv: list[str] | None = None) -> int:
         ("同源校验 guard", test_guard),
         ("组成整条替换 stream_components", test_composition_replace),
         ("组分字典 CAS + 中文名", test_component_dict),
+        ("管路阻力 Re / λ / Σhf", test_hydraulics),
         ("标准表版本化", test_std_versioning),
         ("塔剖面诊断 column_diag", test_column_diag),
         ("HTTP 入口 body / 静态路径", test_http_entry),

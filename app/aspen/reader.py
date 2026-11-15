@@ -945,6 +945,48 @@ def read_stream_vapor_pressure(session, stream_name: str):
     return None
 
 
+# 进口流股粘度的候选路径。实测(2026-11-15,浙大模型)Output 下 120 个子节点里
+# **没有任何粘度叶子** —— 和 p_v 一样,要模型在物性集里挂上 VISC 并重跑才有值。
+# 所以这里按候选名碰,读不到留 None,页面让用户手填(见参数卡的「粘度」一格)。
+VISC_STREAM_PATHS = (
+    r"VISCOSITYMIXED",
+    r"VISCOSITY",
+    r"VISCMIXED",
+    r"MU_LIQ",
+    r"LIQUID-VISC",
+)
+
+
+def _to_cp(value, unit) -> float | None:
+    """把粘度统一成 cP;认不出单位就返回 None(宁缺勿错)。"""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return None
+    if num <= 0:
+        return None
+    text = str(unit or "").strip().lower().replace(" ", "").replace("·", "-")
+    if "cp" in text:
+        return num
+    if "pa-s" in text or "pas" in text or "kg/m-s" in text or "kg/m/s" in text:
+        return num * 1000.0
+    return None
+
+
+def read_stream_viscosity(session, stream_name: str):
+    """进口流股粘度(cP)。读不到返回 None —— 不拿水的粘度之类的常见值顶替。"""
+    base = rf"\Data\Streams\{stream_name}\Output"
+    for rel in VISC_STREAM_PATHS:
+        node = session.find(rf"{base}\{rel}")
+        if node is None or child_names(node):  # 目录节点的值是标志位,不是读数
+            continue
+        value, unit = fetch(session, rf"{base}\{rel}")
+        cp = _to_cp(value, unit)
+        if cp is not None:
+            return cp
+    return None
+
+
 def enrich_side_temperatures(streams, blocks, connections) -> None:
     """给每台设备补 进口/出口流股温度,换热器另补冷侧;**纯数据、不碰 COM**。
 
@@ -1052,6 +1094,8 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
         # 单相时它就是实测密度,与流量守恒自洽。实测有一台泵的 RHO_LIQ×MW 与它差 24%,
         # 说明泵块那个值不是按进口条件给的。两相时 m/V 是混合密度,不能用,退回泵块值。
         block["pump_vap_frac"] = inlet.get("vap_frac") if inlet else None
+        # 粘度只给泵算 Re/Σhf 用;模型没挂 VISC 时读不到,前端会让人手填
+        block["mu_cp"] = read_stream_viscosity(session, inlet["name"]) if inlet else None
         rho_from_flow = None
         vap = block["pump_vap_frac"]
         if inlet and (vap is None or float(vap) <= 0.001):
