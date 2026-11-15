@@ -2711,6 +2711,307 @@ def test_composition_replace() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+# ---------------------------------------------------------------- 组分字典(CAS / 中文名)
+
+
+def test_component_dict() -> None:
+    """组分字典:CAS 归一、中文名查表、两行显示与 AI 包的兜底规则。
+
+    盯的是三条约定(2026-11-15 定的):
+      * 页面显示"中文名 + CAS",认不出来的只显示 Aspen 原名且不给悬浮;
+      * AI 包组分列用 CAS,没有 CAS 才退回原名;
+      * Word / Excel 两个出口保持 Aspen 原名,不受这里影响。
+    """
+    from app.api import aipack, composition
+    from app.design import component_names as names
+
+    # --- CAS 归一:只认 数字-数字-数字,别的东西一律当"没有"
+    check_eq("组分字典: 正常 CAS 原样保留", names.clean_cas("504-63-2"), "504-63-2")
+    check_eq("组分字典: 去前后空白", names.clean_cas("  64-19-7 "), "64-19-7")
+    check_eq("组分字典: 带引号的 CAS 也认", names.clean_cas('"7732-18-5"'), "7732-18-5")
+    check_eq("组分字典: 不是 CAS 的一律返回空", names.clean_cas("DIMHPA"), "")
+    check_eq("组分字典: 只有两段的返回空", names.clean_cas("64-19"), "")
+    check_eq("组分字典: 空值返回空", names.clean_cas(None), "")
+    check_eq("组分字典: 带 CAS 前缀的也抠得出来", names.clean_cas("CAS 64-19-7"), "64-19-7")
+    check_eq("组分字典: 带别名前缀的也抠得出来", names.clean_cas("乙酸 64-19-7"), "64-19-7")
+    check_eq("组分字典: 抠不出就还是空", names.clean_cas("PSEUDOCOMPONENT-11"), "")
+
+    # --- 查表
+    check_eq("组分字典: 1,3-丙二醇", names.cn_name("504-63-2"), "1,3-丙二醇")
+    check_eq("组分字典: 丙烯酸", names.cn_name("79-10-7"), "丙烯酸")
+    check_eq("组分字典: 没收录的 CAS 查不到", names.cn_name("999-99-9"), "")
+    check_eq("组分字典: 认不出时退回 Aspen 原名", names.label("", "DIMHPA"), "DIMHPA")
+    check_eq("组分字典: 认得时用中文名", names.label("504-63-2", "PDO"), "1,3-丙二醇")
+
+    # --- AI 包:有 CAS 用 CAS,没有用原名
+    check_eq("组分字典: AI 包标识优先 CAS", names.cas_or_name("504-63-2", "PDO"), "504-63-2")
+    check_eq("组分字典: AI 包无 CAS 退回原名", names.cas_or_name(None, "DIMHPA"), "DIMHPA")
+
+    # --- 组成 payload 的装饰:cas / cn / cas_found
+    payload = composition._payload(
+        "S1",
+        "case",
+        [
+            {"component": "PDO", "x_liq": 0.6, "y_vap": None},
+            {"component": "DIMHPA", "x_liq": 0.4, "y_vap": None},
+        ],
+        meta={"PDO": {"cas": "504-63-2"}, "DIMHPA": {"cas": None}},
+    )
+    by_name = {c["component"]: c for c in payload["components"]}
+    check_eq("组分字典: payload 带上 CAS", by_name["PDO"]["cas"], "504-63-2")
+    check_eq("组分字典: payload 带上中文名", by_name["PDO"]["cn"], "1,3-丙二醇")
+    check_eq("组分字典: 无 CAS 的组分为 None(页面据此不给悬浮)", by_name["DIMHPA"]["cas"], None)
+    check_eq("组分字典: 无 CAS 的组分没有中文名", by_name["DIMHPA"]["cn"], None)
+    check_eq("组分字典: cas_found 计数", payload["cas_found"], 1)
+    check_eq("组分字典: cas_total 计数", payload["cas_total"], 2)
+
+    # --- read_component_meta:组件树形状不同也要能取到(不需要 Aspen)
+    #
+    # 2026-11-15 的坑:\Data\Components 第一层是分组名(Attr-Comps / Comp-Lists …),
+    # 不是组分。这里用假 session 把三种真实可能的结构各钉一条。
+    from app.aspen import reader as reader_mod
+
+    class _Node:
+        def __init__(self, path, tree):
+            self._p, self._t = path, tree
+
+        @property
+        def Name(self):
+            return self._p.rsplit("\\", 1)[-1]
+
+        @property
+        def UnitString(self):
+            return ""
+
+        @property
+        def Value(self):
+            return self._t.get(self._p)
+
+        @property
+        def Elements(self):
+            # 中间目录(如 Alias)本身不在 tree 里,但要能从 key 的前缀合成出来 ——
+            # 真实 Aspen 的 Elements 会把子目录也列出来,假 session 必须照做
+            pre = self._p + "\\"
+            names = []
+            for path in self._t:
+                if path.startswith(pre):
+                    head = path[len(pre):].split("\\")[0]
+                    if head not in names:
+                        names.append(head)
+            return _Coll([_Node(pre + name, self._t) for name in sorted(names)])
+
+    class _Coll:
+        def __init__(self, items):
+            self._items = items
+            self.Count = len(items)
+
+        def Item(self, i):
+            return self._items[i]
+
+    class _Session:
+        def __init__(self, tree):
+            self._t = tree
+
+        def find(self, path):
+            if any(p == path or p.startswith(path + "\\") for p in self._t):
+                return _Node(path, self._t)
+            return None
+
+    # 形状一:CAS / DBNAME1 直接挂在 分组\组分 下
+    tree_direct = {
+        r"\Data\Components\Attr-Comps\PDO\CAS": "504-63-2",
+        r"\Data\Components\Attr-Comps\PDO\DBNAME1": "1,3-PROPANEDIOL",
+    }
+    meta = reader_mod.read_component_meta(_Session(tree_direct), ["PDO"])
+    check_eq("组分字典: 直接挂在分组下能读到 CAS", meta[0]["cas"], "504-63-2")
+    check_eq("组分字典: 同时读到数据库名", meta[0]["dbname"], "1,3-PROPANEDIOL")
+
+    # 形状二:CAS 藏在下一层(如 Alias\CAS),父节点换成 Comp-Lists
+    tree_nested = {
+        r"\Data\Components\Comp-Lists\AC\Alias\CAS": "CAS 64-19-7",
+        r"\Data\Components\Comp-Lists\AC\DBName": "ACETIC-ACID",
+    }
+    meta = reader_mod.read_component_meta(_Session(tree_nested), ["AC"])
+    check_eq("组分字典: 嵌一层的 CAS 也找得到", meta[0]["cas"], "64-19-7")
+    check_eq("组分字典: 字段名不分大小写", meta[0]["dbname"], "ACETIC-ACID")
+
+    # 形状三:自定义组分没有 CAS —— 如实留空,不能编一个
+    tree_missing = {r"\Data\Components\Attr-Comps\DIMHPA\Type": "CONV"}
+    meta = reader_mod.read_component_meta(_Session(tree_missing), ["DIMHPA"])
+    check_eq("组分字典: 没有 CAS 就留空", meta[0]["cas"], None)
+
+    # 组分节点完全找不到时不能抛异常
+    meta = reader_mod.read_component_meta(_Session({}), ["GHOST"])
+    check_eq("组分字典: 找不到组分节点不崩", meta[0]["cas"], None)
+
+    # 分组名绝不能被当成组分(回归:2026-11-15 曾把 14 个分组写进库)
+    tree_group = {r"\Data\Components\Attr-Comps\PDO\CAS": "504-63-2"}
+    meta = reader_mod.read_component_meta(_Session(tree_group), ["PDO"])
+    check_eq("组分字典: 只按传入的组分名读", [m["component"] for m in meta], ["PDO"])
+
+    # --- AI 包 composition.csv:组分列是 CAS
+    csv_text = aipack._composition_csv(
+        [{"stream": "S1", "component": "PDO", "x_liq": 0.6, "y_vap": 0.0}],
+        {"PDO": "504-63-2"},
+    ).decode("utf-8-sig")
+    check("组分字典: AI 包 composition.csv 用 CAS", "504-63-2" in csv_text, csv_text[:120])
+    check("组分字典: AI 包 composition.csv 不再出现 Aspen 原名 PDO", "PDO" not in csv_text)
+    csv_fallback = aipack._composition_csv(
+        [{"stream": "S1", "component": "DIMHPA", "x_liq": 0.4, "y_vap": 0.0}],
+        {},
+    ).decode("utf-8-sig")
+    check("组分字典: AI 包无 CAS 时保留原名", "DIMHPA" in csv_fallback, csv_fallback[:120])
+
+    # --- 模型文件兜底:COMPONENTS MAIN + DSET CASN 位置配对(不需要 Aspen)
+    from app.aspen import bkp_components
+
+    sample = (
+        "COMPONENTS MAIN ? \\ COMPONENTS CID = H2O ANAME = H2O OUTNAME = H2O DBNAME1 = \n"
+        '"WATER" ANAME1 = "H2O" /  CID = DIMHPA OUTNAME = DIMHPA /  CID = PDO ANAME = \n'
+        'C3H8O2-3 OUTNAME = PDO DBNAME1 = "1,3-PROPANEDIOL" ANAME1 = "C3H8O2-3" \\ ? '
+        'COMPONENTS "ADA/PCS" "LE-PROP-DATA" ? ; "METCHEM_MOLE" ; ? \n'
+        "IDSET CASN (PROPERTIES) (37100 *6)\n"
+        'DSET CASN CASN @CASN ( "7732-18-5" "" "504-63-2" )\n'
+    )
+    parsed = bkp_components.parse_text(sample)
+    check_eq("模型文件: 组分数", len(parsed), 3)
+    check_eq("模型文件: 顺序与定义一致", [p["component"] for p in parsed], ["H2O", "DIMHPA", "PDO"])
+    check_eq("模型文件: 第 1 个 CAS", parsed[0]["cas"], "7732-18-5")
+    check_eq("模型文件: 自定义组分留空", parsed[1]["cas"], None)
+    check_eq("模型文件: 数据库名", parsed[2]["dbname"], "1,3-PROPANEDIOL")
+    check_eq("模型文件: 无 CASN 段时不报错", bkp_components.parse_text("COMPONENTS MAIN ?") , [])
+    check_eq("模型文件: 空文本返回空", bkp_components.parse_model_file(""), [])
+
+    # 段头被换行拆开(实测某个 .bkp 是 "COMPONENTS \r\nMAIN")
+    split_sample = sample.replace("COMPONENTS MAIN", "COMPONENTS \nMAIN")
+    check_eq(
+        "模型文件: 段头被换行拆开也能读",
+        [p["component"] for p in bkp_components.parse_text(split_sample)],
+        ["H2O", "DIMHPA", "PDO"],
+    )
+
+    # .apw 是二进制、没有文本组分段;同目录有同名 .bkp 时必须自动回退到它
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    root0 = _Path(__file__).resolve().parents[1]
+    sibling = root0 / "data" / "preview" / "_selftest-bkp-apw"
+    _shutil.rmtree(sibling, ignore_errors=True)
+    sibling.mkdir(parents=True, exist_ok=True)
+    try:
+        (sibling / "m.apw").write_bytes(b"\x00\x01binary-no-text")
+        (sibling / "m.bkp").write_text(split_sample, encoding="latin-1")
+        rows = bkp_components.parse_model_file(str(sibling / "m.apw"))
+        check_eq("模型文件: .apw 读不到时回退同名 .bkp", len(rows), 3)
+        check_eq("模型文件: 回退后 CAS 正常", rows[2]["cas"], "504-63-2")
+    finally:
+        _shutil.rmtree(sibling, ignore_errors=True)
+
+    # COM 一个 CAS 都读不到时,必须自动翻模型文件(端到端,不需要 Aspen)
+    # 落在 data/preview 下而不是系统临时目录:沙箱对系统 temp 的删除会拒绝(实测 WinError 5)
+    import shutil
+    from pathlib import Path
+
+    tmpdir = Path(__file__).resolve().parents[1] / "data" / "preview" / "_selftest-bkp"
+    shutil.rmtree(tmpdir, ignore_errors=True)
+    tmpdir.mkdir(parents=True, exist_ok=True)
+    try:
+        model = tmpdir / "m.bkp"
+        model.write_text(sample, encoding="latin-1")
+        sess = _Session({})
+        sess.model_path = str(model)
+        meta = reader_mod.read_component_meta(sess, ["H2O", "DIMHPA", "PDO"])
+        check_eq(
+            "模型文件: COM 读不到时用文件兜底",
+            [m["cas"] for m in meta],
+            ["7732-18-5", None, "504-63-2"],
+        )
+        check_eq("模型文件: 兜底也带数据库名", meta[2]["dbname"], "1,3-PROPANEDIOL")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # --- components 表:整份替换 + 删工况时一起清
+    import shutil
+    from pathlib import Path
+
+    from app.store import db
+
+    root = Path(__file__).resolve().parents[1]
+    src = root / "samples" / "case-23-error.db"
+    if not src.is_file():
+        check("组分字典: 表读写跳过(仓库里没有内置示例库)", True)
+        return
+    tmp = root / "data" / "preview" / "_selftest-compdict"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, tmp / "c.db")
+    conn = db.open_db(str(tmp / "c.db"))
+    try:
+        case_id = db.list_cases(conn)[0]["id"]
+        check_eq("组分字典: 老库建表后默认是空的", db.read_components(conn, case_id), [])
+        db.save_components(
+            conn,
+            case_id,
+            [
+                {"component": "PDO", "cas": "504-63-2", "dbname": "1,3-PROPANEDIOL"},
+                {"component": "DIMHPA", "cas": None, "dbname": None},
+            ],
+        )
+        got = {r["component"]: r["cas"] for r in db.read_components(conn, case_id)}
+        check_eq("组分字典: 写入 2 条", len(got), 2)
+        check_eq("组分字典: CAS 存住了", got.get("PDO"), "504-63-2")
+        check_eq("组分字典: 无 CAS 的存成 NULL", got.get("DIMHPA"), None)
+        db.save_components(conn, case_id, [{"component": "PDO", "cas": "504-63-2"}])
+        check_eq(
+            "组分字典: 整份替换后旧组分不残留",
+            [r["component"] for r in db.read_components(conn, case_id)],
+            ["PDO"],
+        )
+        db.delete_case(conn, case_id)
+        check_eq("组分字典: 删工况时一起清掉", db.read_components(conn, case_id), [])
+    finally:
+        conn.close()
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    # --- 手填 CAS:按模型存,只补空缺,不覆盖读到的值
+    tmp2 = root / "data" / "preview" / "_selftest-cas"
+    shutil.rmtree(tmp2, ignore_errors=True)
+    tmp2.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, tmp2 / "c.db")
+    conn = db.open_db(str(tmp2 / "c.db"))
+    try:
+        row0 = conn.execute("SELECT * FROM cases ORDER BY id LIMIT 1").fetchone()
+        cid = row0["id"]
+        mname = str(row0["model_name"] or "")
+        db.save_components(
+            conn,
+            cid,
+            [
+                {"component": "H2O", "cas": "7732-18-5", "dbname": "WATER"},
+                {"component": "DIMHPA", "cas": None, "dbname": None},
+            ],
+        )
+        db.save_component_cas(conn, mname, "DIMHPA", "2134-29-4")
+        db.save_component_cas(conn, mname, "H2O", "999-99-9")  # 不该盖掉读数
+        merged = db.read_cas_map(conn, cid, mname)
+        check_eq("手填 CAS: 补上空缺", merged.get("DIMHPA"), "2134-29-4")
+        check_eq("手填 CAS: 不覆盖读到的值", merged.get("H2O"), "7732-18-5")
+
+        meta = composition._read_meta(conn, row0)
+        check_eq("手填 CAS: 来源标记 manual", meta["DIMHPA"]["source"], "manual")
+        check_eq("手填 CAS: 读数来源标记 aspen", meta["H2O"]["source"], "aspen")
+        payload = composition._payload(
+            "S1", "case", [{"component": "DIMHPA", "x_liq": 0.1, "y_vap": None}], meta=meta
+        )
+        check_eq("手填 CAS: payload 带 cas_source", payload["components"][0]["cas_source"], "manual")
+
+        db.save_component_cas(conn, mname, "DIMHPA", None)
+        check_eq("手填 CAS: 清除后不再补", db.read_cas_map(conn, cid, mname).get("DIMHPA"), None)
+    finally:
+        conn.close()
+        shutil.rmtree(tmp2, ignore_errors=True)
+
+
 # ---------------------------------------------------------------- 标准表版本化
 
 
@@ -2933,6 +3234,7 @@ def main(argv: list[str] | None = None) -> int:
         ("出口一致性 exports", test_export_consistency),
         ("同源校验 guard", test_guard),
         ("组成整条替换 stream_components", test_composition_replace),
+        ("组分字典 CAS + 中文名", test_component_dict),
         ("标准表版本化", test_std_versioning),
         ("塔剖面诊断 column_diag", test_column_diag),
         ("HTTP 入口 body / 静态路径", test_http_entry),

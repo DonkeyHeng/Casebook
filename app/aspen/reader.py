@@ -9,6 +9,7 @@
   - blocks:设备表(已换算到固定单位,含 `balance` 焓平衡自检结果)
   - connections:设备 ↔ 流股连接关系(拓扑)
   - components:组分清单
+  - component_meta:组分字典(CAS 号 + Aspen 数据库名),页面显示中文名、AI 包按 CAS 导出都要用
 
 规模提示:1000 条流股约 6000 次 COM 调用,必须放后台线程并给 `progress` 回调。
 
@@ -25,6 +26,7 @@ import re
 import time
 from typing import Callable
 
+from ..design import component_names as names
 from . import balance as balance_rules
 from . import units
 
@@ -502,6 +504,125 @@ def read_composition(session, stream: str) -> list[dict]:
         mass, _ = fetch(session, f"{base}\\MASSFLOW3\\{comp}")
         rows.append({"component": comp, "x_liq": x, "y_vap": y, "mass_flow_kgh": mass})
     return rows
+
+
+# 组分属性挂在哪个父节点下:实测(2026-11-15,case49)`\Data\Components` 的直接子节点是
+# Aspen 的**分组**(Assay/Blend、Attr-Comps、Comp-Lists、Henry-Comps、Pseudocomponents …),
+# 不是组分本身。所以按候选父路径逐个试,哪个能 find 到 `<父>\<组分>` 就用哪个,都不中就留空。
+_COMPONENT_PARENTS = (
+    r"\Data\Components\Attr-Comps",
+    r"\Data\Components\Comp-Lists",
+    r"\Data\Components\Pseudocomponents",
+    r"\Data\Components\Input",
+    r"\Data\Components\Comp-Groups",
+    r"\Data\Components",
+)
+
+# 字段名比较前统一成"小写、去掉空格/下划线/连字符/斜杠",所以下面写成哪种写法都能命中
+_CAS_FIELDS = {"cas", "casno", "casnumber", "casnum", "casregistrynumber"}
+_DBNAME_FIELDS = {"dbname1", "dbname", "databankname"}
+
+
+def _squash(text: str) -> str:
+    return re.sub(r"[\s_\-/]", "", str(text or "")).lower()
+
+
+def _find_component_base(session, comp: str) -> str:
+    """找一个能 find 到 `<父>\\<组分>` 的父路径;找不到返回空串。"""
+    for parent in _COMPONENT_PARENTS:
+        base = rf"{parent}\{comp}"
+        if session.find(base) is not None:
+            return base
+    return ""
+
+
+def _leaf_fields(session, base: str, depth: int = 2) -> list[tuple[str, str]]:
+    """枚举 base 下最多两层的叶子,返回 [(字段名, 完整路径)]。
+
+    允许两层是因为 CAS 有可能挂在 `...\\<组分>\\Alias\\CAS` 这种子目录下。
+    """
+    out = []
+    for name in child_names(session.find(base)):
+        path = rf"{base}\{name}"
+        kids = child_names(session.find(path))
+        if kids and depth > 1:
+            out.extend(_leaf_fields(session, path, depth - 1))
+        else:
+            out.append((name, path))
+    return out
+
+
+def _meta_from_model_file(model_path, comps: list[str]) -> list[dict]:
+    """离线兜底:直接解析模型文件里的 COMPONENTS MAIN + DSET CASN。
+
+    Aspen 的 COM 树里 CAS 还没定位到(见 docs/aspen-field-map.md §3.1),而模型文件里
+    这份信息是实测存在的,所以"COM 读不到就翻文件"。两条路都失败时返回空列表,
+    调用方保持 cas=None,页面按约定只显示 Aspen 原名 —— 不猜。
+    """
+    try:
+        from . import bkp_components
+
+        parsed = {row["component"]: row for row in bkp_components.parse_model_file(model_path)}
+    except Exception:
+        return []
+    if not parsed:
+        return []
+    return [
+        {
+            "component": comp,
+            "cas": (parsed.get(comp) or {}).get("cas"),
+            "dbname": (parsed.get(comp) or {}).get("dbname"),
+        }
+        for comp in comps
+    ]
+
+
+def read_component_meta(session, comps: list[str]) -> list[dict]:
+    """读组分字典:CAS 号 + Aspen 数据库名。
+
+    组分名从流股的 `Output\\X` 子节点来(那才是模型里定义的组分 ID)。
+    **不能拿 `\\Data\\Components` 的子节点当组分名** —— 实测那一层是分组名,
+    照抄会把 14 个分组写进组分字典(2026-11-15 踩过这个坑)。
+
+    字段名与父节点都还没有唯一实测答案,所以走"候选父路径 + 两层叶子名匹配":
+    名字规范化后等于 cas / casno / casnumber… 的当 CAS,等于 dbname1 的当数据库名。
+    匹配不到就把 cas 留空 —— 猜一个 CAS 比没有更坏,页面会按"没识别"只显示 Aspen 原名。
+    CAS 允许来自 "CAS 64-19-7" 这种带前缀的字符串(见 component_names.extract_cas)。
+
+    COM 调用约 1 + 4 次/组分,30 个组分约 0.5 s,相对读全流程的 9 s 可忽略。
+    """
+    if not comps:
+        return []
+    out = []
+    for comp in comps:
+        base = _find_component_base(session, comp)
+        cas = ""
+        dbname = ""
+        if base:
+            for field, path in _leaf_fields(session, base):
+                key = _squash(field)
+                if not cas and key in _CAS_FIELDS:
+                    raw, _ = fetch(session, path)
+                    cas = names.clean_cas(raw)
+                elif not dbname and key in _DBNAME_FIELDS:
+                    raw, _ = fetch(session, path)
+                    dbname = str(raw or "").strip().strip('"')
+        out.append({"component": comp, "cas": cas or None, "dbname": dbname or None})
+
+    # COM 一路一个 CAS 都没拿到时,退回解析模型文件(实测 .bkp 里有 CASN 列表)
+    if out and not any(row["cas"] for row in out):
+        fallback = _meta_from_model_file(getattr(session, "model_path", ""), comps)
+        if fallback:
+            by_name = {row["component"]: row for row in fallback}
+            out = [
+                {
+                    "component": row["component"],
+                    "cas": row["cas"] or (by_name.get(row["component"]) or {}).get("cas"),
+                    "dbname": row["dbname"] or (by_name.get(row["component"]) or {}).get("dbname"),
+                }
+                for row in out
+            ]
+    return out
 
 
 # ---------------------------------------------------------------- 设备
@@ -993,6 +1114,9 @@ def read_case(
     components = []
     if streams:
         components = child_names(session.find(rf"\Data\Streams\{streams[0]['name']}\Output\X"))
+    phase("读取组分字典")
+    # 组分名只能取流股里的组分 ID:\Data\Components 的第一层是分组名,不是组分
+    component_meta = read_component_meta(session, components)
 
     return {
         "model": {
@@ -1009,6 +1133,7 @@ def read_case(
         "connections": connections,
         "balance": results,
         "components": components,
+        "component_meta": component_meta,
         "unit_gaps": unit_gaps(streams, blocks),
         "stats": {
             "stream_count": len(streams),

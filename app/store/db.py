@@ -14,6 +14,12 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import time
+
+def _now() -> str:
+    """本地时间戳(只用于"什么时候填的"这种展示,不参与任何计算)。"""
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
 
 SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -84,6 +90,29 @@ CREATE TABLE IF NOT EXISTS stream_components (
     -- 老库补列后是 NULL:重读一次工况或单独读一次组成才有值,报告里留空不补 0
     mass_flow_kgh REAL,
     PRIMARY KEY (case_id, stream, component)
+);
+
+-- 组分字典(模型级,一工况一套):CAS 号是跨模型对齐组分的稳定键。
+-- 老库建库时这张表还不存在,CREATE TABLE IF NOT EXISTS 会直接补上;
+-- 历史工况里 cas / dbname 是 NULL(当初没读过),重读一次 Aspen 才有值。
+CREATE TABLE IF NOT EXISTS components (
+    case_id   INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    component TEXT    NOT NULL,
+    -- 饱和蒸气压/汽蚀余量都按组分算,CAS 用来查中文名、做跨工况对齐
+    cas       TEXT,
+    -- Aspen 数据库名(如 ACROLEIN / 1,3-PROPANEDIOL),人工核对中文名时对照用
+    dbname    TEXT,
+    PRIMARY KEY (case_id, component)
+);
+
+-- 手填的组分 CAS(按模型挂,不按工况):
+-- 重读工况会整份重建 components 表,写那里会被冲掉;组分本质上是"模型"的属性。
+CREATE TABLE IF NOT EXISTS component_cas (
+    model_name TEXT    NOT NULL,
+    component  TEXT    NOT NULL,
+    cas        TEXT    NOT NULL,
+    updated_at TEXT,
+    PRIMARY KEY (model_name, component)
 );
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -352,6 +381,22 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
             VALUES (?,?,?,?,?,?)
             """,
             comp_rows,
+        )
+
+    meta_rows = [
+        (case_id, m.get("component"), m.get("cas"), m.get("dbname"))
+        for m in (case.get("component_meta") or [])
+        if m.get("component")
+    ]
+    # 组分字典是模型级、每次读取都是完整一份:先清后插,避免上一次的残留变成幽灵行
+    conn.execute("DELETE FROM components WHERE case_id = ?", (case_id,))
+    if meta_rows:
+        conn.executemany(
+            """
+            INSERT OR REPLACE INTO components (case_id, component, cas, dbname)
+            VALUES (?,?,?,?)
+            """,
+            meta_rows,
         )
 
     conn.executemany(
@@ -650,13 +695,115 @@ def read_all_composition(conn: sqlite3.Connection, case_id: int) -> list[sqlite3
     ).fetchall()
 
 
+def read_components(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
+    """这个工况已存的组分字典;没读过返回空列表(调用方据此决定要不要去 Aspen 现读)。"""
+    return conn.execute(
+        "SELECT component, cas, dbname FROM components WHERE case_id = ? ORDER BY component",
+        (case_id,),
+    ).fetchall()
+
+
+def save_components(
+    conn: sqlite3.Connection, case_id: int, rows: list[dict]
+) -> int:
+    """整份替换组分字典,返回写入条数。
+
+    和组成一样整份替换:同一份模型重新读过之后,组分可能变少,
+    留着旧行会让页面显示出上一版模型的组分。
+    """
+    try:
+        conn.execute("DELETE FROM components WHERE case_id = ?", (case_id,))
+        if rows:
+            conn.executemany(
+                """
+                INSERT OR REPLACE INTO components (case_id, component, cas, dbname)
+                VALUES (?,?,?,?)
+                """,
+                [
+                    (case_id, r.get("component"), r.get("cas"), r.get("dbname"))
+                    for r in rows
+                    if r.get("component")
+                ],
+            )
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise
+    return len(rows)
+
+
+def read_component_cas(conn: sqlite3.Connection, model_name: str) -> dict[str, str]:
+    """这个模型手填过的组分 CAS:{组分 → CAS};没填过返回空 dict。"""
+    name = str(model_name or "").strip()
+    if not name:
+        return {}
+    return {
+        r["component"]: r["cas"]
+        for r in conn.execute(
+            "SELECT component, cas FROM component_cas WHERE model_name = ? ORDER BY component",
+            (name,),
+        )
+    }
+
+
+def save_component_cas(
+    conn: sqlite3.Connection, model_name: str, component: str, cas: str | None
+) -> bool:
+    """写一条手填 CAS;cas 为空表示清除。返回是否写到了东西。"""
+    name = str(model_name or "").strip()
+    comp = str(component or "").strip()
+    if not name or not comp:
+        return False
+    if not cas:
+        cur = conn.execute(
+            "DELETE FROM component_cas WHERE model_name = ? AND component = ?", (name, comp)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    conn.execute(
+        """
+        INSERT INTO component_cas (model_name, component, cas, updated_at)
+        VALUES (?,?,?,?)
+        ON CONFLICT(model_name, component)
+        DO UPDATE SET cas = excluded.cas, updated_at = excluded.updated_at
+        """,
+        (name, comp, str(cas), _now()),
+    )
+    conn.commit()
+    return True
+
+
+def read_cas_map(conn: sqlite3.Connection, case_id: int, model_name: str) -> dict[str, str]:
+    """组分 → CAS 的合并视图:Aspen / 模型文件读到的优先,读不到才用手填的。
+
+    手填只补空缺 —— 读得到的时候以模型为准,免得手误覆盖真实读数。
+    """
+    out = {
+        r["component"]: r["cas"]
+        for r in conn.execute(
+            "SELECT component, cas FROM components WHERE case_id = ? AND cas IS NOT NULL",
+            (case_id,),
+        )
+    }
+    for comp, cas in read_component_cas(conn, model_name).items():
+        out.setdefault(comp, cas)
+    return out
+
+
 def delete_case(conn: sqlite3.Connection, case_id: int) -> dict:
     """删掉一个工况及其全部明细,返回各表删除的行数。
 
     明细表显式删除,不依赖 `ON DELETE CASCADE`(外键 pragma 在不同连接上未必生效)。
     """
     counts: dict[str, int] = {}
-    for table in ("connections", "stream_components", "column_stages", "blocks", "streams"):
+    for table in (
+        "components",
+        "connections",
+        "stream_components",
+        "column_stages",
+        "blocks",
+        "streams",
+    ):
         cur = conn.execute(f"DELETE FROM {table} WHERE case_id = ?", (case_id,))
         counts[table] = cur.rowcount
     conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))

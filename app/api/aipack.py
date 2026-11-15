@@ -31,6 +31,7 @@ import json
 import time
 import zipfile
 
+from app.design import component_names as names
 from app.store import db
 
 SEVERITY_TEXT = {"ok": "收敛", "warning": "有告警", "error": "有错误", "empty": "没有结果"}
@@ -363,12 +364,25 @@ def _profiles_csv(stages_by_block) -> bytes:
     )
 
 
-def _composition_csv(rows) -> bytes:
+def _composition_csv(rows, cas_map: dict[str, str] | None = None) -> bytes:
+    """组成明细。组分列一律用 CAS 号(跨模型对齐靠它),读不到 CAS 才退回 Aspen 原名。
+
+    Word / Excel 两个出口刻意保持 Aspen 原名(见 docs/pump-selection-plan.md),
+    只有 AI 包用 CAS —— 给程序和模型读的东西,标识要稳定,中文名反而会变。
+    """
+    cas_map = cas_map or {}
     out = []
     for r in rows:
-        out.append([r["stream"], r["component"], _num(r["x_liq"]), _num(r["y_vap"])])
+        out.append(
+            [
+                r["stream"],
+                names.cas_or_name(cas_map.get(r["component"]), r["component"]),
+                _num(r["x_liq"]),
+                _num(r["y_vap"]),
+            ]
+        )
     return _csv_bytes(
-        ["流股", "组分", "液相摩尔分数x", "气相摩尔分数y"],
+        ["流股", "组分(CAS/原名)", "液相摩尔分数x", "气相摩尔分数y"],
         out,
     )
 
@@ -957,10 +971,14 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
 
     connections = db.read_connections(conn, case_id)
     comp_rows = db.read_all_composition(conn, case_id)
+    # 手填的 CAS 也要带上(手填只补空缺,Aspen/文件读到的优先)
+    cas_map = db.read_cas_map(conn, case_id, str(case["model_name"] or ""))
     composition = {
         "rows": comp_rows,
         "streams": db.list_composed_streams(conn, case_id),
-        "components": sorted({r["component"] for r in comp_rows}),
+        "components": sorted(
+            {names.cas_or_name(cas_map.get(r["component"]), r["component"]) for r in comp_rows}
+        ),
     }
 
     reasons = _json(case["reasons_json"], [])
@@ -996,7 +1014,7 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     if columns:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
     if comp_rows:
-        files.append(("composition.csv", _composition_csv(comp_rows)))
+        files.append(("composition.csv", _composition_csv(comp_rows, cas_map)))
     pipe_res, pipe_checks = _pipe_result(streams, blocks, connections)
     if pipe_res:
         files.append(("pipe_schedule.csv", _pipe_csv(pipe_res["rows"], pipe_checks)))

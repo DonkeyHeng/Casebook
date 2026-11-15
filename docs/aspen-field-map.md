@@ -93,6 +93,43 @@ DSH 的 shell 跑在隔离环境里时,ROT 是**空的**(连 `Shell.Application`
 
 ---
 
+## 3.1 组分字典(Components)
+
+读一次工况顺带读一遍(COM 约 3 次/组分),存进 `components` 表:组分 ID / CAS 号 / Aspen 数据库名。
+
+| 量 | 路径 | 说明 |
+| --- | --- | --- |
+| 组分 ID | 流股 `Output\X` 的子节点名 | **不要用** `\Data\Components` 的第一层:实测(2026-11-15,case49)那是 Aspen 的分组名(Assay/Blend、Attr-Comps、Comp-Lists、Henry-Comps、Pseudocomponents …),照抄会把 14 个分组当组分写进库 |
+| CAS 号 | `<候选父>\<组分>\<CAS 字段>` | **位置未实测**。父路径候选见 `reader._COMPONENT_PARENTS`;字段名规范化后按 cas / casno / casnumber 匹配,允许嵌一层(如 `Alias\CAS`) |
+| 数据库名 | `\Data\Components\<ID>\<DBNAME 字段>` | 候选 `DBNAME1` / `DBNAME` / `DATABANK-NAME`;值形如 `ACROLEIN`、`1,3-PROPANEDIOL` |
+
+> **实测进度(2026-11-15)**
+> 1. `\Data\Components` 第一层是分组,不是组分 —— 已确认(见上表第一行)。
+> 2. **COM 树里没有组分属性层**(2026-11-15 探针实测,模型 = 天津大学 `【4】…bkp`):
+>    `\Data\Components` 第一层只有分组;对 `H2O` 依次试
+>    `Attr-Comps` / `Comp-Lists` / `Pseudocomponents` / `Input` / `Comp-Groups` / `Components`,
+>    **全部 find -> 无**。所以 CAS 只能从模型文件取(见下一条),`_COMPONENT_PARENTS` 保留
+>    只是给别的 Aspen 版本留的后路。
+> 3. 组分属性(含 CAS)挂在哪个父节点、字段叫什么,**仍未确认**:候选父路径 + 两层叶子名匹配
+>    没命中时 `cas` / `dbname` 留空,页面只显示 Aspen 原名、AI 包也用原名,**不会算出错的数**。
+> 4. **兜底已是主路**:COM 一个 CAS 都读不到时,`reader.read_component_meta` 会改去解析模型文件
+>    本身(`app/aspen/bkp_components.py`:按 `COMPONENTS MAIN` 的定义顺序配对 `DSET CASN CASN`
+>    的 CAS 列表)。实测 case51 的 `.bkp`:16 个组分里 14 个能取到 CAS,2 个自定义组分无 CAS。
+>    注意锚点要用完整的 `DSET CASN CASN` —— 文件里另有 `IDSET CASN (PROPERTIES)`,
+>    用短的 `DSET CASN` 会被它的子串提前命中,一个 CAS 都取不到。
+> 5. 实在没有 CAS 的组分(自定义/伪组分)可以在页面上**手填**:存进 `component_cas` 表,
+>    键是 (模型文件名, 组分),只补空缺、重读工况不丢;详细规则见 [api.md](api.md)。
+> 6. Aspen 打开着的时候跑一次 `python tools/probe_components.py`,它会把真实树打出来
+>    (分组第一层 + 指定组分在各候选父节点下的样子)。照着输出改
+>    `reader._COMPONENT_PARENTS` / `_CAS_FIELDS` 即可,不用再猜。
+> 4. 重读一次 Aspen 后,组成抽屉底部显示「CAS 命中数 / 组分总数」,这个数就是判断依据。
+
+> 离线旁证:`.bkp` 里有同样的信息,可用来核对 —— `COMPONENTS MAIN` 段的 `DBNAME1` /
+> `ANAME1`,以及 `DSET CASN CASN @CASN ( … )` 那个**按组分定义顺序排列**的 CAS 列表
+> (自定义组分留空 `""`)。实测 4 个模型的 28 个组分:23 个有 CAS,5 个是自定义组分无 CAS。
+
+---
+
 ## 4. 流股(Streams)
 
 > **没 Run 过的模型长什么样**(2026-11-01 实测):`\Data\Streams\<流股>` 的**名字都在**,

@@ -17,13 +17,35 @@
 | POST | `/api/pipe-standards` | **导入标准表**:校验 → 写 `data/preview/std/docx/` → 立即重新加载,不用重启 |
 | POST | `/api/sample/install` | 把内置示例工况装进当前库(**先备份原库为 `cases.db.bak`**);首页「载入示例工况」按钮用它,效果同 `--sample` |
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股 / 设备 / 连接 / 塔剖面 / 组成) |
-| GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成;没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
+| GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成(含 CAS / 中文名);没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
+| POST | `/api/cases/{id}/components/cas` | **手填组分 CAS**(body `{component, cas}`,`cas` 为空表示清除);按**模型**保存,重读工况不丢 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |
 | GET | `/api/cases/{id}/export-family.xlsx?family=pump` | 设备页右上角「导出 Excel」:只导**当前分类**的设备明细;分类键见 `/api/block-families`,泵分类含 p_v / NPSHₐ / 建议电机 |
 | GET | `/api/cases/{id}/export.ai.zip` | 导出 AI 分析包(给 AI 读);多一份 `pipe_schedule.csv` |
 | GET | `/api/cases/{id}/sections` | 工段(界区)边界:自动草稿 + 已确认 + 合并结果;含配置文件现状 |
 | POST | `/api/cases/{id}/sections` | 保存工段边界(写 `data/config/sections.json`,按工况 id;不碰工况库) |
 | GET | `/api/cases/{id}/balance-report.docx?blocks=&families=` | 物料与能量衡算报告(Word);`blocks` / `families` 取并集,不给就是全部设备 |
+
+## 流股组成 `/api/cases/{id}/streams/{流股}/composition`
+
+`components` 每项带 `component`(Aspen 原名)/ `x_liq` / `y_vap` / `cas` / `cn`:
+
+| 字段 | 内容 |
+| --- | --- |
+| `cas` | CAS 号;Aspen 里读不到(自定义组分)时为 `null` |
+| `cn` | 中文名,按 CAS 查 `app/design/component_names.py`;查不到为 `null` |
+| `cas_source` | `aspen`(从 Aspen / 模型文件读到) 或 `manual`(手填);都没有时为 `null` |
+| `cas_found` / `cas_total` | 本条流股"认出几个 CAS"(含手填) / 组分总数,页面底部直接显示 |
+
+**手填 CAS 的规则**:存在 `component_cas` 表里,键 = (模型文件名, 组分),只能**补空缺** ——
+该组分从 Aspen / 模型文件读得到 CAS 时以读数为准,手填不覆盖。显示上:"读不到 CAS"的组分
+才会出现「补录 CAS」按钮;填了之后第一行用原组分名、第二行显示 CAS(查不到中文名时不编造)。
+
+显示约定:**有 `cn` 就显示"中文名 + CAS"两行,悬浮**只**显示 Aspen 原名(用来对回模型里的叫法);
+没有就只显示 Aspen 原名、不给悬浮。**
+Word / Excel 两个出口刻意保持 Aspen 原名;AI 包的 `composition.csv` 用 CAS,没有 CAS 才退回原名。
+
+---
 
 ## 管路选型 `/api/cases/{id}/pipes`
 

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import threading
 
+from app.design import component_names as names
 from app.store import db
 
 # 一条一条来:跨进程 COM 调用叠加没有好处,而且会同时占两个许可证请求
@@ -52,11 +53,9 @@ def get(conn, case, stream: str, force: bool = False) -> dict:
             return _payload(
                 stream,
                 "case",
-                [
-                    {"component": r["component"], "x_liq": r["x_liq"], "y_vap": r["y_vap"]}
-                    for r in cached
-                ],
+                [_row(r) for r in cached],
                 run_id=case["run_id"],
+                meta=_read_meta(conn, case),
             )
 
     with _lock:
@@ -67,22 +66,23 @@ def get(conn, case, stream: str, force: bool = False) -> dict:
                 return _payload(
                     stream,
                     "case",
-                    [
-                        {"component": r["component"], "x_liq": r["x_liq"], "y_vap": r["y_vap"]}
-                        for r in cached
-                    ],
+                    [_row(r) for r in cached],
                     run_id=case["run_id"],
+                    meta=_read_meta(conn, case["id"]),
                 )
 
-        rows, run_id = _read_live(case, stream)
+        rows, run_id, meta_rows = _read_live(case, stream)
         db.save_stream_composition(conn, case["id"], stream, rows)
-        return _payload(stream, "live", rows, run_id=run_id)
+        if meta_rows:
+            db.save_components(conn, case["id"], meta_rows)
+        # 落库之后统一从库里读一遍:这样"读到 / 手填"的来源标记只有一处逻辑
+        return _payload(stream, "live", rows, run_id=run_id, meta=_read_meta(conn, case))
 
 
 # ---------------------------------------------------------------- 实际读
 
 
-def _read_live(case, stream: str) -> tuple[list[dict], str]:
+def _read_live(case, stream: str) -> tuple[list[dict], str, list[dict]]:
     try:
         from app.aspen import connect, reader
     except Exception as exc:  # pragma: no cover - 只有环境坏掉才会进来
@@ -114,8 +114,15 @@ def _read_live(case, stream: str) -> tuple[list[dict], str]:
             "可能原因:该流股的 X / Y 节点为空(纯能量流?),或者模型里没定义组分。"
         )
 
+    # 组分字典(CAS + 数据库名)顺手读一遍:页面要显示中文名、AI 包要按 CAS 导出。
+    # 读失败不影响组成本身 —— 宁可只显示 Aspen 原名,也不能因为字典读不到就看不了组成。
+    try:
+        meta = reader.read_component_meta(session, [r["component"] for r in rows])
+    except Exception:
+        meta = []
+
     run_id = str(session.value(r"\Data\Results Summary\Run-Status\Output\RUNID") or "")
-    return rows, run_id
+    return rows, run_id, meta
 
 
 def _attach_matching(connect, case):
@@ -170,18 +177,91 @@ def _check_same_run(connect, session, case) -> None:
 # ---------------------------------------------------------------- 组装返回
 
 
-def _payload(stream: str, source: str, rows: list[dict], run_id: str = "") -> dict:
+def _row(row) -> dict:
+    """库里的一行 → 前端用的组分条目。"""
+    return {"component": row["component"], "x_liq": row["x_liq"], "y_vap": row["y_vap"]}
+
+
+def _read_meta(conn, case) -> dict[str, dict]:
+    """组分字典:{组分 → {cas, dbname, source}}。
+
+    CAS 的优先级:**Aspen / 模型文件读到的** > 该模型手填的。
+    手填只补空缺(读不到才用),免得手误把真实读数盖掉。
+    """
+    meta = {
+        r["component"]: {
+            "cas": r["cas"],
+            "dbname": r["dbname"],
+            "source": "aspen" if r["cas"] else None,
+        }
+        for r in db.read_components(conn, case["id"])
+    }
+    for comp, cas in db.read_component_cas(conn, str(case["model_name"] or "")).items():
+        row = meta.setdefault(comp, {"cas": None, "dbname": None, "source": None})
+        if not row.get("cas"):
+            row["cas"] = cas
+            row["source"] = "manual"
+    return meta
+
+
+def _meta_map(rows) -> dict[str, dict]:
+    """[{'component': …}] → {组分: {…}}。
+
+    组分字典从 Aspen 读回来是列表(要写库),但组装返回体时要按组分名查,
+    两者形状不同 —— 2026-11-15 直接把列表塞进 _payload 导致
+    `AttributeError: 'list' object has no attribute 'get'`,这里统一成 dict。
+    """
+    return {
+        str(m.get("component")): m
+        for m in (rows or [])
+        if isinstance(m, dict) and m.get("component")
+    }
+
+
+def _payload(
+    stream: str,
+    source: str,
+    rows: list[dict],
+    run_id: str = "",
+    meta: dict[str, dict] | None = None,
+) -> dict:
+    """组装返回体。组分条目带上 cas 和中文名 cn,查不到就留 None。
+
+    查不到不是错误:自定义组分在 Aspen 里本来就没有 CAS(实测 case46 的 DIMHPA / 3-HPA),
+    前端约定是"只显示 Aspen 原名、不给悬浮",所以这里如实给 None,不编造。
+    """
+    if isinstance(meta, (list, tuple)):
+        meta = _meta_map(meta)  # 防御:调用方给列表也别炸
+    meta = meta or {}
+    comps = []
+    for r in rows:
+        info = meta.get(r["component"]) or {}
+        cas = names.clean_cas(info.get("cas"))
+        comps.append(
+            {
+                **r,
+                "cas": cas or None,
+                "cn": names.cn_name(cas) or None,
+                # aspen = Aspen/模型文件读到的;manual = 手填的。页面据此区分显示
+                "cas_source": (info.get("source") if cas else None),
+            }
+        )
+
     def total(key: str):
-        vals = [r.get(key) for r in rows]
+        vals = [r.get(key) for r in comps]
         nums = [v for v in vals if isinstance(v, (int, float))]
         return round(sum(nums), 6) if nums else None
 
+    cas_found = sum(1 for c in comps if c["cas"])
     return {
         "stream": stream,
         "source": source,  # case = 工况库里存的;live = 刚从 Aspen 读并已存库
         "run_id": run_id or "",
-        "components": rows,
-        "count": len(rows),
+        "components": comps,
+        "count": len(comps),
         "sum_x": total("x_liq"),
         "sum_y": total("y_vap"),
+        # 页面上要报"读到了几个 CAS":没读到时用户得知道是"没收录"还是"没读到"
+        "cas_found": cas_found,
+        "cas_total": len(comps),
     }

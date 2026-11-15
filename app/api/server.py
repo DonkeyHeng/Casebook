@@ -50,6 +50,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from app import paths
+from app.design import component_names
 from app.store import db, flowsheet, impact
 from app.api import read_job
 from app.api import window as win
@@ -357,6 +358,10 @@ class Handler(BaseHTTPRequestHandler):
                 if len(seg) == 4 and seg[3] == "sections":
                     self._save_sections(seg[2])
                     return
+                # /api/cases/{id}/components/cas —— 手填某个组分的 CAS(按模型存)
+                if len(seg) == 5 and seg[3] == "components" and seg[4] == "cas":
+                    self._set_component_cas(seg[2])
+                    return
             self._error("未知接口", 404)
         except BrokenPipeError:
             pass
@@ -402,6 +407,56 @@ class Handler(BaseHTTPRequestHandler):
                 "block": block,
                 "pv_bar": pv,
                 "pv_source": "manual" if pv is not None else None,
+            }
+        )
+
+    def _set_component_cas(self, raw_id: str) -> None:
+        """手动填写某个组分的 CAS 号;body 里 cas 为空表示清除。
+
+        为什么按**模型**存、不写回 components 表:
+        组分是模型的属性,而且重读工况会整份重建 components(= 手填会被冲掉)。
+        手填只补空缺 —— 该组分从 Aspen / 模型文件读得到 CAS 时,以读数为准。
+        """
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        body = self._read_json_body()
+        component = str(body.get("component") or "").strip()
+        if not component:
+            self._error("component 不能为空")
+            return
+        raw = str(body.get("cas") or "").strip()
+        cas = None
+        if raw:
+            cas = component_names.clean_cas(raw)
+            if not cas:
+                self._error("CAS 号形状不对:应为 数字-数字-数字 的形式,例如 2134-29-4")
+                return
+        conn = db.open_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT model_name FROM cases WHERE id = ?", (case_id,)
+            ).fetchone()
+            if row is None:
+                self._error(f"没有 id={case_id} 的工况", 404)
+                return
+            model_name = str(row["model_name"] or "").strip()
+            if not model_name:
+                self._error("这个工况没有记录模型名,无法挂手填 CAS")
+                return
+            db.save_component_cas(conn, model_name, component, cas)
+        finally:
+            conn.close()
+        self._json(
+            {
+                "ok": True,
+                "case_id": case_id,
+                "model_name": model_name,
+                "component": component,
+                "cas": cas,
+                "cn": component_names.cn_name(cas) if cas else None,
             }
         )
 

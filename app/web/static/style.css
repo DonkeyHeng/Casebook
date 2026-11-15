@@ -961,11 +961,84 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   line-height: 38px;
 }
 
+/* 组分名两行:第一行中文名、第二行 CAS(见 app.js renderComposition)。
+   行高 38 → 44:代价是"窗口多高显示多少行"少一行,换来不用悬浮就能看到 CAS。
+   没认出来的组分没有 .comp-name,仍是单行 Aspen 原名,行高保持 38。 */
+.comp-table-wrap tbody td.comp-name {
+  height: 44px;
+  padding: 4px 12px;
+  line-height: 1.35;
+  vertical-align: middle;
+}
+.comp-name .cn {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comp-name .cas {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.2px;
+}
+
 .comp-foot {
   flex: none;
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.comp-tools {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+}
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.link-btn:hover { text-decoration-style: solid; }
+
+/* 手填 CAS 的小清单:窄侧栏里一行一个组分 + 输入框 */
+.cas-edit-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cas-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cas-edit-name {
+  flex: 0 0 auto;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+}
+.cas-edit-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cas-edit-msg {
+  font-size: var(--fs-sm);
+  color: var(--muted);
 }
 
 .comp-note {

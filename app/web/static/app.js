@@ -1308,35 +1308,160 @@ async function openComposition(stream) {
   renderComposition(data);
 }
 
+/* 含量为 0 的组分默认收起来:一屏几十行 0 既占地方又没信息量。
+   只把"真正的数值 0"算作空;null 表示没读到,不能当 0 藏掉(那会把缺数据伪装成没有)。 */
+let compShowAll = false;
+
+function compIsZero(c) {
+  const isZero = (v) => typeof v === "number" && v === 0;
+  return isZero(c.x_liq) && isZero(c.y_vap);
+}
+
+/* CAS 校验位:从右往左 ×1,2,3… 求和取个位。算不对多半是抄错了。 */
+function casCheckOk(raw) {
+  const digits = String(raw || "").replace(/-/g, "");
+  if (!/^\d{5,10}$/.test(digits)) return false;
+  const check = Number(digits.slice(-1));
+  const rest = digits.slice(0, -1).split("").reverse();
+  const sum = rest.reduce((s, d, i) => s + Number(d) * (i + 1), 0);
+  return sum % 10 === check;
+}
+
 function renderComposition(data) {
   const body = document.getElementById("compBody");
   const comps = data.components || [];
+  const zeroCount = comps.filter(compIsZero).length;
+  const shown = compShowAll ? comps : comps.filter((c) => !compIsZero(c));
+  const missingCas = comps.filter((c) => !c.cas);
   const note = data.source === "live"
     ? '<p class="comp-note live">刚从当前打开的 Aspen 读出来,已存入本工况(下次打开直接取,不再连 Aspen)。</p>'
     : '<p class="comp-note">来自本工况已存的数据。</p>';
 
-  const rows = comps.map((c) => {
+  const rows = shown.map((c) => {
     const zero = (v) => (v === 0 ? " comp-zero" : "");
+    // 组分名的显示规则(2026-11-15 定):
+    //   认得出来(CAS 在字典里)→ 第一行中文名、第二行 CAS,悬浮给 Aspen 原名;
+    //   认不出来(自定义组分没有 CAS)→ 只显示 Aspen 原名,不给悬浮,免得让人以为工具认得。
+    const cn = c.cn ? String(c.cn) : "";
+    const cas = c.cas ? String(c.cas) : "";
+    // 悬浮只给 Aspen 原名(2026-11-15 定):页面上已经是中文名+CAS,
+    // 悬浮的用处是"回到模型里的叫法",别再把中文和 CAS 重复一遍。
+    // 手填的 CAS 往往查不到中文名,这时第一行用原名、第二行照旧显示 CAS —— 不能因为
+    // 没有中文名就把 CAS 一起吞掉(那会让用户以为"填了没用")。
+    const head = cn || c.component;
+    const title = cn ? esc(c.component) : "";
+    const nameCell =
+      cn || cas
+        ? `<td class="name comp-name"${title ? ` title="${title}"` : ""}>` +
+          `<span class="cn">${esc(head)}</span>` +
+          (cas ? `<span class="cas">${esc(cas)}</span>` : "") +
+          `</td>`
+        : `<td class="name">${esc(c.component)}</td>`;
     return `<tr>
-      <td class="name">${esc(c.component)}</td>
+      ${nameCell}
       <td class="num${zero(c.x_liq)}">${fmtFrac(c.x_liq)}</td>
       <td class="num${zero(c.y_vap)}">${fmtFrac(c.y_vap)}</td>
     </tr>`;
   }).join("");
 
+  const tools = [];
+  if (zeroCount) {
+    tools.push(
+      `<button class="link-btn" id="compZeroToggle">${compShowAll ? "隐藏" : "显示"}含量为 0 的 ${zeroCount} 个组分</button>`
+    );
+  }
+  if (missingCas.length) {
+    tools.push(`<button class="link-btn" id="compCasBtn">补录 CAS（${missingCas.length} 个）</button>`);
+  }
+  const emptyRows = shown.length
+    ? rows
+    : '<tr><td class="name" colspan="3">该流股所有组分含量均为 0</td></tr>';
+
   body.innerHTML = `${note}
+    ${tools.length ? `<div class="comp-tools">${tools.join("")}</div>` : ""}
     <div class="comp-table-wrap">
       <table>
         <thead><tr><th>组分</th><th class="num">液相摩尔分数 x</th><th class="num">气相摩尔分数 y</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${emptyRows}</tbody>
       </table>
     </div>
     <div class="comp-foot">
       ${phaseRow("液相", "x_liq", comps, data.sum_x)}
       ${phaseRow("气相", "y_vap", comps, data.sum_y)}
-      <p class="comp-sum">共 ${data.count} 个组分 · 合计 x = ${fmt(data.sum_x, 4)} · 合计 y = ${fmt(data.sum_y, 4)}${
+      <p class="comp-sum">共 ${data.count} 个组分${
+        zeroCount && !compShowAll ? ` · 显示 ${shown.length} 个` : ""} · 合计 x = ${fmt(data.sum_x, 4)} · 合计 y = ${fmt(data.sum_y, 4)}${
+        data.cas_total ? ` · CAS ${data.cas_found}/${data.cas_total}` : ""}${
         data.run_id ? ` · 运行 ID ${esc(data.run_id)}` : ""}</p>
     </div>`;
+
+  const zeroToggle = document.getElementById("compZeroToggle");
+  if (zeroToggle) {
+    zeroToggle.addEventListener("click", () => {
+      compShowAll = !compShowAll;
+      renderComposition(data);
+    });
+  }
+  const casBtn = document.getElementById("compCasBtn");
+  if (casBtn) casBtn.addEventListener("click", () => renderCasEditor(data));
+}
+
+/* 手填 CAS:只列"读不到 CAS"的组分。
+   存到按模型挂的 component_cas 表,重读工况不会丢;读得到时仍以读数为准。 */
+function renderCasEditor(data) {
+  const body = document.getElementById("compBody");
+  const missing = (data.components || []).filter((c) => !c.cas);
+  const rows = missing
+    .map(
+      (c) => `<div class="cas-edit-row">
+        <span class="cas-edit-name" title="${esc(c.component)}">${esc(c.component)}</span>
+        <input class="cas-edit-input" data-comp="${esc(c.component)}" placeholder="如 2134-29-4"
+               aria-label="${esc(c.component)} 的 CAS 号">
+      </div>`
+    )
+    .join("");
+
+  body.innerHTML = `
+    <div class="comp-tools"><button class="link-btn" id="casBack">← 返回组成</button></div>
+    <p class="comp-note">这些组分在 Aspen 和模型文件里都没读到 CAS。手填按<b>模型</b>保存,重读工况不会丢;
+    读得到 CAS 时仍以读数为准。</p>
+    <div class="cas-edit-list">${rows}</div>
+    <div class="comp-tools">
+      <button class="link-btn" id="casSave">保存全部</button>
+      <span class="cas-edit-msg" id="casMsg"></span>
+    </div>`;
+
+  document.getElementById("casBack").addEventListener("click", () => renderComposition(data));
+
+  let forceSave = false;
+  document.getElementById("casSave").addEventListener("click", async () => {
+    const msg = document.getElementById("casMsg");
+    const inputs = Array.from(document.querySelectorAll(".cas-edit-input"));
+    const todo = inputs
+      .map((el) => ({ comp: el.dataset.comp, raw: el.value.trim() }))
+      .filter((item) => item.raw);
+    if (!todo.length) {
+      msg.textContent = "没有填写任何 CAS";
+      return;
+    }
+    const bad = todo.filter((item) => !casCheckOk(item.raw));
+    if (bad.length && !forceSave) {
+      forceSave = true;
+      msg.textContent = `${bad.length} 个 CAS 校验位对不上(可能抄错),再点一次仍要保存`;
+      return;
+    }
+    msg.textContent = "保存中…";
+    try {
+      for (const item of todo) {
+        await apiPost(`/api/cases/${state.current.id}/components/cas`, {
+          component: item.comp,
+          cas: item.raw,
+        });
+      }
+      await openComposition(data.stream);
+    } catch (err) {
+      msg.textContent = err.message;
+    }
+  });
 }
 
 /* ------------------------------------------------------------ 对比 */
