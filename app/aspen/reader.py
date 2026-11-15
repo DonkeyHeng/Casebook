@@ -949,8 +949,14 @@ def read_stream_vapor_pressure(session, stream_name: str):
 # **Output\STRM_UPP\VISC** —— 和 p_v 的 PBUB 同在一个 STRM_UPP 容器里(那是 Aspen
 # 放"物性集结果"的地方)。第一版漏了 STRM_UPP 前缀,所以模型算出来了也读不到。
 VISC_STREAM_PATHS = (
-    # 实测(2026-11-15):节点确实在 \`STRM_UPP\VISC\MIXED\`,但物性集没重跑成功时
-    # 值是 None —— 存在 ≠ 有值,所以下面几种可能的分相写法也一并试。
+    # **首选 MUMX**:Aspen 里"混合物粘度"的属性名是 MUMX(VISC 只是纯组分方法名)。
+    # 实测(2026-11-15)物性集挂上后 STRM_UPP 下出现了 MUMX 节点,且和 PBUB 一样
+    # 直接取 MIXED 会拿到"1 + 单位"的标志值 —— 真值要再往下钻到 TOTAL。
+    r"STRM_UPP\MUMX\MIXED\TOTAL",
+    r"STRM_UPP\MUMX\MIXED",
+    r"STRM_UPP\MUMX\LIQUID\MIXED",
+    r"STRM_UPP\MUMX",
+    r"STRM_UPP\VISC\MIXED\TOTAL",
     r"STRM_UPP\VISC\MIXED",
     r"STRM_UPP\VISC\LIQUID\MIXED",
     r"STRM_UPP\VISC\MIXED\LIQUID",

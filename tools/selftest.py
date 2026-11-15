@@ -2827,6 +2827,19 @@ def test_hydraulics() -> None:
     value, unit = reader_mod._visc_leaf(_Stub(nested_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")
     check_eq("粘度: MIXED 是目录时钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
 
+    # MUMX(M=混合物粘度)是首选属性,真值同样在 MIXED\TOTAL 下
+    mumx_tree = {
+        r"\Data\Streams\S\Output\STRM_UPP\MUMX\MIXED": (["TOTAL"], 1, "cP"),
+        r"\Data\Streams\S\Output\STRM_UPP\MUMX\MIXED\TOTAL": ([], 0.483, "cP"),
+    }
+    value, unit = reader_mod._visc_leaf(_Stub(mumx_tree), r"\Data\Streams\S\Output\STRM_UPP\MUMX")
+    check_eq("粘度: MUMX 下钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
+    check(
+        "粘度: MUMX 排在 VISC 前面",
+        reader_mod.VISC_STREAM_PATHS[0].startswith("STRM_UPP\\MUMX"),
+        reader_mod.VISC_STREAM_PATHS[0],
+    )
+
     unknown_dir = {
         r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": (["SOMETHING"], 1, "bar"),
         r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED\SOMETHING": ([], 9.9, "cP"),
