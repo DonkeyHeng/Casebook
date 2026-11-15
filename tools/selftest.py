@@ -2769,6 +2769,74 @@ def test_hydraulics() -> None:
     check_eq("粘度: 认不出的单位返回 None", reader_mod._to_cp("1.2", "kgf/m2"), None)
     check_eq("粘度: 非数字返回 None", reader_mod._to_cp("abc", "cP"), None)
 
+    # --- _visc_leaf:MIXED 是目录时要钻到 TOTAL,不能把标志位 1 当读数
+    # (实测 STRM_UPP\PL\MIXED 与 PBUB\MIXED 直接取值都是 1 bar,那是目录/标志节点)
+    def _kids_of(tree, path):
+        """按 key 前缀合成子节点名 —— 真实 Aspen 的 Elements 也会列出子目录。"""
+        pre = path + "\\"
+        names = []
+        for key in tree:
+            if key.startswith(pre):
+                head = key[len(pre):].split("\\")[0]
+                if head not in names:
+                    names.append(head)
+        return names
+
+    class _Coll:
+        def __init__(self, path, tree):
+            self._path, self._tree = path, tree
+            self._kids = _kids_of(tree, path)
+            self.Count = len(self._kids)
+
+        def Item(self, i):
+            return _Node(rf"{self._path}\{self._kids[i]}", self._tree)
+
+    class _Node:
+        def __init__(self, path, tree):
+            self._path, self._tree = path, tree
+            self.Name = path.rsplit("\\", 1)[-1]
+            _k, value, unit = tree.get(path, ([], None, ""))
+            self.UnitString = unit
+            self.Value = value
+            self.Elements = _Coll(path, tree)
+
+    class _Stub:
+        """极简假 session:tree = {路径: (子节点列表, 值, 单位)}。"""
+
+        def __init__(self, tree):
+            self.tree = tree
+
+        def find(self, path):
+            if path in self.tree or _kids_of(self.tree, path):
+                return _Node(path, self.tree)
+            return None
+
+    flat_visc = {
+        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": ([], 1.23, "cP"),
+    }
+    check_eq(
+        "粘度: MIXED 是叶子时直接取",
+        round(reader_mod._visc_leaf(_Stub(flat_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")[0], 2),
+        1.23,
+    )
+
+    nested_visc = {
+        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": (["TOTAL"], 1, "bar"),
+        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED\TOTAL": ([], 0.483, "cP"),
+    }
+    value, unit = reader_mod._visc_leaf(_Stub(nested_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")
+    check_eq("粘度: MIXED 是目录时钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
+
+    unknown_dir = {
+        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": (["SOMETHING"], 1, "bar"),
+        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED\SOMETHING": ([], 9.9, "cP"),
+    }
+    check_eq(
+        "粘度: 认不出的目录不硬猜",
+        reader_mod._visc_leaf(_Stub(unknown_dir), r"\Data\Streams\S\Output\STRM_UPP\VISC"),
+        (None, ""),
+    )
+
 
 # ---------------------------------------------------------------- 组分字典(CAS / 中文名)
 

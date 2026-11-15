@@ -949,15 +949,23 @@ def read_stream_vapor_pressure(session, stream_name: str):
 # **Output\STRM_UPP\VISC** —— 和 p_v 的 PBUB 同在一个 STRM_UPP 容器里(那是 Aspen
 # 放"物性集结果"的地方)。第一版漏了 STRM_UPP 前缀,所以模型算出来了也读不到。
 VISC_STREAM_PATHS = (
+    # 实测(2026-11-15):节点确实在 \`STRM_UPP\VISC\MIXED\`,但物性集没重跑成功时
+    # 值是 None —— 存在 ≠ 有值,所以下面几种可能的分相写法也一并试。
     r"STRM_UPP\VISC\MIXED",
-    r"STRM_UPP\VISC",
+    r"STRM_UPP\VISC\LIQUID\MIXED",
+    r"STRM_UPP\VISC\MIXED\LIQUID",
+    r"STRM_UPP\VISC\VAPOR\MIXED",
     r"STRM_UPP\VISCOSITY\MIXED",
-    r"STRM_UPP\VISCOSITY",
+    r"STRM_UPP\VISCOSITY\LIQUID\MIXED",
     r"STRM_UPP\MU\MIXED",
+    r"STRM_UPP\VISC",
+    r"STRM_UPP\VISCOSITY",
     r"VISCOSITY\MIXED",
     r"VISCOSITY",
+    r"VISC\MIXED",
     r"VISC",
     r"MU_LIQ",
+    r"MU_VAP",
     r"LIQUID-VISC",
 )
 
@@ -986,14 +994,39 @@ def _to_cp(value, unit) -> float | None:
     return None
 
 
+# 目录里再往下找时优先看的子节点名:Aspen 的 TOTAL 就是"混合物总物性",
+# LIQUID / LIQ 是液相。顺序有讲究 —— 单相液相流股优先取液相值。
+_VISC_DESCEND = ("total", "mixed", "liquid", "liq")
+
+# 探针一次最多下钻几层:Output\STRM_UPP\VISC\MIXED\TOTAL 是 4 层,再留 1 层余量
+_VISC_MAX_DEPTH = 5
+
+
+def _visc_leaf(session, path: str, depth: int = _VISC_MAX_DEPTH):
+    r"""从 path 往下钻到叶子,返回 (值, 单位);钻不到或认不出返回 (None, "")。
+
+    为什么要钻:实测 STRM_UPP\PL\MIXED 与 STRM_UPP\PBUB\MIXED 直接取值都是
+    **1 且带 bar 单位** —— 那是 Aspen 的目录/标志节点,极像读数。真正的值在
+    MIXED\TOTAL。所以看到有子节点不能直接当读数,也不能直接放弃,得按名字往下找。
+    """
+    if depth <= 0:
+        return None, ""
+    kids = child_names(session.find(path))
+    if not kids:
+        value, unit = fetch(session, path)
+        return value, unit
+    lowered = {str(k).lower(): k for k in kids}
+    for want in _VISC_DESCEND:
+        if want in lowered:
+            return _visc_leaf(session, rf"{path}\{lowered[want]}", depth - 1)
+    return None, ""
+
+
 def read_stream_viscosity(session, stream_name: str):
     """进口流股粘度(cP)。读不到返回 None —— 不拿水的粘度之类的常见值顶替。"""
     base = rf"\Data\Streams\{stream_name}\Output"
     for rel in VISC_STREAM_PATHS:
-        node = session.find(rf"{base}\{rel}")
-        if node is None or child_names(node):  # 目录节点的值是标志位,不是读数
-            continue
-        value, unit = fetch(session, rf"{base}\{rel}")
+        value, unit = _visc_leaf(session, rf"{base}\{rel}")
         cp = _to_cp(value, unit)
         if cp is not None:
             return cp
