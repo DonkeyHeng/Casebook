@@ -1279,6 +1279,9 @@ function renderPumpDesign(row) {
     `<input class="pump-design-input" data-key="${key}" inputmode="decimal" placeholder="${ph}"
             value="${state.pumpDesign[key] === null || state.pumpDesign[key] === undefined ? "" : state.pumpDesign[key]}"
             aria-label="${key}">`;
+  if (!state.pumpDesign.fittings) {
+    state.pumpDesign.fittings = { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 };
+  }
   const calc = state.pumpDesign.calc;
   const calcLine = !calc
     ? "填管长与 Σζ 后可自动算 Re / λ / Σhf"
@@ -1380,6 +1383,7 @@ async function computeHeadLoss(row) {
 async function loadPumpDesign(row) {
   state.pumpDesign = {
     dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
+    idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
   };
   renderPumpDesign(row);
   const cid = state.current.id;
