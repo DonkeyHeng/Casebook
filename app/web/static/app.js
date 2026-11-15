@@ -19,6 +19,8 @@ const state = {
   families: [],            // 家族表(/api/block-families)
   pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
   pump: { margin: 1 },  // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
+  // 设计扬程辅助:位压头 ΔZ 与管路阻力 Σhf(米),按模型+位号存,由用户手填
+  pumpDesign: { dz: null, hf: null },
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
   impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
@@ -96,6 +98,7 @@ const FAMILY_COLS = {
   flash:  ["name", "type", "status", "duty", "outT", "vapOut", "dh", "ref", "balance", "message"],
   react:  ["name", "type", "status", "duty", "outT", "message"],
   // 泵页:流量/扬程/效率/轴功率/建议电机/p_v/NPSHₐ;级数和热负荷在这里没有意义
+  // 注意 head 列显示的是"压升扬程"(Aspen HEAD_CAL),不含位压头与管路阻力
   pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "pv", "npsh", "message"],
   // 涡轮机:只关心流量/扬程/回收功率;NPSHₐ、选型电机对透平没有意义
   turbine: ["name", "type", "status", "flow", "head", "power", "message"],
@@ -1164,8 +1167,13 @@ function openPump(block) {
   const rows = [
     kv("流量 m³/h", fmt(scaled(row.flow_m3h), 2), `Aspen${marginTag}`,
        row.flow_m3h == null ? "没读到" : `原值 ${fmt(row.flow_m3h, 2)}`),
-    kv("扬程 m", fmt(scaled(row.head_m), 2), `Aspen${marginTag}`,
-       row.head_m == null ? "没读到" : `原值 ${fmt(row.head_m, 2)}`),
+    // 名称写明"压升":Aspen 的 HEAD_CAL 只等于 Δp/(ρg),不含位压头与管路阻力。
+    // 实测(2026-11-15)两例:head_m 与 Δp/(ρg) 差 0.0015 m / 0.143 m,就是纯压升那一项。
+    kv("压升扬程 m", fmt(scaled(row.head_m), 2), `Aspen${marginTag}`,
+       row.head_m == null
+         ? "没读到"
+         : `原值 ${fmt(row.head_m, 2)};这只是 Δp/(ρg),不含位压头与管路阻力。`
+           + "设计扬程 = 本值 + ΔZ + Σhf,见下方「设计扬程」"),
     kv("轴功率 kW", fmt(row.power_kw, 2), "Aspen", "BRAKE_POWER,反向工况为负"),
     kv("建议电机 kW", fmt(row.motor_kw, 1), "计算", spec ? spec.motor_rule : ""),
     kv("效率 %", fmt(row.pump_eff == null ? null : row.pump_eff * 100, 1), "Aspen", "CEFF"),
@@ -1194,6 +1202,93 @@ function openPump(block) {
         copyBtn.textContent = "复制选型参数";
       }, 1500);
     };
+  }
+
+  loadPumpDesign(row);
+}
+
+/* ------------------------------------------------------------ 设计扬程辅助
+
+   Aspen 的泵扬程只有压升那一项。真实选型还要加:
+     ΔZ  位压头(进出口标高差)—— 几何信息,Aspen 里没有
+     Σhf 管路阻力 —— 要管长/管件/λ,属于水力计算
+   两项都只能人工给,工具只做加法与 1.1 取整,不估算(项目一贯口径)。 */
+const PUMP_DESIGN_MARGIN = 1.1; // 手册惯例;两处设计算例都用 1.1
+
+function pumpDesignTotal(row) {
+  const head = typeof row.head_m === "number" ? row.head_m : null;
+  const dz = state.pumpDesign.dz;
+  const hf = state.pumpDesign.hf;
+  if (head === null || dz === null || hf === null) return null;
+  return head + dz + hf;
+}
+
+function renderPumpDesign(row) {
+  const box = document.getElementById("pumpDesign");
+  if (!box) return;
+  const head = typeof row.head_m === "number" ? row.head_m : null;
+  const total = pumpDesignTotal(row);
+  const padded = total === null ? null : Math.ceil(total * PUMP_DESIGN_MARGIN);
+  const val = (v, ph) =>
+    `<input class="pump-design-input" data-field="${v}" inputmode="decimal" placeholder="${ph}"
+            value="${state.pumpDesign[v] === null ? "" : state.pumpDesign[v]}"
+            aria-label="${v === "dz" ? "位压头 ΔZ" : "管路阻力 Σhf"}(米)">`;
+  box.innerHTML = `
+    <div class="pump-design-head">
+      <span>设计扬程</span>
+      <span class="muted">ΔZ 与 Σhf 由你填,工具不估算</span>
+    </div>
+    <div class="pump-design-inputs">
+      <label>ΔZ m ${val("dz", "如 9.45")}</label>
+      <label>Σhf m ${val("hf", "如 5.93")}</label>
+    </div>
+    <p class="pump-design-sum">${head === null
+      ? "压升扬程没读到,算不了"
+      : total === null
+        ? `${fmt(head, 2)} m + 待填 = 待算`
+        : `${fmt(head, 2)} + ${fmt(state.pumpDesign.dz, 2)} + ${fmt(state.pumpDesign.hf, 2)}
+           = <b>${fmt(total, 2)} m</b> · ×${PUMP_DESIGN_MARGIN} 取整 <b>${padded} m</b>`}</p>`;
+
+  box.querySelectorAll(".pump-design-input").forEach((input) => {
+    input.addEventListener("input", (e) => {
+      const field = e.target.dataset.field;
+      const raw = e.target.value.trim();
+      const parsed = raw === "" ? null : Number(raw);
+      state.pumpDesign[field] = parsed !== null && isFinite(parsed) ? parsed : null;
+      renderPumpDesign(row); // 只重画这一块,不动上面的表
+      e.target.focus();
+      const again = box.querySelector(`[data-field="${field}"]`);
+      if (again) again.setSelectionRange(again.value.length, again.value.length);
+    });
+    input.addEventListener("change", () => savePumpDesign(row));
+  });
+}
+
+async function loadPumpDesign(row) {
+  state.pumpDesign = { dz: null, hf: null };
+  renderPumpDesign(row);
+  try {
+    const data = await api(
+      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/design-head`
+    );
+    state.pumpDesign = {
+      dz: typeof data.dz_m === "number" ? data.dz_m : null,
+      hf: typeof data.hf_m === "number" ? data.hf_m : null,
+    };
+    renderPumpDesign(row);
+  } catch (err) {
+    // 读不到就是没填过 / 老服务:保持空,不影响主功能
+  }
+}
+
+async function savePumpDesign(row) {
+  try {
+    await apiPost(
+      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/design-head`,
+      { dz_m: state.pumpDesign.dz, hf_m: state.pumpDesign.hf }
+    );
+  } catch (err) {
+    reportNotice(`设计扬程没保存:${err.message}`, "warn");
   }
 }
 

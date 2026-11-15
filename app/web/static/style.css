@@ -1020,6 +1020,48 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
 }
 .pump-panel-tools .pump-panel-hint { margin: 0; }
 
+/* 设计扬程辅助:ΔZ / Σhf 两个输入 + 一行结果,放在参数表下面 */
+.pump-design {
+  flex: none;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pump-design-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.pump-design-head .muted { font-weight: 400; }
+.pump-design-inputs {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pump-design-inputs label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.pump-design-input {
+  width: 84px;
+  min-width: 0;
+}
+.pump-design-sum {
+  margin: 0;
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+}
+
 /* 手填 CAS 的小清单:窄侧栏里一行一个组分 + 输入框 */
 .cas-edit-list {
   flex: 1 1 auto;

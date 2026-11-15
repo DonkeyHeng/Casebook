@@ -20,6 +20,8 @@
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成(含 CAS / 中文名);没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
 | POST | `/api/cases/{id}/sections/inherit` | **沿用上一工况**的工段(界区)边界:取同一模型(文件名)更早的工况已保存的结果,写进当前工况;同模型没有更早工况或那边没保存过 → 404 |
 | POST | `/api/cases/{id}/components/cas` | **手填组分 CAS**(body `{component, cas}`,`cas` 为空表示清除);按**模型**保存,重读工况不丢 |
+| GET | `/api/cases/{id}/pumps/{位号}/design-head` | 该泵手填的位压头 ΔZ / 管路阻力 Σhf(米);没填过返回两个 `null` |
+| POST | `/api/cases/{id}/pumps/{位号}/design-head` | 存这两项(body `{dz_m, hf_m}`,都为空表示清除);按模型+位号保存 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |
 | GET | `/api/cases/{id}/export-family.xlsx?family=pump` | 设备页右上角「导出 Excel」:只导**当前分类**的设备明细;分类键见 `/api/block-families`,泵分类含 p_v / NPSHₐ / 建议电机 |
 | GET | `/api/cases/{id}/export.ai.zip` | 导出 AI 分析包(给 AI 读);多一份 `pipe_schedule.csv` |

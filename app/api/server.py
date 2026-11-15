@@ -347,6 +347,9 @@ class Handler(BaseHTTPRequestHandler):
             # /api/cases/{id}/pumps/{设备}/pv —— 逐台保存饱和蒸气压(精度优先,不做估算)
             if path.startswith("/api/cases/"):
                 seg = [p for p in path.split("/") if p]
+                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "design-head":
+                    self._set_pump_design(seg[2], seg[4])
+                    return
                 if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "pv":
                     self._set_pump_pv(seg[2], seg[4])
                     return
@@ -413,6 +416,79 @@ class Handler(BaseHTTPRequestHandler):
                 "pv_source": "manual" if pv is not None else None,
             }
         )
+
+    def _pump_design(self, raw_id: str, block: str) -> None:
+        """GET …/pumps/{位号}/design-head —— 手填的位压头 / 管路阻力(米)。"""
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT model_name FROM cases WHERE id = ?", (case_id,)
+            ).fetchone()
+            if row is None:
+                self._error(f"没有 id={case_id} 的工况", 404)
+                return
+            data = db.read_pump_design(conn, str(row["model_name"] or ""), block)
+        finally:
+            conn.close()
+        self._json(
+            {
+                "ok": True,
+                "block": block,
+                **(data or {"dz_m": None, "hf_m": None}),
+            }
+        )
+
+    def _set_pump_design(self, raw_id: str, block: str) -> None:
+        """POST …/pumps/{位号}/design-head —— 存位压头 ΔZ 与管路阻力 Σhf(米)。
+
+        工具只负责 `H = 压升扬程 + ΔZ + Σhf` 的加法和 1.1 取整,**不估算这两项**
+        (ΔZ 是标高几何,Σhf 要管长/管件/λ,都属于人工程序)。两项都空 = 清除。
+        """
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        body = self._read_json_body()
+
+        def pick(key: str):
+            raw = body.get(key)
+            if raw in (None, ""):
+                return None
+            try:
+                val = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key} 必须是数字") from exc
+            if not -1000.0 <= val <= 5000.0:
+                raise ValueError(f"{key} 超出合理范围(-1000~5000 m)")
+            return val
+
+        try:
+            dz_m, hf_m = pick("dz_m"), pick("hf_m")
+        except ValueError as exc:
+            self._error(str(exc))
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT model_name FROM cases WHERE id = ?", (case_id,)
+            ).fetchone()
+            if row is None:
+                self._error(f"没有 id={case_id} 的工况", 404)
+                return
+            model_name = str(row["model_name"] or "").strip()
+            if not model_name:
+                self._error("这个工况没有记录模型名,无法挂手填值")
+                return
+            db.save_pump_design(conn, model_name, block, dz_m, hf_m)
+        finally:
+            conn.close()
+        self._json({"ok": True, "block": block, "dz_m": dz_m, "hf_m": hf_m})
 
     def _inherit_sections(self, raw_id: str) -> None:
         """把同模型更早工况保存过的工段边界搬过来,省掉重新拉一遍。
@@ -735,6 +811,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts[3] == "pipes":
                 self._pipes(conn, case_id, query)
+                return
+            if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "design-head":
+                self._pump_design(parts[2], parts[4])
                 return
             if parts[3] == "columns":
                 if len(parts) == 4:

@@ -115,6 +115,17 @@ CREATE TABLE IF NOT EXISTS component_cas (
     PRIMARY KEY (model_name, component)
 );
 
+-- 手动给的"设计扬程"修正项(按模型+位号):位压头 ΔZ 与管路阻力 Σhf,单位 m。
+-- Aspen 的泵扬程只有压升那一部分,这两项是几何/管路信息,只能人来填。
+CREATE TABLE IF NOT EXISTS pump_design (
+    model_name TEXT    NOT NULL,
+    block      TEXT    NOT NULL,
+    dz_m       REAL,
+    hf_m       REAL,
+    updated_at TEXT,
+    PRIMARY KEY (model_name, block)
+);
+
 CREATE TABLE IF NOT EXISTS blocks (
     case_id       INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
     name          TEXT    NOT NULL,
@@ -791,6 +802,47 @@ def previous_case_same_model(conn: sqlite3.Connection, case_id: int) -> int | No
         (case_id, case_id),
     ).fetchone()
     return int(row["id"]) if row else None
+
+
+def read_pump_design(
+    conn: sqlite3.Connection, model_name: str, block: str
+) -> dict | None:
+    """某台泵手填的位压头 / 管路阻力;没填过返回 None。"""
+    row = conn.execute(
+        "SELECT dz_m, hf_m FROM pump_design WHERE model_name = ? AND block = ?",
+        (str(model_name or "").strip(), str(block or "").strip()),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"dz_m": row["dz_m"], "hf_m": row["hf_m"]}
+
+
+def save_pump_design(
+    conn: sqlite3.Connection, model_name: str, block: str, dz_m, hf_m
+) -> bool:
+    """写一台泵的 ΔZ / Σhf;两项都为空表示清除。返回是否写到东西。"""
+    name = str(model_name or "").strip()
+    key = str(block or "").strip()
+    if not name or not key:
+        return False
+    if dz_m is None and hf_m is None:
+        cur = conn.execute(
+            "DELETE FROM pump_design WHERE model_name = ? AND block = ?", (name, key)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    conn.execute(
+        """
+        INSERT INTO pump_design (model_name, block, dz_m, hf_m, updated_at)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(model_name, block)
+        DO UPDATE SET dz_m = excluded.dz_m, hf_m = excluded.hf_m,
+                      updated_at = excluded.updated_at
+        """,
+        (name, key, dz_m, hf_m, _now()),
+    )
+    conn.commit()
+    return True
 
 
 def read_cas_map(conn: sqlite3.Connection, case_id: int, model_name: str) -> dict[str, str]:

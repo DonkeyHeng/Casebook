@@ -2982,6 +2982,29 @@ def test_component_dict() -> None:
         conn.close()
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # --- 设计扬程修正项:ΔZ / Σhf 按模型+位号存,加法与 1.1 取整由前端做
+    tmp3 = root / "data" / "preview" / "_selftest-pumpdesign"
+    shutil.rmtree(tmp3, ignore_errors=True)
+    tmp3.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, tmp3 / "c.db")
+    conn = db.open_db(str(tmp3 / "c.db"))
+    try:
+        row0 = conn.execute("SELECT * FROM cases ORDER BY id LIMIT 1").fetchone()
+        model = str(row0["model_name"] or "")
+        check_eq("设计扬程: 默认没有值", db.read_pump_design(conn, model, "P0101"), None)
+        db.save_pump_design(conn, model, "P0101", 9.45, 5.93)
+        got = db.read_pump_design(conn, model, "P0101")
+        check_eq("设计扬程: ΔZ 存住了", got["dz_m"], 9.45)
+        check_eq("设计扬程: Σhf 存住了", got["hf_m"], 5.93)
+        db.save_pump_design(conn, model, "P0101", 11.0, None)
+        got = db.read_pump_design(conn, model, "P0101")
+        check_eq("设计扬程: 可以只改一项", (got["dz_m"], got["hf_m"]), (11.0, None))
+        db.save_pump_design(conn, model, "P0101", None, None)
+        check_eq("设计扬程: 两项都清掉后不再返回", db.read_pump_design(conn, model, "P0101"), None)
+    finally:
+        conn.close()
+        shutil.rmtree(tmp3, ignore_errors=True)
+
     # --- 手填 CAS:按模型存,只补空缺,不覆盖读到的值
     tmp2 = root / "data" / "preview" / "_selftest-cas"
     shutil.rmtree(tmp2, ignore_errors=True)
