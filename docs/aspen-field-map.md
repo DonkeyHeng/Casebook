@@ -103,6 +103,11 @@ DSH 的 shell 跑在隔离环境里时,ROT 是**空的**(连 `Shell.Application`
 | CAS 号 | `<候选父>\<组分>\<CAS 字段>` | **位置未实测**。父路径候选见 `reader._COMPONENT_PARENTS`;字段名规范化后按 cas / casno / casnumber 匹配,允许嵌一层(如 `Alias\CAS`) |
 | 数据库名 | `\Data\Components\<ID>\<DBNAME 字段>` | 候选 `DBNAME1` / `DBNAME` / `DATABANK-NAME`;值形如 `ACROLEIN`、`1,3-PROPANEDIOL` |
 
+> **`STRM_UPP` 容器(2026-11-15 实测)**:物性集结果不在 `Output` 的直接子层,而在
+> `Output\STRM_UPP\...` 下 —— 已知有 `PBUB`(泡点压力,p_v 用)、`VISC`(粘度,算 Re 用)、`PL`。
+> 只把 VISC 加进物性集还不够,**结果要挂在「报告选项 → 流股 → 物性集」上并重跑**才会出现。
+> 读不到时用 `python tools/probe_viscosity.py` 看该层到底有哪些子节点。
+>
 > **实测进度(2026-11-15)**
 > 1. `\Data\Components` 第一层是分组,不是组分 —— 已确认(见上表第一行)。
 > 2. **COM 树里没有组分属性层**(2026-11-15 探针实测,模型 = 天津大学 `【4】…bkp`):

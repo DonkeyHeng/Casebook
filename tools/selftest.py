@@ -2755,6 +2755,20 @@ def test_hydraulics() -> None:
              ["管长 L", "管件系数 Σζ"])
     check_eq("管路: 粘度缺失也报出来", "粘度" in h.solve(4.32, 723.007, None, 32, 40, 1)["missing"], True)
 
+    # --- 粘度读取:路径顺序与单位换算(2026-11-15 修正:结果在 STRM_UPP 下)
+    from app.aspen import reader as reader_mod
+
+    check(
+        "粘度: STRM_UPP 变体排在最前",
+        reader_mod.VISC_STREAM_PATHS[0].startswith("STRM_UPP"),
+        reader_mod.VISC_STREAM_PATHS[0],
+    )
+    check_eq("粘度: cP 原样", reader_mod._to_cp("1.23", "cP"), 1.23)
+    check_eq("粘度: Pa·s 换算", reader_mod._to_cp(0.00123, "Pa-s"), 1.23)
+    check_eq("粘度: mPa·s 原样", reader_mod._to_cp(0.5, "mPa-s"), 0.5)
+    check_eq("粘度: 认不出的单位返回 None", reader_mod._to_cp("1.2", "kgf/m2"), None)
+    check_eq("粘度: 非数字返回 None", reader_mod._to_cp("abc", "cP"), None)
+
 
 # ---------------------------------------------------------------- 组分字典(CAS / 中文名)
 

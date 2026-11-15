@@ -945,13 +945,18 @@ def read_stream_vapor_pressure(session, stream_name: str):
     return None
 
 
-# 进口流股粘度的候选路径。实测(2026-11-15,浙大模型)Output 下 120 个子节点里
-# **没有任何粘度叶子** —— 和 p_v 一样,要模型在物性集里挂上 VISC 并重跑才有值。
-# 所以这里按候选名碰,读不到留 None,页面让用户手填(见参数卡的「粘度」一格)。
+# 进口流股粘度的候选路径。实测(2026-11-15):用户把 VISC 挂进物性集后,结果出现在
+# **Output\STRM_UPP\VISC** —— 和 p_v 的 PBUB 同在一个 STRM_UPP 容器里(那是 Aspen
+# 放"物性集结果"的地方)。第一版漏了 STRM_UPP 前缀,所以模型算出来了也读不到。
 VISC_STREAM_PATHS = (
-    r"VISCOSITYMIXED",
+    r"STRM_UPP\VISC\MIXED",
+    r"STRM_UPP\VISC",
+    r"STRM_UPP\VISCOSITY\MIXED",
+    r"STRM_UPP\VISCOSITY",
+    r"STRM_UPP\MU\MIXED",
+    r"VISCOSITY\MIXED",
     r"VISCOSITY",
-    r"VISCMIXED",
+    r"VISC",
     r"MU_LIQ",
     r"LIQUID-VISC",
 )
@@ -966,10 +971,18 @@ def _to_cp(value, unit) -> float | None:
     if num <= 0:
         return None
     text = str(unit or "").strip().lower().replace(" ", "").replace("·", "-")
-    if "cp" in text:
+    # 常见写法都收:cp / centipoise → ×1;mPa·s → ×1;Pa·s、kg/(m·s) → ×1000;
+    # poise(P、g/(cm·s)) = 0.1 Pa·s → ×100;lb/(ft·hr) → ×0.413
+    if "cp" in text or "centipoise" in text:
+        return num
+    if "mpa-s" in text or "mpas" in text:
         return num
     if "pa-s" in text or "pas" in text or "kg/m-s" in text or "kg/m/s" in text:
         return num * 1000.0
+    if text in ("p", "poise", "g/cm-s", "g/cm/s"):
+        return num * 100.0
+    if "lb/ft-hr" in text or "lb/ft/h" in text or "lbm/ft-hr" in text:
+        return num * 0.413
     return None
 
 
