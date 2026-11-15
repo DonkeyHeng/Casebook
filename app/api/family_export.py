@@ -139,7 +139,9 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
 
     label = block_family.FAMILY_LABELS.get(family, family)
     blocks = [
-        b for b in db.read_blocks(conn, case_id) if block_family.family_of(b["type"]) == family
+        b
+        for b in db.read_blocks(conn, case_id)
+        if block_family.family_of_block(b) == family
     ]
 
     wb = openpyxl.Workbook()

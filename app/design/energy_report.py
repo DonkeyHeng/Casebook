@@ -76,7 +76,7 @@ def tower_duties(blocks, stages) -> dict:
     out: dict[str, dict] = {}
     for block in blocks or []:
         name = block["name"]
-        if block_family.family_of(block.get("type")) != "column":
+        if block_family.family_of_block(block) != "column":
             continue
         cond = block.get("cond_duty_kw")
         reb = block.get("reb_duty_kw")
@@ -191,7 +191,7 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
     for block in blocks or []:
         name = block["name"]
         btype = block.get("type") or ""
-        family = block_family.family_of(btype)
+        family = block_family.family_of(btype, name)
         in_rows = ins.get(name, [])
         out_rows = outs.get(name, [])
         tower_info = tower_map.get(name)
@@ -266,14 +266,14 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
             power = block.get("power_kw")
             if power is not None:
                 ref_kind = (balance_results.get(name) or {}).get("ref_kind")
-                if ref_kind == "power" or family in ("pump", "move"):
+                if ref_kind == "power" or family in ("pump", "turbine", "move"):
                     shaft += float(power)
 
     # 反应热:按家族统计,不再依赖「不校验」状态(2026-11-14 起反应器也参与校验)
     reaction = sum(
         float(b.get("duty_kw") or 0.0)
         for b in blocks or []
-        if block_family.family_of(b.get("type")) == "react"
+        if block_family.family_of_block(b) == "react"
     )
     tower_reb = sum(t["reb_kw"] for t in towers if t["reb_kw"] is not None)
     tower_cond = sum(t["cond_kw"] for t in towers if t["cond_kw"] is not None)
@@ -284,7 +284,7 @@ def build(blocks, streams, connections, balance_results, tower=None) -> dict:
 
     groups: dict[str, list[dict]] = {}
     for row in devices:
-        family = block_family.family_of(row["type"])
+        family = block_family.family_of_block(row)
         groups.setdefault(family, []).append(row)
     order = [key for key, _label, _types in block_family.FAMILIES]
 

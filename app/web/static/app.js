@@ -97,6 +97,8 @@ const FAMILY_COLS = {
   react:  ["name", "type", "status", "duty", "outT", "message"],
   // 泵页:流量/扬程/效率/轴功率/建议电机/p_v/NPSHₐ;级数和热负荷在这里没有意义
   pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "pv", "npsh", "message"],
+  // 涡轮机:只关心流量/扬程/回收功率;NPSHₐ、选型电机对透平没有意义
+  turbine: ["name", "type", "status", "flow", "head", "power", "message"],
   move:   ["name", "type", "status", "power", "inT", "outT", "dh", "ref", "balance", "message"],
   mix:    ["name", "type", "status", "outT", "message"],
   other:  ["name", "type", "status", "message"],
@@ -107,7 +109,8 @@ const FAMILY_COLS = {
 const FAMILY_FALLBACK = [
   { key: "column", label: "塔" }, { key: "heat", label: "换热" },
   { key: "flash", label: "分离" }, { key: "react", label: "反应" },
-  { key: "pump", label: "泵" }, { key: "move", label: "流体输送" },
+  { key: "pump", label: "泵" }, { key: "turbine", label: "涡轮机" },
+  { key: "move", label: "流体输送" },
   { key: "mix", label: "混合分流" }, { key: "other", label: "其他" },
 ];
 
@@ -566,7 +569,7 @@ function rowsForTab() {
   // 设备页按家族筛;名称搜索只对流股页生效 —— 否则在流股页打过的关键词,
   // 切到设备页会"看不见地"把行筛掉。
   if (state.tab === "blocks") rows = rows.filter((r) => blockFamilyOf(r) === state.family);
-  const q = state.tab === "streams" ? state.filter.trim().toLowerCase() : "";
+  const q = state.filter.trim().toLowerCase();
   if (q) rows = rows.filter((r) => String(r.name).toLowerCase().includes(q));
 
   if (state.tab === "blocks") {
@@ -645,7 +648,9 @@ function renderBlocks() {
   }).join("")}</tr>`;
   tbody.innerHTML = rows.map((row) => {
     const isColumn = COLUMN_TYPE.test(row.type || "");
-    const isPump = String(row.type || "").toLowerCase() === "pump";
+    // 用后端下发的 family 判,不只看 type:位号 K 开头的透平 type 也是 "Pump",
+    // 但它在「涡轮机」页签里,不该弹泵参数卡
+    const isPump = row.family === "pump";
     return `<tr data-block="${esc(row.name)}">${cols.map((c) => {
       if (c.status) return `<td>${blockBadge(row.status)}</td>`;
       if (c.balance) return `<td>${balanceBadge(row.balance_state)}</td>`;
@@ -1102,6 +1107,38 @@ function highlightRow(idx) {
    流量/扬程由用户自己敲进去。 */
 const ZHONGLIAN_URL = "https://www.cipump.com/sbxx.html";
 
+/* 把中联表单要的三个数合成一行:粘贴比照抄不容易错。
+   数值用**显示值**(含余量系数),和参数卡上看到的一致。 */
+function pumpSpecLine(row) {
+  const margin = state.pump.margin || 1;
+  const scaled = (v, d) => (v === null || v === undefined ? "—" : fmt(v * margin, d));
+  const motor = row.motor_kw === null || row.motor_kw === undefined ? "—" : fmt(row.motor_kw, 1);
+  return `流量 ${scaled(row.flow_m3h, 2)} m³/h · 扬程 ${scaled(row.head_m, 2)} m · 配套功率 ${motor} kW`;
+}
+
+/* 剪贴板 API 需要安全上下文,127.0.0.1 算安全上下文;失败时退回 textarea 方案 */
+async function copyPlainText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (err) {
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.style.position = "fixed";
+    box.style.opacity = "0";
+    document.body.appendChild(box);
+    box.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (e) {
+      ok = false;
+    }
+    document.body.removeChild(box);
+    return ok;
+  }
+}
+
 /* 泵参数卡:把要抄进中联表单的那几个数摆出来。余量只影响显示,不改库 */
 function openPump(block) {
   const row = state.blocks.find((b) => b.name === block);
@@ -1146,6 +1183,18 @@ function openPump(block) {
   document.querySelector("#pumpTable thead").innerHTML =
     '<tr><th>参数</th><th class="num">值</th><th>来源</th></tr>';
   document.querySelector("#pumpTable tbody").innerHTML = rows.join("");
+
+  const copyBtn = document.getElementById("copyPumpSpec");
+  if (copyBtn) {
+    copyBtn.textContent = "复制选型参数";
+    copyBtn.onclick = async () => {
+      const ok = await copyPlainText(pumpSpecLine(row));
+      copyBtn.textContent = ok ? "已复制" : "复制失败,请手动选中";
+      setTimeout(() => {
+        copyBtn.textContent = "复制选型参数";
+      }, 1500);
+    };
+  }
 }
 
 async function openColumn(block) {
@@ -1574,7 +1623,8 @@ function syncToolbar(tab) {
   document.getElementById("compareHint").classList.toggle("hidden", isCompare);
   document.getElementById("compareControls").classList.toggle("hidden", !isCompare);
   document.getElementById("compareScope").classList.toggle("hidden", !isCompare);
-  document.getElementById("filter").classList.toggle("hidden", isCompare || isBlocks);
+  // 设备页也放开搜索框(2026-11-15):79 台泵里找一台,不放开只能翻页
+  document.getElementById("filter").classList.toggle("hidden", isCompare);
   document.getElementById("blockFamilies").classList.toggle("hidden", !isBlocks);
   document.getElementById("count").classList.toggle("hidden", isCompare);
   // 设备页右上角「导出 Excel」:只导当前分类;没有工况时禁用
@@ -2793,6 +2843,32 @@ function downloadReport(kind) {
 function bindReportPage() {
   const save = document.getElementById("reportSave");
   if (save) save.addEventListener("click", () => saveReportSections());
+
+  const inheritBtn = document.getElementById("reportInherit");
+  if (inheritBtn) {
+    inheritBtn.addEventListener("click", async () => {
+      const c = state.current;
+      if (!c) {
+        reportNotice("还没有工况", "warn");
+        return;
+      }
+      inheritBtn.disabled = true;
+      try {
+        const payload = await apiPost(`/api/cases/${c.id}/sections/inherit`, null);
+        const fresh = await api(`/api/cases/${c.id}/sections`);
+        state.report.data = fresh;
+        state.report.removed = new Set();
+        reportRenderSections(fresh);
+        reportNotice(
+          `已从工况 #${payload.from_case} 沿用 ${(payload.zones || []).length} 个工段,记得核对后保存`
+        );
+      } catch (err) {
+        reportNotice(`没沿用:${err.message}`, "warn");
+      } finally {
+        inheritBtn.disabled = false;
+      }
+    });
+  }
 
   const reset = document.getElementById("reportReset");
   if (reset) {

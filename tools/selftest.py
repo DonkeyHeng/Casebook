@@ -1855,13 +1855,22 @@ def test_block_family() -> None:
 
     check_eq("家族:RadFrac → 塔", fam.family_of("RadFrac"), "column")
     check_eq("家族:Pump → 泵(独立一族)", fam.family_of("Pump"), "pump")
-    check_eq("家族:Turbine → 流体输送", fam.family_of("Turbine"), "move")
+    check_eq("家族:Turbine → 涡轮机", fam.family_of("Turbine"), "turbine")
+    check_eq("家族:Pump + 位号 K → 涡轮机", fam.family_of("Pump", "K0101"), "turbine")
+    check_eq("家族:Pump + 位号 P → 泵", fam.family_of("Pump", "P0101"), "pump")
+    check_eq("家族:Pump 不给位号时按泵算", fam.family_of("Pump"), "pump")
+    check_eq("家族:k 开头小写也认", fam.family_of("pump", "k0201"), "turbine")
     check_eq("家族:未知类型 → 其他", fam.family_of("Welding"), "other")
     check_eq("家族:空类型 → 其他", fam.family_of(None), "other")
     check_eq("家族:大小写不敏感", fam.family_of("radfrac"), "column")
 
     blocks = [{"type": "Pump"}, {"type": "Pump"}, {"type": "RadFrac"}]
     check_eq("默认家族:有塔落塔", fam.pick_default(blocks), "column")
+    check_eq(
+        "家族计数:透平不算泵",
+        fam.counts([{"type": "Pump", "name": "P0101"}, {"type": "Pump", "name": "K0101"}]),
+        {"pump": 1, "turbine": 1},
+    )
     check_eq(
         "默认家族:无塔落第一个非空",
         fam.pick_default([{"type": "Pump"}, {"type": "Heater"}]),
@@ -1872,7 +1881,7 @@ def test_block_family() -> None:
     check_eq(
         "家族表顺序",
         [f["key"] for f in fam.describe()],
-        ["column", "heat", "flash", "react", "pump", "move", "mix", "other"],
+        ["column", "heat", "flash", "react", "pump", "turbine", "move", "mix", "other"],
     )
 
 

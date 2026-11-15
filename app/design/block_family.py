@@ -1,4 +1,4 @@
-"""设备家族:把 Aspen 的几十种块类型收敛成 7 个页签。
+"""设备家族:把 Aspen 的几十种块类型收敛成 8 个页签。
 
 为什么要这个模块
 ----------------
@@ -26,7 +26,10 @@ FAMILIES: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     # 泵单独一族:它有自己的一整套参数(流量/扬程/汽蚀/选型),和压缩机阀门混在一起
     # 会逼着每种列都带"对这台无意义"的留白。
     ("pump", "泵", ("Pump",)),
-    ("move", "流体输送", ("Compr", "MCompr", "Turbine", "Valve", "Pipe", "Mult")),
+    # 涡轮机/透平:位号以 K 开头的块在 Aspen 里也被标成 Pump 类型(实测 case56 有 6 台),
+    # 但它们是回收功的透平,不是泵 —— 混进泵页会把 NPSHₐ、选型这些"对透平无意义"的列全带上。
+    ("turbine", "涡轮机", ("Turbine",)),
+    ("move", "流体输送", ("Compr", "MCompr", "Valve", "Pipe", "Mult")),
     ("mix", "混合分流", ("Mixer", "FSplit", "Splitter")),
     ("other", "其他", ()),
 )
@@ -37,11 +40,41 @@ DEFAULT_FAMILY = "column"
 _LOOKUP: dict[str, str] = {btype.lower(): key for key, _label, types in FAMILIES for btype in types}
 
 
-def family_of(btype) -> str:
-    """块类型 → 家族 key。空值、未知类型一律 'other',不抛异常。"""
+# Aspen 把涡轮机也标成 Pump 类型,只能靠位号区分:P 开头是泵,K 开头是涡轮机。
+_TURBINE_PREFIX = "K"
+
+
+def family_of(btype, name=None) -> str:
+    """块类型 → 家族 key。空值、未知类型一律 'other',不抛异常。
+
+    传了 name 时会多看一位:类型是 Pump 但位号以 K 开头 → 涡轮机(见 FAMILIES 注释)。
+    不传 name 就只按类型判 —— 调用方拿不到位号时的保守退化。
+    """
     if not btype:
         return "other"
-    return _LOOKUP.get(str(btype).strip().lower(), "other")
+    key = _LOOKUP.get(str(btype).strip().lower(), "other")
+    if key == "pump" and name is not None:
+        if str(name).strip().upper().startswith(_TURBINE_PREFIX):
+            return "turbine"
+    return key
+
+
+def family_of_block(block) -> str:
+    """整个设备行 → 家族 key。
+
+    同时吃 dict 与 `sqlite3.Row`(前者有 .get、后者只能下标),所以这里不直接用 .get ——
+    实测把两者混用时会在 AI 包导出处炸成 `'sqlite3.Row' object has no attribute 'get'`。
+    """
+    if block is None:
+        return "other"
+
+    def pick(key):
+        try:
+            return block[key]
+        except (KeyError, IndexError, TypeError):
+            return None
+
+    return family_of(pick("type"), pick("name"))
 
 
 def describe() -> list[dict]:
@@ -53,7 +86,7 @@ def counts(blocks) -> dict[str, int]:
     """{家族 key: 台数},只统计出现过的。"""
     out: dict[str, int] = {}
     for block in blocks or []:
-        key = family_of(block.get("type"))
+        key = family_of_block(block)
         out[key] = out.get(key, 0) + 1
     return out
 

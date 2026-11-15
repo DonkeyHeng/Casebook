@@ -530,7 +530,12 @@ def _pump_streams(
     该流股**进入**这台设备,`"out"` 表示由这台设备产出。
     泵入口按 0.8 m/s 选型,泵出口不能沿用这个口径(V8)。
     """
-    pump_names = {b["name"] for b in blocks if str(b.get("type", "")).lower() == "pump"}
+    # 泵入口流速只对泵成立;位号 K 开头的透平不算泵(见 block_family 注释)
+    from . import block_family
+
+    pump_names = {
+        b["name"] for b in blocks if block_family.family_of_block(b) == "pump"
+    }
     inlets, outlets = set(), set()
     for c in connections:
         if c.get("block") not in pump_names:

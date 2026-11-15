@@ -358,6 +358,10 @@ class Handler(BaseHTTPRequestHandler):
                 if len(seg) == 4 and seg[3] == "sections":
                     self._save_sections(seg[2])
                     return
+                # /api/cases/{id}/sections/inherit —— 沿用同模型更早工况的工段边界
+                if len(seg) == 5 and seg[3] == "sections" and seg[4] == "inherit":
+                    self._inherit_sections(seg[2])
+                    return
                 # /api/cases/{id}/components/cas —— 手填某个组分的 CAS(按模型存)
                 if len(seg) == 5 and seg[3] == "components" and seg[4] == "cas":
                     self._set_component_cas(seg[2])
@@ -408,6 +412,49 @@ class Handler(BaseHTTPRequestHandler):
                 "pv_bar": pv,
                 "pv_source": "manual" if pv is not None else None,
             }
+        )
+
+    def _inherit_sections(self, raw_id: str) -> None:
+        """把同模型更早工况保存过的工段边界搬过来,省掉重新拉一遍。
+
+        只在当次请求里搬 —— 搬完写进 data/config/sections.json 的当前工况键下,
+        之后照常可编辑、可保存。源工况没有保存过边界就报 404,不去猜。
+        """
+        from app.api import report_config
+
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            if conn.execute("SELECT 1 FROM cases WHERE id = ?", (case_id,)).fetchone() is None:
+                self._error(f"没有 id={case_id} 的工况", 404)
+                return
+            prev = db.previous_case_same_model(conn, case_id)
+        finally:
+            conn.close()
+        if prev is None:
+            self._error("同一模型没有更早的工况可以沿用", 404)
+            return
+        parts, overrides, _deleted, err = report_config.load(prev)
+        if err:
+            self._error(err, 500)
+            return
+        if not parts and not overrides:
+            self._error(f"工况 #{prev} 没有保存过工段边界,无从沿用", 404)
+            return
+        ok, save_errors = report_config.save(case_id, parts, overrides)
+        self._json(
+            {
+                "ok": ok,
+                "from_case": prev,
+                "errors": save_errors,
+                "zones": sorted(parts.keys()),
+                "config": report_config.status(),
+            },
+            200 if ok else 500,
         )
 
     def _set_component_cas(self, raw_id: str) -> None:
@@ -663,7 +710,7 @@ class Handler(BaseHTTPRequestHandler):
                 for row in db.read_blocks(conn, case_id):
                     item = _row_to_dict(row)
                     # 家族在 API 层现算,不入库:老工况不用迁移也能分页签
-                    item["family"] = block_family.family_of(item.get("type"))
+                    item["family"] = block_family.family_of_block(item)
                     rows.append(item)
                 self._json(rows)
                 return
@@ -967,7 +1014,9 @@ class Handler(BaseHTTPRequestHandler):
         for key in _q("families").replace(" ", "").split(","):
             if key:
                 picked.update(
-                    b["name"] for b in blocks if block_family.family_of(b.get("type")) == key
+                    b["name"]
+            for b in blocks
+            if block_family.family_of_block(b) == key
                 )
         keys = {b["name"] for b in blocks}
         picked_list = sorted(picked & keys) or None
@@ -1610,7 +1659,10 @@ def build_workbook(conn, case_id: int) -> bytes:
     )
 
     # --- 泵参数(只有 Pump 块有值;老工况这些列是空的,不是 0)---
-    pumps = [b for b in blocks if str(b["type"] or "").strip().lower() == "pump"]
+    from app.design import block_family as _bf
+
+    # 位号 K 开头的透平在 Aspen 里也是 Pump 类型,但不算泵(见 block_family 注释)
+    pumps = [b for b in blocks if _bf.family_of_block(b) == "pump"]
     if pumps:
         from app.design import pump as pump_rules
 

@@ -389,7 +389,14 @@ def _composition_csv(rows, cas_map: dict[str, str] | None = None) -> bytes:
 
 def _pump_blocks(blocks) -> list:
     """只挑 Pump 块。类型名大小写不保证,统一转小写比。"""
-    return [b for b in blocks if str(b["type"] or "").strip().lower() == "pump"]
+    from app.design import block_family
+
+    # 位号 K 开头的透平在 Aspen 里也是 Pump 类型,不能算泵(见 block_family 注释)
+    return [
+        b
+        for b in blocks
+        if block_family.family_of_block(b) == "pump"
+    ]
 
 
 def has_pumps(blocks) -> bool:
