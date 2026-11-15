@@ -773,6 +773,26 @@ def save_component_cas(
     return True
 
 
+def previous_case_same_model(conn: sqlite3.Connection, case_id: int) -> int | None:
+    """同一模型里更早的一个工况 id;没有返回 None。
+
+    模型身份沿用项目既有口径:文件名(cases.model_name)。“同模型”= 文件名完全一致。
+    """
+    row = conn.execute(
+        """
+        SELECT id FROM cases
+        WHERE id < ?
+          AND COALESCE(model_name, '') = COALESCE(
+              (SELECT model_name FROM cases WHERE id = ?), ''
+          )
+          AND COALESCE(model_name, '') <> ''
+        ORDER BY id DESC LIMIT 1
+        """,
+        (case_id, case_id),
+    ).fetchone()
+    return int(row["id"]) if row else None
+
+
 def read_cas_map(conn: sqlite3.Connection, case_id: int, model_name: str) -> dict[str, str]:
     """组分 → CAS 的合并视图:Aspen / 模型文件读到的优先,读不到才用手填的。
 

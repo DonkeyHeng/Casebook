@@ -1,7 +1,8 @@
 # 衡算报告方案(物料衡算 · 能量衡算 · Word 导出)
 
 > 版本:2026-11-14
-> 状态:**方案已确认,待实现**。按 §9 的五步顺序落地。
+> 状态:**已实现并随 v1.2.0 发布**(2026-11-15 更新状态行;方案内容保持不动)。
+> 使用说明见 [balance-report.md](balance-report.md),实现落点见 §9 的五步。
 > 代码依据:`app/aspen/balance.py`(焓平衡纯函数)、`app/store/db.py`(四张表字段)、
 > `app/api/family_export.py`(导出风格)、`tools/selftest.py`(回归自测)。
 > 实测依据:本地库 `data/cases.db` 的 9 个工况、653 台设备、121 流股/工况;

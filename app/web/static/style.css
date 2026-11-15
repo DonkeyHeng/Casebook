@@ -1010,6 +1010,16 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
 }
 .link-btn:hover { text-decoration-style: solid; }
 
+/* 泵参数卡顶部:提示文字 + 一键复制,窄侧栏里一行放得下 */
+.pump-panel-tools {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pump-panel-tools .pump-panel-hint { margin: 0; }
+
 /* 手填 CAS 的小清单:窄侧栏里一行一个组分 + 输入框 */
 .cas-edit-list {
   flex: 1 1 auto;

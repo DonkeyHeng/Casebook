@@ -1049,6 +1049,9 @@ def _mass_chapter(doc, data: dict, cap: "_Captions", chapter: str = "1") -> None
         _figure_slot(doc, f"{zone['label']}流程图")
         _wide_table(doc, zone, cap, chapter, title=f"{zone['label']}物料平衡表")
 
+    # 附注里要列"本册该贴几张图":流程图是人工贴的,漏贴没人提醒(2026-11-15)
+    data["_figures"] = [f"{zone['label']}流程图" for zone in wide["zones"]] + ["全流程图"]
+
     _heading(doc, f"{chapter}.2 全流程物料平衡表", 2)
     _para(
         doc,
@@ -1353,6 +1356,12 @@ def _notes_chapter(doc, data: dict) -> None:
         "量级大（10% 以上）才值得查模型。",
         "本报告由 Casebook 自动生成，用于内部校核与存档，不能作为工程设计依据。",
     ]
+    figures = data.get("_figures") or []
+    if figures:
+        notes.append(
+            f"本册共 {len(figures)} 张流程图需人工贴入：{'、'.join(figures)}。"
+            "正文各处已留虚线框并标注「图片插入处」，贴完请逐条核对。"
+        )
     for text in notes:
         _para(doc, f"· {text}", None, False, WD_ALIGN_PARAGRAPH.LEFT, space_after=4)
 

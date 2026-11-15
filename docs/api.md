@@ -18,6 +18,7 @@
 | POST | `/api/sample/install` | 把内置示例工况装进当前库(**先备份原库为 `cases.db.bak`**);首页「载入示例工况」按钮用它,效果同 `--sample` |
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股 / 设备 / 连接 / 塔剖面 / 组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成(含 CAS / 中文名);没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
+| POST | `/api/cases/{id}/sections/inherit` | **沿用上一工况**的工段(界区)边界:取同一模型(文件名)更早的工况已保存的结果,写进当前工况;同模型没有更早工况或那边没保存过 → 404 |
 | POST | `/api/cases/{id}/components/cas` | **手填组分 CAS**(body `{component, cas}`,`cas` 为空表示清除);按**模型**保存,重读工况不丢 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道」「管道计算书」两张表 |
 | GET | `/api/cases/{id}/export-family.xlsx?family=pump` | 设备页右上角「导出 Excel」:只导**当前分类**的设备明细;分类键见 `/api/block-families`,泵分类含 p_v / NPSHₐ / 建议电机 |

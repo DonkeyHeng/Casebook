@@ -1,3 +1,5 @@
 pywin32>=306
 openpyxl>=3.1
 python-docx>=1.1
+# 仅 tools/ui_sweep.py(无头浏览器扫页面 console 报错)需要,不影响主程序运行
+websocket-client>=1.6
