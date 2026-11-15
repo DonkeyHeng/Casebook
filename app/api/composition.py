@@ -196,7 +196,7 @@ def _read_meta(conn, case) -> dict[str, dict]:
         }
         for r in db.read_components(conn, case["id"])
     }
-    for comp, cas in db.read_component_cas(conn, str(case["model_name"] or "")).items():
+    for comp, cas in db.read_component_cas(conn, db.model_key(conn, case["id"])).items():
         row = meta.setdefault(comp, {"cas": None, "dbname": None, "source": None})
         if not row.get("cas"):
             row["cas"] = cas

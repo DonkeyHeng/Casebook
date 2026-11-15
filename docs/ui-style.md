@@ -110,7 +110,7 @@ JS 里取颜色统一用 `cssVar("--chart-1")`(定义在 `app.js`),
 
    ```bash
    python -m app.api --port 8000            # 另开一个窗口起服务
-   python -m tools.ui_sweep                 # 6 个页签 × 浅色/深色,截图 + 抓控制台报错
+   python -m tools.ui_sweep                 # 7 个页签 × 浅色/深色,截图 + 抓控制台报错
    ```
 
    截图落在 `data/preview/ui-check/`(已 gitignore),退出码非 0 就是有报错。

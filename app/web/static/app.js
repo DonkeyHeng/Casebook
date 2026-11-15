@@ -19,11 +19,20 @@ const state = {
   families: [],            // 家族表(/api/block-families)
   pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
   pump: { margin: 1 },  // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
-  // 设计扬程辅助:位压头 ΔZ 与管路阻力 Σhf(米),按模型+位号存,由用户手填
+  // 设计扬程辅助:按模型+位号存 ΔZ / Σhf / 管长 L / Σζ / 管件数量;
+  // 内径、粘度、粗糙度是现取的自动值(刷新会重取),不持久化
   pumpDesign: {
     dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
     idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
+    // 只记用户手改过的自动取值;没改过的不存,免得模型换了还显示旧值
+    manual: { idMm: null, muCp: null, epsMm: null },
+    // λ 口径:后端三法并存,前端原来写死默认 Colebrook,这里给用户选
+    lambdaMethod: "colebrook", lambdaManual: null,
   },
+  pumpSelection: null,
+  // 泵参数卡三个折叠区的展开状态(同一会话内切设备回来保持);
+  // 详细参数是主读数,默认展开;两块人填区默认收起
+  pumpFold: { params: true, design: false, selection: false },
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
   impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
@@ -792,15 +801,18 @@ function renderCompare() {
   thead.innerHTML = `<tr>${head.map((h, i) =>
     `<th class="${i === 0 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
 
-  const q = state.filter.trim().toLowerCase();
-  const rows = (data.streams || []).filter((r) => !q || r.name.toLowerCase().includes(q));
+  // 对比数据是接口给的;缺字段时只显示「—」,不抛 TypeError 让整块表格空白
+  const q = String(state.filter || "").trim().toLowerCase();
+  const rows = (data.streams || []).filter(
+    (r) => !q || String(r.name || "").toLowerCase().includes(q));
 
   tbody.innerHTML = rows.map((r) => {
     const cells = [`<td class="name">${esc(r.name)}</td>`];
+    const delta = r.delta || {};
     COMPARE_FIELDS.forEach((f) => {
       const a = r.base ? r.base[f.key] : null;
       const b = r.other ? r.other[f.key] : null;
-      const d = r.delta[f.key];
+      const d = delta[f.key] ?? null;
       const cls = d === null || d === undefined || d === 0 ? "" : "changed";
       cells.push(`<td class="num">${fmt(a, f.digits)}</td>`);
       cells.push(`<td class="num">${fmt(b, f.digits)}</td>`);
@@ -809,11 +821,13 @@ function renderCompare() {
     return `<tr>${cells.join("")}</tr>`;
   }).join("");
 
-  const s = data.summary;
+  const s = data.summary || {};
+  const onlyA = (s.only_base || []).length;
+  const onlyB = (s.only_other || []).length;
   document.getElementById("count").textContent =
-    `${rows.length} 行 · 共同 ${s.common} · 有变化 ${s.changed}`
-    + (s.only_base.length ? ` · 仅 A ${s.only_base.length}` : "")
-    + (s.only_other.length ? ` · 仅 B ${s.only_other.length}` : "");
+    `${rows.length} 行 · 共同 ${s.common ?? "—"} · 有变化 ${s.changed ?? "—"}`
+    + (onlyA ? ` · 仅 A ${onlyA}` : "")
+    + (onlyB ? ` · 仅 B ${onlyB}` : "");
 }
 
 /* 设备对比:负荷/功率/级数/顶底温/ΔH 各出一组 A/B/Δ;状态与焓平衡各一列(变了就显示 A → B) */
@@ -823,8 +837,9 @@ function renderCompareBlocks(thead, tbody, data) {
   thead.innerHTML = `<tr>${head.map((h, i) =>
     `<th class="${i === 0 ? "cmp-name" : i < 4 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
 
-  const q = state.filter.trim().toLowerCase();
-  const rows = (data.blocks || []).filter((r) => !q || r.name.toLowerCase().includes(q));
+  const q = String(state.filter || "").trim().toLowerCase();
+  const rows = (data.blocks || []).filter(
+    (r) => !q || String(r.name || "").toLowerCase().includes(q));
 
   /* 判定不能相减,只能并排:一致就只显示一个徽标,变了才 A → B */
   const pairCell = (a, b, render) => {
@@ -851,10 +866,11 @@ function renderCompareBlocks(thead, tbody, data) {
       pairCell(sa, sb, blockBadge),
       pairCell(ba, bb, balanceBadge),
     ];
+    const delta = r.delta || {};
     BLOCK_COMPARE_FIELDS.forEach((f) => {
       const a = r.base ? r.base[f.key] : null;
       const b = r.other ? r.other[f.key] : null;
-      const d = r.delta[f.key];
+      const d = delta[f.key] ?? null;
       const cls = d === null || d === undefined || d === 0 ? "" : "changed";
       cells.push(`<td class="num">${fmt(a, f.digits)}</td>`);
       cells.push(`<td class="num">${fmt(b, f.digits)}</td>`);
@@ -863,11 +879,13 @@ function renderCompareBlocks(thead, tbody, data) {
     return `<tr>${cells.join("")}</tr>`;
   }).join("");
 
-  const s = data.summary;
+  const s = data.summary || {};
+  const onlyA = (s.block_only_base || []).length;
+  const onlyB = (s.block_only_other || []).length;
   document.getElementById("count").textContent =
-    `${rows.length} 行 · 共同 ${s.block_common} · 有变化 ${s.block_changed}`
-    + (s.block_only_base.length ? ` · 仅 A ${s.block_only_base.length}` : "")
-    + (s.block_only_other.length ? ` · 仅 B ${s.block_only_other.length}` : "");
+    `${rows.length} 行 · 共同 ${s.block_common ?? "—"} · 有变化 ${s.block_changed ?? "—"}`
+    + (onlyA ? ` · 仅 A ${onlyA}` : "")
+    + (onlyB ? ` · 仅 B ${onlyB}` : "");
 }
 
 function renderTable() {
@@ -1146,6 +1164,17 @@ async function copyPlainText(text) {
 }
 
 /* 泵参数卡:把要抄进中联表单的那几个数摆出来。余量只影响显示,不改库 */
+/* 详细参数折叠头收起时的一行摘要。缺数据走 fmt 的「—」,不拿 0 顶替。 */
+function pumpParamsBrief(row) {
+  return `流量 ${fmt(row.flow_m3h, 2)} m³/h · 压升扬程 ${fmt(row.head_m, 2)} m`
+    + ` · 建议电机 ${fmt(row.motor_kw, 1)} kW`;
+}
+
+function fillPumpParamsBrief(row) {
+  const brief = document.getElementById("pumpParamsBrief");
+  if (brief) brief.textContent = pumpParamsBrief(row);
+}
+
 function openPump(block) {
   const row = state.blocks.find((b) => b.name === block);
   if (!row) return;
@@ -1155,7 +1184,9 @@ function openPump(block) {
   document.getElementById("pumpTitle").textContent = `泵参数 · ${block}`;
   panel.classList.remove("hidden");
   markDrawerOpened();
-  panel.scrollTop = 0;
+  // 抽屉本身不滚,滚的是里面那条唯一的滚动容器
+  const scroll = panel.querySelector(".pump-panel-scroll");
+  if (scroll) scroll.scrollTop = 0;
 
   const margin = state.pump.margin || 1;
   const spec = state.pumpSpec;
@@ -1194,6 +1225,8 @@ function openPump(block) {
   document.querySelector("#pumpTable thead").innerHTML =
     '<tr><th>参数</th><th class="num">值</th><th>来源</th></tr>';
   document.querySelector("#pumpTable tbody").innerHTML = rows.join("");
+  fillPumpParamsBrief(row);
+  bindPumpFold(document.getElementById("pumpParams"), "params");
 
   const copyBtn = document.getElementById("copyPumpSpec");
   if (copyBtn) {
@@ -1208,6 +1241,7 @@ function openPump(block) {
   }
 
   loadPumpDesign(row);
+  loadPumpSelection(row);
 }
 
 /* ------------------------------------------------------------ 设计扬程辅助
@@ -1217,6 +1251,31 @@ function openPump(block) {
      Σhf 管路阻力 —— 要管长/管件/λ,属于水力计算
    两项都只能人工给,工具只做加法与 1.1 取整,不估算(项目一贯口径)。 */
 const PUMP_DESIGN_MARGIN = 1.1; // 手册惯例;两处设计算例都用 1.1
+const LAMBDA_LABELS = { colebrook: "Colebrook", gu: "顾毓珍", manual: "手填 λ" };
+
+/* 手填值统一规范:非有限数字一律 null —— 缺数据不拿 0 或常见值顶替。 */
+function pumpDesignNum(v) {
+  return typeof v === "number" && isFinite(v) ? v : null;
+}
+
+/* 「设计扬程」「选型台账」都收进 <details>:收起时只留一行标题 + 结论摘要,
+   泵参数卡不再被两长条输入挤满。同一会话里记住展开状态,切设备回来不用反复点开;
+   注意 innerHTML 重写不会清掉 <details> 的 open 属性。 */
+function bindPumpFold(box, key) {
+  if (!box) return;
+  // 逐项补默认,兼容只有 design/selection 两个 key 的旧 state
+  if (!state.pumpFold) state.pumpFold = {};
+  if (state.pumpFold.params === undefined) state.pumpFold.params = true;
+  if (state.pumpFold.design === undefined) state.pumpFold.design = false;
+  if (state.pumpFold.selection === undefined) state.pumpFold.selection = false;
+  if (!box.dataset.foldBound) {
+    box.dataset.foldBound = "1";
+    box.addEventListener("toggle", () => {
+      state.pumpFold[key] = box.open;
+    });
+  }
+  box.open = !!state.pumpFold[key];
+}
 
 /* 常用管件的局部阻力系数 ζ。数值取自设计手册的常用值(同一份算例里两种取法并存),
    只作为"数管件"的辅助,勾完仍可手改 Σζ —— 不给任何默认数量,没勾就是 0。 */
@@ -1288,12 +1347,18 @@ function renderPumpDesign(row) {
     : calc.missing && calc.missing.length
       ? `缺:${calc.missing.join("、")}`
       : `u = ${fmt(calc.u_ms, 2)} m/s · Re = ${fmt(calc.re, 0)} · λ = ${fmt(calc.lam, 4)}` +
-        ` · ε/d = ${calc.eps_d === null ? "—" : (calc.eps_d * 1000).toFixed(2) + "‰"}`;
+        ` · ε/d = ${calc.eps_d == null || !isFinite(calc.eps_d)
+          ? "—" : (calc.eps_d * 1000).toFixed(2) + "‰"}` +
+        (calc.method ? ` · ${LAMBDA_LABELS[calc.method] || calc.method}` : "");
+  const brief = total === null
+    ? '<span class="muted">待填 ΔZ / Σhf</span>'
+    : `<span class="muted">${fmt(total, 2)} m → 选型 ${padded} m</span>`;
   box.innerHTML = `
-    <div class="pump-design-head">
-      <span>设计扬程</span>
-      <span class="muted">ΔZ / L / Σζ 由你填,工具不估算</span>
-    </div>
+    <summary class="pump-fold-summary" title="ΔZ / L / Σζ 由你填,工具不估算">
+      <span class="pump-fold-title">设计扬程</span>
+      ${brief}
+      <span class="pump-fold-mark" aria-hidden="true"></span>
+    </summary>
     <div class="pump-design-inputs">
       <label>ΔZ m ${val("dz", "如 9.45")}</label>
       <label>Σhf m ${val("hf", "如 5.93")}</label>
@@ -1305,6 +1370,19 @@ function renderPumpDesign(row) {
         val("idMm", state.pumpDesign.idNote ? "超档,手填" : "自动")}</label>
       <label>粘度 cP ${val("muCp", "自动")}</label>
       <label>粗糙度 mm ${val("epsMm", "0.05")}</label>
+    </div>
+    <div class="pump-design-inputs pump-design-lambda">
+      <label>λ 口径
+        <select class="pump-design-select" data-key="lambdaMethod" aria-label="λ 口径">
+          <option value="colebrook"${state.pumpDesign.lambdaMethod === "colebrook" ? " selected" : ""}>Colebrook(默认)</option>
+          <option value="gu"${state.pumpDesign.lambdaMethod === "gu" ? " selected" : ""}>顾毓珍</option>
+          <option value="manual"${state.pumpDesign.lambdaMethod === "manual" ? " selected" : ""}>手填</option>
+        </select>
+      </label>
+      ${state.pumpDesign.lambdaMethod === "manual"
+        ? `<label>λ 值 ${val("lambdaManual", "如 0.028")}</label>`
+        : ""}
+      <span class="muted">默认 Colebrook;两份算例口径不同,别混用</span>
     </div>
     ${state.pumpDesign.idNote
       ? `<p class="pump-design-note">内径没给:${esc(state.pumpDesign.idNote)}</p>`
@@ -1330,7 +1408,12 @@ function renderPumpDesign(row) {
       const key = e.target.dataset.key;
       const raw = e.target.value.trim();
       const parsed = raw === "" ? null : Number(raw);
-      state.pumpDesign[key] = parsed !== null && isFinite(parsed) ? parsed : null;
+      const value = parsed !== null && isFinite(parsed) ? parsed : null;
+      state.pumpDesign[key] = value;
+      // 这三项原本是自动取值;只有人改过才记进 overrides,免得模型换了还显示旧值
+      if (key === "idMm" || key === "muCp" || key === "epsMm") {
+        state.pumpDesign.manual[key] = value;
+      }
       refreshPumpDesignSum(row);
     });
     input.addEventListener("change", () => savePumpDesign(row));
@@ -1342,10 +1425,21 @@ function renderPumpDesign(row) {
       state.pumpDesign.fittings[key] = Number.isFinite(count) && count > 0 ? count : 0;
       applyFittings();
       renderPumpDesign(row);
+      savePumpDesign(row);   // 管件数量也按模型+位号存,刷新不丢
+    });
+  });
+  box.querySelectorAll(".pump-design-select").forEach((sel) => {
+    sel.addEventListener("change", (e) => {
+      const v = e.target.value;
+      state.pumpDesign.lambdaMethod = ["colebrook", "gu", "manual"].includes(v)
+        ? v : "colebrook";
+      renderPumpDesign(row);   // 手填 λ 输入框随方法显隐
+      savePumpDesign(row);     // 口径也按模型 + 位号存,刷新不丢
     });
   });
   const calcBtn = document.getElementById("pumpCalcHf");
   if (calcBtn) calcBtn.onclick = () => computeHeadLoss(row);
+  bindPumpFold(box, "design");
   refreshPumpDesignSum(row);
 }
 
@@ -1361,11 +1455,21 @@ async function computeHeadLoss(row) {
     if (line) line.textContent = "先填 Σζ(弯头/阀门的局部阻力之和)";
     return;
   }
+  const method = ["colebrook", "gu", "manual"].includes(d.lambdaMethod)
+    ? d.lambdaMethod : "colebrook";
+  const lam = pumpDesignNum(d.lambdaManual);
+  if (method === "manual" && lam === null) {
+    if (line) line.textContent = "选手填口径时先填 λ 值";
+    return;
+  }
   if (line) line.textContent = "计算中…";
   try {
     const res = await apiPost(
       `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/head-loss`,
-      { l_m: d.l, zeta_sum: d.zeta, d_mm: d.idMm, eps_mm: d.epsMm, mu_cp: d.muCp }
+      {
+        l_m: d.l, zeta_sum: d.zeta, d_mm: d.idMm, eps_mm: d.epsMm, mu_cp: d.muCp,
+        method, ...(method === "manual" ? { lam } : {}),
+      }
     );
     d.calc = res;
     if (typeof res.hf_m === "number") {
@@ -1384,14 +1488,38 @@ async function loadPumpDesign(row) {
   state.pumpDesign = {
     dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
     idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
+    manual: { idMm: null, muCp: null, epsMm: null },
+    lambdaMethod: "colebrook", lambdaManual: null,
   };
   renderPumpDesign(row);
   const cid = state.current.id;
   const name = encodeURIComponent(row.name);
   try {
     const saved = await api(`/api/cases/${cid}/pumps/${name}/design-head`);
-    state.pumpDesign.dz = typeof saved.dz_m === "number" ? saved.dz_m : null;
-    state.pumpDesign.hf = typeof saved.hf_m === "number" ? saved.hf_m : null;
+    state.pumpDesign.dz = pumpDesignNum(saved.dz_m);
+    state.pumpDesign.hf = pumpDesignNum(saved.hf_m);
+    state.pumpDesign.l = pumpDesignNum(saved.l_m);
+    // zeta_json 服务端已解析成对象;老服务没这个字段时整块保持空,不猜值
+    const z = saved.zeta_json && typeof saved.zeta_json === "object" ? saved.zeta_json : null;
+    state.pumpDesign.zeta = z ? pumpDesignNum(z.zeta_sum) : null;
+    if (z && z.fittings && typeof z.fittings === "object") {
+      PUMP_FITTINGS.forEach((f) => {
+        const n = z.fittings[f.key];
+        state.pumpDesign.fittings[f.key] = Number.isInteger(n) && n > 0 ? n : 0;
+      });
+    }
+    const ov = z && z.overrides && typeof z.overrides === "object" ? z.overrides : null;
+    [["idMm", "id_mm"], ["muCp", "mu_cp"], ["epsMm", "eps_mm"]].forEach(([key, jsonKey]) => {
+      const v = ov ? pumpDesignNum(ov[jsonKey]) : null;
+      state.pumpDesign.manual[key] = v;
+      if (v !== null) state.pumpDesign[key] = v;
+    });
+    const lam = z && z.lambda && typeof z.lambda === "object" ? z.lambda : null;
+    if (lam) {
+      state.pumpDesign.lambdaMethod = ["colebrook", "gu", "manual"].includes(lam.method)
+        ? lam.method : "colebrook";
+      state.pumpDesign.lambdaManual = pumpDesignNum(lam.manual);
+    }
     renderPumpDesign(row);
   } catch (err) {
     // 读不到就是没填过 / 老服务:保持空,不影响主功能
@@ -1415,13 +1543,145 @@ async function loadPumpDesign(row) {
 }
 
 async function savePumpDesign(row) {
+  const d = state.pumpDesign;
+  const dz = pumpDesignNum(d.dz), hf = pumpDesignNum(d.hf);
+  const l = pumpDesignNum(d.l), zeta = pumpDesignNum(d.zeta);
+  const fittings = {};
+  PUMP_FITTINGS.forEach((f) => {
+    const n = d.fittings && d.fittings[f.key];
+    fittings[f.key] = Number.isInteger(n) && n > 0 ? n : 0;
+  });
+  const manual = d.manual || {};
+  const overrides = {
+    id_mm: pumpDesignNum(manual.idMm),
+    mu_cp: pumpDesignNum(manual.muCp),
+    eps_mm: pumpDesignNum(manual.epsMm),
+  };
+  const hasOverride = Object.values(overrides).some((v) => v !== null);
+  const method = ["colebrook", "gu", "manual"].includes(d.lambdaMethod)
+    ? d.lambdaMethod : "colebrook";
+  const lambda = { method, manual: method === "manual" ? pumpDesignNum(d.lambdaManual) : null };
+  const hasLambda = method !== "colebrook" || lambda.manual !== null;
+  // 全空 = 清除这一行:发全 null 让后端删记录,别留一条空挂账
+  const empty = dz === null && hf === null && l === null && zeta === null
+    && !Object.values(fittings).some((n) => n > 0) && !hasOverride && !hasLambda;
   try {
     await apiPost(
       `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/design-head`,
-      { dz_m: state.pumpDesign.dz, hf_m: state.pumpDesign.hf }
+      {
+        dz_m: empty ? null : dz,
+        hf_m: empty ? null : hf,
+        l_m: empty ? null : l,
+        zeta_json: empty ? null : { zeta_sum: zeta, fittings, overrides, lambda },
+      }
     );
   } catch (err) {
     reportNotice(`设计扬程没保存:${err.message}`, "warn");
+  }
+}
+
+/* ------------------------------------------------------------ 泵选型台账
+
+   台账只存人工决定的字段;数值一律由后端按当前工况实时算(compute_view),
+   不从任何外部 Excel 导入、不反推、不落库。三态只说
+   「满足 / 不满足 / 无法判定」,不写「验过」这类断言 —— 工具没有型谱数据。 */
+function renderPumpSelection(row, data) {
+  const box = document.getElementById("pumpSelection");
+  if (!box) return;
+  const s = data.saved || {};
+  const input = (key, ph = "") =>
+    `<input class="pump-design-input pump-sel-input" data-sel="${key}" placeholder="${ph}"
+            value="${s[key] === null || s[key] === undefined ? "" : esc(String(s[key]))}"
+            aria-label="${key}">`;
+  const kv = (label, value, unit = "") =>
+    `<span class="pump-sel-kv">${label} <b>${
+      value === null || value === undefined ? "—" : esc(String(value)) + unit
+    }</b></span>`;
+  const stateText = { ok: "满足", bad: "不满足", unknown: "无法判定" }[data.npsh_state]
+    || "无法判定";
+  const modelBrief = s.model_no
+    ? `<span class="muted">${esc(String(s.model_no))}</span>`
+    : '<span class="muted">未填型号</span>';
+  box.innerHTML = `
+    <summary class="pump-fold-summary" title="只记「选了什么」,数值以当前工况为准">
+      <span class="pump-fold-title">选型台账</span>
+      ${modelBrief}
+      <span class="pump-sel-state-mini" data-state="${esc(data.npsh_state)}">${stateText}</span>
+      <span class="pump-fold-mark" aria-hidden="true"></span>
+    </summary>
+    <div class="pump-sel-live">
+      ${kv("流量", fmt(data.flow_m3h, 2), " m³/h")}
+      ${kv("设计扬程", fmt(data.design_head_m, 2), " m")}
+      ${kv("选型扬程", fmt(data.selection_head_m, 0), " m")}
+      ${kv("NPSHₐ", fmt(data.npsh_a_m, 2), " m")}
+      ${kv("建议电机", fmt(data.motor_suggested_kw, 1), " kW")}
+    </div>
+    <p class="pump-sel-state" data-state="${esc(data.npsh_state)}">
+      <b>${stateText}</b> · ${esc(data.npsh_reason || "")}
+      ${data.margin_is_default
+        ? `<span class="muted">(余量用建议值 ${fmt(data.margin_used_m, 2)} m)</span>` : ""}
+    </p>
+    <div class="pump-design-inputs">
+      <label>型号 ${input("model_no", "人工填写")}</label>
+      <label>名称 ${input("pump_name")}</label>
+      <label>材质 ${input("material")}</label>
+    </div>
+    <div class="pump-design-inputs">
+      <label>台数 ${input("qty", "如 2")}</label>
+      <label>配套电机 kW ${input("motor_kw")}</label>
+      <label>NPSHᵣ m ${input("npshr_m")}</label>
+      <label>余量 m ${input("margin_m", "0.5~1.0")}</label>
+    </div>
+    <div class="pump-design-inputs">
+      <label>备注 ${input("note")}</label>
+    </div>
+    <div class="pump-design-actions">
+      <button class="link-btn" id="pumpSelSave">保存台账</button>
+      <span class="muted" id="pumpSelMsg">缺 p_v 或 NPSHᵣ 时只能判「无法判定」</span>
+    </div>`;
+  const btn = document.getElementById("pumpSelSave");
+  if (btn) btn.onclick = () => savePumpSelection(row);
+  bindPumpFold(box, "selection");
+}
+
+async function loadPumpSelection(row) {
+  const box = document.getElementById("pumpSelection");
+  if (box) box.innerHTML = '<p class="muted">读取选型台账…</p>';
+  try {
+    const data = await api(
+      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/selection`
+    );
+    state.pumpSelection = data;
+    renderPumpSelection(row, data);
+  } catch (err) {
+    if (box) box.innerHTML = `<p class="muted">台账读不到:${esc(err.message)}</p>`;
+  }
+}
+
+async function savePumpSelection(row) {
+  const msg = document.getElementById("pumpSelMsg");
+  const body = {};
+  document.querySelectorAll(".pump-sel-input").forEach((input) => {
+    const raw = input.value.trim();
+    body[input.dataset.sel] = raw === "" ? null : raw;
+  });
+  for (const key of ["qty", "motor_kw", "npshr_m", "margin_m"]) {
+    if (body[key] === null || body[key] === undefined) continue;
+    const n = Number(body[key]);
+    if (!isFinite(n)) {
+      if (msg) msg.textContent = `${key} 必须是数字`;
+      return;
+    }
+    body[key] = n;
+  }
+  try {
+    await apiPost(
+      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/selection`,
+      body
+    );
+    await loadPumpSelection(row);
+  } catch (err) {
+    if (msg) msg.textContent = `没保存:${err.message}`;
   }
 }
 

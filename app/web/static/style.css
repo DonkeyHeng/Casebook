@@ -1055,6 +1055,11 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   width: 84px;
   min-width: 0;
 }
+/* λ 口径下拉:沿用全局 select 样式(它已按主题设好 background/padding),
+   这里只定宽度,别覆盖背景色,否则浅/深主题会掉色 */
+.pump-design-select { min-width: 132px; }
+.pump-design-lambda { margin-top: 8px; }
+.pump-design-lambda > .muted { font-size: var(--fs-xs); }
 .pump-design-fits {
   display: flex;
   align-items: center;
@@ -1973,3 +1978,73 @@ input:focus-visible {
   display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 999px;
   border: 1px solid var(--line); color: var(--muted);
 }
+
+/* 泵选型台账:上半区是实时算出来的只读数值,下半区才是人工填写 */
+.pump-selection { margin-top: 12px; }
+.pump-sel-live {
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+  margin: 8px 0; font-size: var(--fs-sm); color: var(--muted);
+}
+.pump-sel-kv b { color: var(--text); font-weight: 500; }
+.pump-sel-state { margin: 6px 0 10px; font-size: var(--fs-sm); color: var(--muted); }
+.pump-sel-state b { font-weight: 500; }
+.pump-sel-state[data-state="ok"] b { color: var(--ok, #1d7a4d); }
+.pump-sel-state[data-state="bad"] b { color: var(--bad, #b03a2e); }
+.pump-sel-state[data-state="unknown"] b { color: var(--warn, #8a6d1f); }
+
+/* 两个可折叠区:收起时只留标题 + 一行结论摘要,箭头指示展开方向 */
+.pump-fold { margin-top: 10px; }
+.pump-fold > summary.pump-fold-summary {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px 12px; list-style: none; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-head, transparent);
+  font-size: var(--fs-sm); color: var(--text); user-select: none;
+}
+.pump-fold > summary.pump-fold-summary::-webkit-details-marker { display: none; }
+.pump-fold > summary.pump-fold-summary:hover { border-color: var(--text); }
+.pump-fold > summary.pump-fold-summary:focus-visible {
+  outline: 2px solid var(--text); outline-offset: 2px;
+}
+.pump-fold-title { font-weight: 500; white-space: nowrap; }
+.pump-fold-summary > .muted { margin-right: auto; }
+.pump-fold-mark {
+  width: 7px; height: 7px; flex: none;
+  border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translate(-2px, -2px);
+  transition: transform .15s ease;
+}
+.pump-fold[open] > summary .pump-fold-mark {
+  transform: rotate(-135deg) translate(-2px, -2px);
+}
+.pump-fold[open] > summary.pump-fold-summary { border-radius: 8px 8px 0 0; }
+/* 内边距常驻、不挂在 [open] 上:展开时不再突然左右各缩进 10px,
+   靠右的数值也就不会跟着往左跳。12px 与 summary 的文字内边距对齐。 */
+.pump-fold > :not(summary) { padding-left: 12px; padding-right: 12px; }
+.pump-fold[open] { padding-bottom: 10px; }
+
+/* 参数表不再自己滚:三块折叠区共用 .pump-panel-scroll 一条滚动条。
+   去掉 .table-wrap.small 的 320px 上限与 overflow 后,table 宽度恒为
+   100%,右对齐的 td.num 不会随任何滚动条出现/消失而左右跳。
+   用 id 覆盖,只作用于泵参数抽屉,不动其它页面的表格。 */
+#pumpPanel .table-wrap {
+  max-height: none;
+  overflow: visible;
+}
+#pumpParams { margin-top: 0; }
+#pumpParams > .table-wrap { margin-top: 2px; }
+/* 三块折叠区全展开时内容可能超过 100vh。.column-panel 的 overflow:hidden
+   是塔剖面抽屉刻意保留的(整栏滚动会被 highlightRow 的 scrollIntoView 把
+   图表顶出视口),不能全局改成 auto —— 只给泵抽屉的折叠区套内部滚动容器。
+   槽位常驻在外层,可用宽度恒定,展开/收起零位移。 */
+#pumpPanel .pump-panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.pump-sel-state-mini { font-size: var(--fs-xs); white-space: nowrap; }
+.pump-sel-state-mini[data-state="ok"] { color: var(--ok, #1d7a4d); }
+.pump-sel-state-mini[data-state="bad"] { color: var(--bad, #b03a2e); }
+.pump-sel-state-mini[data-state="unknown"] { color: var(--muted); }

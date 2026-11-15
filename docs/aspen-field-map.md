@@ -110,7 +110,7 @@ DSH 的 shell 跑在隔离环境里时,ROT 是**空的**(连 `Shell.Application`
 >
 > **实测进度(2026-11-15)**
 > 1. `\Data\Components` 第一层是分组,不是组分 —— 已确认(见上表第一行)。
-> 2. **COM 树里没有组分属性层**(2026-11-15 探针实测,模型 = 天津大学 `【4】…bkp`):
+> 2. **COM 树里没有组分属性层**(2026-11-15 探针实测,一份本地模型):
 >    `\Data\Components` 第一层只有分组;对 `H2O` 依次试
 >    `Attr-Comps` / `Comp-Lists` / `Pseudocomponents` / `Input` / `Comp-Groups` / `Components`,
 >    **全部 find -> 无**。所以 CAS 只能从模型文件取(见下一条),`_COMPONENT_PARENTS` 保留

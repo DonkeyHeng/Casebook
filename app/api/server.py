@@ -353,6 +353,9 @@ class Handler(BaseHTTPRequestHandler):
                 if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "design-head":
                     self._set_pump_design(seg[2], seg[4])
                     return
+                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "selection":
+                    self._set_pump_selection(seg[2], seg[4])
+                    return
                 if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "pv":
                     self._set_pump_pv(seg[2], seg[4])
                     return
@@ -421,7 +424,11 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _pump_design(self, raw_id: str, block: str) -> None:
-        """GET …/pumps/{位号}/design-head —— 手填的位压头 / 管路阻力(米)。"""
+        """GET …/pumps/{位号}/design-head —— 手填的设计扬程修正项与管路输入。
+
+        zeta_json 在库里是文本,这里解析成对象;坏 JSON 只让这一项为空,
+        不让 ΔZ / Σhf / 管长跟着一起读不出来。
+        """
         try:
             case_id = int(raw_id)
         except ValueError:
@@ -429,22 +436,22 @@ class Handler(BaseHTTPRequestHandler):
             return
         conn = db.open_db(self.db_path)
         try:
-            row = conn.execute(
-                "SELECT model_name FROM cases WHERE id = ?", (case_id,)
-            ).fetchone()
+            row = conn.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
             if row is None:
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
-            data = db.read_pump_design(conn, str(row["model_name"] or ""), block)
+            data = dict(
+                db.read_pump_design(conn, db.model_key(conn, case_id), block)
+                or {"dz_m": None, "hf_m": None, "l_m": None, "zeta_json": None}
+            )
         finally:
             conn.close()
-        self._json(
-            {
-                "ok": True,
-                "block": block,
-                **(data or {"dz_m": None, "hf_m": None}),
-            }
-        )
+        raw = data.get("zeta_json")
+        try:
+            data["zeta_json"] = json.loads(raw) if raw else None
+        except (TypeError, ValueError):
+            data["zeta_json"] = None
+        self._json({"ok": True, "block": block, **data})
 
     def _pump_hydraulics(self, raw_id: str, block_name: str) -> None:
         """GET …/pumps/{位号}/hydraulics —— 手算 Σhf 需要的输入(含管道选型内径)。
@@ -602,11 +609,15 @@ class Handler(BaseHTTPRequestHandler):
         self._json({"ok": True, "block": block_name, **result})
 
     def _set_pump_design(self, raw_id: str, block: str) -> None:
-        """POST …/pumps/{位号}/design-head —— 存位压头 ΔZ 与管路阻力 Σhf(米)。
+        """POST …/pumps/{位号}/design-head —— 存 ΔZ、Σhf 与算 Σhf 的人填输入。
 
-        工具只负责 `H = 压升扬程 + ΔZ + Σhf` 的加法和 1.1 取整,**不估算这两项**
-        (ΔZ 是标高几何,Σhf 要管长/管件/λ,都属于人工程序)。两项都空 = 清除。
+        工具只负责 `H = 压升扬程 + ΔZ + Σhf` 的加法和 1.1 取整,**不估算这几项**
+        (ΔZ 是标高几何,Σhf 要管长/管件/λ,都属于人工程序)。
+        管长 L 与管件数量只做校验和持久化,不替用户补默认数量;全部为空 = 清除。
+        λ 口径只存用户的白名单选择,不替用户挑公式。
         """
+        from app.design import hydraulics   # 与其它接口一致,局部导入
+
         try:
             case_id = int(raw_id)
         except ValueError:
@@ -626,27 +637,202 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError(f"{key} 超出合理范围(-1000~5000 m)")
             return val
 
+        # 与前端 PUMP_FITTINGS 的 key 对齐;前端加管件时这里要同步
+        fitting_keys = ("el90", "gate", "globe", "check", "reducer")
+        # 手填覆盖的自动取值:原本刷新即丢,现在随设计扬程一起存;缺项不补默认值
+        override_keys = ("id_mm", "mu_cp", "eps_mm")
+
+        def pick_zeta() -> str | None:
+            """管件数量 + 手填 Σζ + 覆盖值 → JSON 文本;全空返回 None(不落空记录)。"""
+            raw = body.get("zeta_json")
+            if raw in (None, ""):
+                return None
+            if not isinstance(raw, dict):
+                raise ValueError("zeta_json 必须是对象")
+            zsum = raw.get("zeta_sum")
+            if zsum is not None:
+                if isinstance(zsum, bool) or not isinstance(zsum, (int, float)):
+                    raise ValueError("zeta_sum 必须是数字")
+                if not 0 <= float(zsum) <= 100000:
+                    raise ValueError("zeta_sum 超出合理范围(0~100000)")
+            fits = raw.get("fittings") or {}
+            if not isinstance(fits, dict):
+                raise ValueError("fittings 必须是对象")
+            clean: dict[str, int] = {}
+            for key, val in fits.items():
+                if key not in fitting_keys:
+                    raise ValueError(f"不认识的管件:{key}")
+                if isinstance(val, bool) or not isinstance(val, int) or not 0 <= val <= 10000:
+                    raise ValueError(f"{key} 的数量必须是 0~10000 的整数")
+                clean[key] = val
+            ov = raw.get("overrides") or {}
+            if not isinstance(ov, dict):
+                raise ValueError("overrides 必须是对象")
+            clean_ov: dict[str, float] = {}
+            for key, val in ov.items():
+                if key not in override_keys:
+                    raise ValueError(f"不认识的覆盖项:{key}")
+                if val in (None, ""):
+                    continue
+                if isinstance(val, bool) or not isinstance(val, (int, float)):
+                    raise ValueError(f"{key} 必须是数字")
+                if not 0 < float(val) <= 100000:
+                    raise ValueError(f"{key} 超出合理范围(0~100000]")
+                clean_ov[key] = float(val)
+            lam = raw.get("lambda") or {}
+            if not isinstance(lam, dict):
+                raise ValueError("lambda 必须是对象")
+            method = str(lam.get("method") or hydraulics.METHOD_COLEBROOK).strip().lower()
+            if method not in (
+                hydraulics.METHOD_COLEBROOK,
+                hydraulics.METHOD_GU,
+                hydraulics.METHOD_MANUAL,
+            ):
+                raise ValueError("lambda.method 只能是 colebrook / gu / manual")
+            lam_raw = lam.get("manual")
+            if lam_raw in (None, ""):
+                lam_manual = None
+            elif isinstance(lam_raw, bool) or not isinstance(lam_raw, (int, float)):
+                raise ValueError("lambda.manual 必须是数字")
+            elif not 0.0001 <= float(lam_raw) <= 1.0:
+                raise ValueError("lambda.manual 超出合理范围(0.0001~1.0)")
+            else:
+                lam_manual = float(lam_raw)
+            # 默认口径 + 没手填值时不落这个 key,免得给每台泵都留一条空挂账
+            clean_lam = (
+                {"method": method, "manual": lam_manual}
+                if method != hydraulics.METHOD_COLEBROOK or lam_manual is not None
+                else {}
+            )
+            if zsum is None and not any(clean.values()) and not clean_ov and not clean_lam:
+                return None
+            payload = {"zeta_sum": zsum, "fittings": clean, "overrides": clean_ov}
+            if clean_lam:
+                payload["lambda"] = clean_lam
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
         try:
             dz_m, hf_m = pick("dz_m"), pick("hf_m")
+            l_m = pick("l_m")
+            if l_m is not None and l_m < 0:
+                raise ValueError("l_m 不能为负")
+            zeta_json = pick_zeta()
         except ValueError as exc:
             self._error(str(exc))
             return
         conn = db.open_db(self.db_path)
         try:
-            row = conn.execute(
-                "SELECT model_name FROM cases WHERE id = ?", (case_id,)
-            ).fetchone()
+            row = conn.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
             if row is None:
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
-            model_name = str(row["model_name"] or "").strip()
-            if not model_name:
-                self._error("这个工况没有记录模型名,无法挂手填值")
+            key = db.model_key(conn, case_id)
+            if not key:
+                self._error("这个工况没有可用的模型身份,无法挂手填值")
                 return
-            db.save_pump_design(conn, model_name, block, dz_m, hf_m)
+            db.save_pump_design(conn, key, block, dz_m, hf_m, l_m, zeta_json)
         finally:
             conn.close()
-        self._json({"ok": True, "block": block, "dz_m": dz_m, "hf_m": hf_m})
+        self._json(
+            {
+                "ok": True,
+                "block": block,
+                "dz_m": dz_m,
+                "hf_m": hf_m,
+                "l_m": l_m,
+                "zeta_json": json.loads(zeta_json) if zeta_json else None,
+            }
+        )
+
+    def _pump_selection(self, raw_id: str, block: str) -> None:
+        """GET …/pumps/{位号}/selection —— 台账手填结果 + 实时设计点 + 三态。
+
+        数值一律按当前工况实时算(不落库、不从外部 Excel 导入);台账只回
+        人工决定的字段。三态里的「无法判定」必须写明缺什么。
+        """
+        from app.design import pump_selection as selection_rules
+
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT * FROM blocks WHERE case_id = ? AND name = ?", (case_id, block)
+            ).fetchone()
+            if row is None:
+                self._error(f"没有位号 {block} 的泵", 404)
+                return
+            key = db.model_key(conn, case_id)
+            design = db.read_pump_design(conn, key, block)
+            saved = db.read_pump_selection(conn, key, block)
+            view = selection_rules.compute_view(dict(row), design, saved)
+        finally:
+            conn.close()
+        self._json({"ok": True, "block": block, "saved": saved or {}, **view})
+
+    def _set_pump_selection(self, raw_id: str, block: str) -> None:
+        """POST …/pumps/{位号}/selection —— 整份提交人工决定的字段。
+
+        不收任何计算值(流量 / 扬程 / NPSHₐ / 三态),那些由 GET 实时算;
+        也就不存在「外部 Excel 数值进库」这条路径。
+        """
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        body = self._read_json_body()
+        text_fields = ("model_no", "pump_name", "material", "note")
+        num_fields = ("motor_kw", "npshr_m", "margin_m")
+        values: dict = {}
+        try:
+            for field in text_fields:
+                raw = body.get(field)
+                if raw in (None, ""):
+                    values[field] = None
+                elif not isinstance(raw, str):
+                    raise ValueError(f"{field} 必须是文字")
+                elif len(raw) > 200:
+                    raise ValueError(f"{field} 太长(最多 200 字)")
+                else:
+                    values[field] = raw.strip()
+            qty = body.get("qty")
+            if qty in (None, ""):
+                values["qty"] = None
+            elif isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= 999:
+                raise ValueError("qty 必须是 1~999 的整数")
+            else:
+                values["qty"] = qty
+            for field in num_fields:
+                raw = body.get(field)
+                if raw in (None, ""):
+                    values[field] = None
+                    continue
+                if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+                    raise ValueError(f"{field} 必须是数字")
+                if not 0 <= float(raw) <= 100000:
+                    raise ValueError(f"{field} 超出合理范围(0~100000)")
+                values[field] = float(raw)
+        except ValueError as exc:
+            self._error(str(exc))
+            return
+        conn = db.open_db(self.db_path)
+        try:
+            row = conn.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
+            if row is None:
+                self._error(f"没有 id={case_id} 的工况", 404)
+                return
+            key = db.model_key(conn, case_id)
+            if not key:
+                self._error("这个工况没有可用的模型身份,无法挂台账")
+                return
+            db.save_pump_selection(conn, key, block, values)
+        finally:
+            conn.close()
+        self._json({"ok": True, "block": block, "saved": values})
 
     def _inherit_sections(self, raw_id: str) -> None:
         """把同模型更早工况保存过的工段边界搬过来,省掉重新拉一遍。
@@ -718,23 +904,23 @@ class Handler(BaseHTTPRequestHandler):
         conn = db.open_db(self.db_path)
         try:
             row = conn.execute(
-                "SELECT model_name FROM cases WHERE id = ?", (case_id,)
+                "SELECT id, model_name FROM cases WHERE id = ?", (case_id,)
             ).fetchone()
             if row is None:
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
-            model_name = str(row["model_name"] or "").strip()
-            if not model_name:
-                self._error("这个工况没有记录模型名,无法挂手填 CAS")
+            key = db.model_key(conn, case_id)
+            if not key:
+                self._error("这个工况没有可用的模型身份,无法挂手填 CAS")
                 return
-            db.save_component_cas(conn, model_name, component, cas)
+            db.save_component_cas(conn, key, component, cas)
         finally:
             conn.close()
         self._json(
             {
                 "ok": True,
                 "case_id": case_id,
-                "model_name": model_name,
+                "model_name": row["model_name"],
                 "component": component,
                 "cas": cas,
                 "cn": component_names.cn_name(cas) if cas else None,
@@ -975,6 +1161,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "design-head":
                 self._pump_design(parts[2], parts[4])
+                return
+            if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "selection":
+                self._pump_selection(parts[2], parts[4])
                 return
             if parts[3] == "columns":
                 if len(parts) == 4:

@@ -92,12 +92,13 @@ On first launch, the local database is empty (`data/cases.db` is excluded from G
 
 ## Release History
 
-**Current Version: [v1.2.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.2.1)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for full changelogs)
+**Current Version: [v1.3.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.3.0)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for full changelogs)
 
 - **Phase 1 (Core Extraction & Sizing)**: Snapshots, streams/equipment/tray profiles/flowsheet viewer, multi-case comparison, pipe sizing, and data exports.
 - **Phase 2 (Engineering Depth & UX)**: Categorized equipment views, pump hydraulics & $\text{NPSH}_a$ calculation, category-filtered Excel exports, and dark mode (strictly read-only).
 - **v1.2.0 (Balance Reports)**: Added Word `.docx` Mass & Energy Balance Reports, interactive section/battery-limit boundary confirmation, plant-wide conservation checks, and enthalpy balance validation for columns and reactors.
 - **v1.2.1 (Robustness fixes)**: Hardened write paths found by a code review — malformed requests no longer clear the piping-class table, sample install uses a consistent backup plus atomic replace, standards tables switch via versioned directories, numeric inputs reject NaN/Inf, and the safety scan fails closed. Four long functions were split up.
+- **v1.3.0 (Pump design & selection ledger)**: Pump design inputs (pipe length, Σζ, fitting counts, property overrides, friction-factor method) and the selection ledger are now persisted under a content-hash model identity, with ledger values recomputed from the current case. Three friction-factor methods are selectable (Colebrook, Gu Yuzhen, manual λ). The pump drawer uses three collapsible panels sharing one scroll container. Added DOM-stub render regression and a headless UI sweep. Existing databases migrate automatically and previously entered values remain valid.
 
 <details>
 <summary><strong>Legacy Version Number Mapping (Renumbered in Nov 2026)</strong></summary>

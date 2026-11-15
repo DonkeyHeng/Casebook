@@ -31,7 +31,7 @@ TXT_SRC = ROOT / "docs" / "install-text.txt"
 TXT_NAME = "安装说明.txt"
 PREFIX = "Casebook"
 EXE = DIST / "Casebook.exe"
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 
 
 def _sha256(path: Path) -> str:

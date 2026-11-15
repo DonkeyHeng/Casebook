@@ -583,10 +583,23 @@
           <p class="muted pump-panel-hint">中联表单:分类 · 型号 · 流量 · 扬程 · 配套功率</p>
           <button id="copyPumpSpec" class="link-btn" title="把流量/扬程/配套功率合成一行,粘进中联表单,不用手敲">复制选型参数</button>
         </div>
-        <div class="table-wrap small">
-          <table id="pumpTable"><thead></thead><tbody></tbody></table>
+        <!-- 三块折叠区共用这一条滚动容器。抽屉本身 overflow:hidden 是塔剖面
+             抽屉刻意保留的(防 scrollIntoView 把图表顶走),不能全局改;参数表
+             也不再自己滚,所以无论同时展开几块,整个抽屉始终只有一条滚动条。 -->
+        <div class="pump-panel-scroll">
+          <details id="pumpParams" class="pump-params pump-fold" open>
+            <summary class="pump-fold-summary" title="Aspen 读到的泵详细读数">
+              <span class="pump-fold-title">详细参数</span>
+              <span class="muted" id="pumpParamsBrief"></span>
+              <span class="pump-fold-mark" aria-hidden="true"></span>
+            </summary>
+            <div class="table-wrap small">
+              <table id="pumpTable"><thead></thead><tbody></tbody></table>
+            </div>
+          </details>
+          <details id="pumpDesign" class="pump-design pump-fold"></details>
+          <details id="pumpSelection" class="pump-selection pump-fold"></details>
         </div>
-        <div id="pumpDesign" class="pump-design"></div>
       </section>
 
       <section id="compPanel" class="column-panel comp-panel hidden">

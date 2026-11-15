@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS cases (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     model_path    TEXT NOT NULL,
     model_name    TEXT,
+    model_hash    TEXT,          -- 模型文件内容 sha256;老库补列后是 NULL,按文件名兜底
     read_at       TEXT NOT NULL,
     run_id        TEXT,
     run_date      TEXT,
@@ -117,13 +118,36 @@ CREATE TABLE IF NOT EXISTS component_cas (
 
 -- 手动给的"设计扬程"修正项(按模型+位号):位压头 ΔZ 与管路阻力 Σhf,单位 m。
 -- Aspen 的泵扬程只有压升那一部分,这两项是几何/管路信息,只能人来填。
+-- l_m(管长)与 zeta_json(管件数量 + 手填 Σζ)是算 Σhf 的人填输入,一并持久化,
+-- 免得刷新页面后管件数量丢失、Σζ 却还留着(两处口径会对不上)。
+-- 缺项一律 NULL:程序不替用户补 0,也不给默认数量。
 CREATE TABLE IF NOT EXISTS pump_design (
     model_name TEXT    NOT NULL,
     block      TEXT    NOT NULL,
     dz_m       REAL,
     hf_m       REAL,
+    l_m        REAL,
+    zeta_json  TEXT,
     updated_at TEXT,
     PRIMARY KEY (model_name, block)
+);
+
+-- 泵选型台账(按模型身份 + 位号)。只存**人工决定**的字段。
+-- 流量 / 扬程 / 选型扬程 / NPSHₐ / 三态判定一律按当前工况实时算,不落库:
+-- 数值以工况为准,不从外部 Excel 导入、不做反推(见 docs/pump-selection-plan.md §7)。
+CREATE TABLE IF NOT EXISTS pump_selection (
+    model_key  TEXT    NOT NULL,   -- model_identity.key_of():内容哈希优先,文件名兜底
+    block      TEXT    NOT NULL,
+    model_no   TEXT,               -- 型号
+    pump_name  TEXT,               -- 名称
+    qty        INTEGER,            -- 台数
+    material   TEXT,               -- 材质
+    motor_kw   REAL,               -- 配套电机 kW(人工决定,不等于程序建议值)
+    npshr_m    REAL,               -- NPSHᵣ m;暂缓,空着就是「无法判定」
+    margin_m   REAL,               -- 汽蚀余量 m,§6.3 建议 0.5~1.0
+    note       TEXT,
+    updated_at TEXT,
+    PRIMARY KEY (model_key, block)
 );
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -210,6 +234,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
 _ADDED_COLUMNS = (
     ("unit_gaps", "INTEGER"),
     ("unit_gaps_json", "TEXT"),
+    # 模型身份加固:老库补列后是 NULL,key_of() 会退回文件名,历史数据不失效
+    ("model_hash", "TEXT"),
 )
 
 # streams 表后加的列(焓)
@@ -258,6 +284,13 @@ _BLOCK_ADDED_COLUMNS = (
     ("reb_duty_kw", "REAL"),
 )
 
+# pump_design 表后加的列(管路阻力半自动的人填输入)。
+# 老库补列后历史记录是 NULL,页面按"没填过"显示,不回算、不猜值。
+_PUMP_DESIGN_ADDED_COLUMNS = (
+    ("l_m", "REAL"),
+    ("zeta_json", "TEXT"),
+)
+
 
 def _migrate(conn: sqlite3.Connection) -> None:
     have = {row["name"] for row in conn.execute("PRAGMA table_info(cases)")}
@@ -276,6 +309,12 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for name, ddl in _BLOCK_ADDED_COLUMNS:
         if name not in have_block:
             conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {ddl}")
+    have_pump_design = {
+        row["name"] for row in conn.execute("PRAGMA table_info(pump_design)")
+    }
+    for name, ddl in _PUMP_DESIGN_ADDED_COLUMNS:
+        if name not in have_pump_design:
+            conn.execute(f"ALTER TABLE pump_design ADD COLUMN {name} {ddl}")
 
 
 # ---------------------------------------------------------------- 写入
@@ -289,18 +328,22 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
     stats = case.get("stats", {})
     gaps = case.get("unit_gaps") or {}
 
+    # 局部导入:model_identity 只做本地文件读取,与 store 层没有循环依赖
+    from app.design import model_identity
+
     cur = conn.execute(
         """
-        INSERT INTO cases (model_path, model_name, read_at, run_id, run_date, run_user,
-                           aspen_version, severity, converged, reasons_json, errtxt,
-                           status_json, tear_json, block_errors, block_warnings,
-                           unit_gaps, unit_gaps_json,
+        INSERT INTO cases (model_path, model_name, model_hash, read_at, run_id,
+                           run_date, run_user, aspen_version, severity, converged,
+                           reasons_json, errtxt, status_json, tear_json,
+                           block_errors, block_warnings, unit_gaps, unit_gaps_json,
                            stream_count, block_count, elapsed_sec)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             model.get("path"),
             model.get("name"),
+            model_identity.hash_file(model.get("path")),
             model.get("read_at"),
             run.get("RUNID"),
             run.get("ITDATE"),
@@ -498,25 +541,35 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
 def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
     """把**同一模型**更早工况里填过的 p_v 按位号搬到当前工况。
 
-    只填空着的行(用户已经手填的不覆盖),只认同一个模型文件名 ——
-    不同模型里同一个位号未必是同一种液体,不能瞎搬。
+    只填空着的行(用户已经手填的不覆盖),只认同一个模型身份键
+    (内容哈希优先、老工况退回文件名) —— 不同模型里同一个位号未必是
+    同一种液体,不能瞎搬。
     返回 {source_case_id, source_read_at, copied, skipped};没有可沿用的返回 source_case_id=None。
     """
-    target = conn.execute("SELECT id, model_name FROM cases WHERE id=?", (case_id,)).fetchone()
+    from app.design import model_identity
+
+    target = conn.execute(
+        "SELECT id, model_hash, model_name FROM cases WHERE id=?", (case_id,)
+    ).fetchone()
     if target is None:
         return None
+    key = model_identity.key_of(target["model_hash"], target["model_name"])
+    if not key:
+        return {"source_case_id": None, "source_read_at": None, "copied": 0, "skipped": 0}
     source = conn.execute(
         """
         SELECT c.id AS id, c.read_at AS read_at, COUNT(*) AS n
           FROM cases c JOIN blocks b ON b.case_id = c.id
          WHERE c.id != ?
            AND b.pv_bar IS NOT NULL
-           AND COALESCE(c.model_name, '') = COALESCE(?, '')
+           AND (CASE WHEN c.model_hash IS NOT NULL AND c.model_hash <> ''
+                     THEN 'sha256:' || c.model_hash
+                     ELSE COALESCE(c.model_name, '') END) = ?
          GROUP BY c.id
          ORDER BY c.id DESC
          LIMIT 1
         """,
-        (case_id, target["model_name"]),
+        (case_id, key),
     ).fetchone()
     if source is None:
         return {"source_case_id": None, "source_read_at": None, "copied": 0, "skipped": 0}
@@ -790,19 +843,29 @@ def save_component_cas(
 def previous_case_same_model(conn: sqlite3.Connection, case_id: int) -> int | None:
     """同一模型里更早的一个工况 id;没有返回 None。
 
-    模型身份沿用项目既有口径:文件名(cases.model_name)。“同模型”= 文件名完全一致。
+    按模型身份键匹配(内容哈希优先、老工况退回文件名),与
+    `model_identity.key_of()` 口径一致 —— 别只改这一处。
     """
+    from app.design import model_identity
+
+    target = conn.execute(
+        "SELECT model_hash, model_name FROM cases WHERE id = ?", (case_id,)
+    ).fetchone()
+    if target is None:
+        return None
+    key = model_identity.key_of(target["model_hash"], target["model_name"])
+    if not key:
+        return None
     row = conn.execute(
         """
         SELECT id FROM cases
         WHERE id < ?
-          AND COALESCE(model_name, '') = COALESCE(
-              (SELECT model_name FROM cases WHERE id = ?), ''
-          )
-          AND COALESCE(model_name, '') <> ''
+          AND (CASE WHEN model_hash IS NOT NULL AND model_hash <> ''
+                    THEN 'sha256:' || model_hash
+                    ELSE COALESCE(model_name, '') END) = ?
         ORDER BY id DESC LIMIT 1
         """,
-        (case_id, case_id),
+        (case_id, key),
     ).fetchone()
     return int(row["id"]) if row else None
 
@@ -810,25 +873,44 @@ def previous_case_same_model(conn: sqlite3.Connection, case_id: int) -> int | No
 def read_pump_design(
     conn: sqlite3.Connection, model_name: str, block: str
 ) -> dict | None:
-    """某台泵手填的位压头 / 管路阻力;没填过返回 None。"""
+    """某台泵手填的设计参数;没填过返回 None。
+
+    zeta_json 原样透传(不解析):库里万一存了坏 JSON,也不能让 ΔZ / Σhf 一起读不出来。
+    """
     row = conn.execute(
-        "SELECT dz_m, hf_m FROM pump_design WHERE model_name = ? AND block = ?",
+        "SELECT dz_m, hf_m, l_m, zeta_json FROM pump_design "
+        "WHERE model_name = ? AND block = ?",
         (str(model_name or "").strip(), str(block or "").strip()),
     ).fetchone()
     if row is None:
         return None
-    return {"dz_m": row["dz_m"], "hf_m": row["hf_m"]}
+    return {
+        "dz_m": row["dz_m"],
+        "hf_m": row["hf_m"],
+        "l_m": row["l_m"],
+        "zeta_json": row["zeta_json"],
+    }
 
 
 def save_pump_design(
-    conn: sqlite3.Connection, model_name: str, block: str, dz_m, hf_m
+    conn: sqlite3.Connection,
+    model_name: str,
+    block: str,
+    dz_m,
+    hf_m,
+    l_m=None,
+    zeta_json: str | None = None,
 ) -> bool:
-    """写一台泵的 ΔZ / Σhf;两项都为空表示清除。返回是否写到东西。"""
+    """写一台泵的手填设计参数;所有项都空表示清除。返回是否写到东西。
+
+    zeta_json 是 API 层校验过的 JSON 文本,库层只存不解析,也不补默认值。
+    新增参数放在末尾且可缺省,老调用点 `save_pump_design(c, m, b, dz, hf)` 语义不变。
+    """
     name = str(model_name or "").strip()
     key = str(block or "").strip()
     if not name or not key:
         return False
-    if dz_m is None and hf_m is None:
+    if all(v is None for v in (dz_m, hf_m, l_m, zeta_json)):
         cur = conn.execute(
             "DELETE FROM pump_design WHERE model_name = ? AND block = ?", (name, key)
         )
@@ -836,22 +918,100 @@ def save_pump_design(
         return cur.rowcount > 0
     conn.execute(
         """
-        INSERT INTO pump_design (model_name, block, dz_m, hf_m, updated_at)
-        VALUES (?,?,?,?,?)
+        INSERT INTO pump_design
+            (model_name, block, dz_m, hf_m, l_m, zeta_json, updated_at)
+        VALUES (?,?,?,?,?,?,?)
         ON CONFLICT(model_name, block)
         DO UPDATE SET dz_m = excluded.dz_m, hf_m = excluded.hf_m,
+                      l_m = excluded.l_m, zeta_json = excluded.zeta_json,
                       updated_at = excluded.updated_at
         """,
-        (name, key, dz_m, hf_m, _now()),
+        (name, key, dz_m, hf_m, l_m, zeta_json, _now()),
     )
     conn.commit()
     return True
 
 
-def read_cas_map(conn: sqlite3.Connection, case_id: int, model_name: str) -> dict[str, str]:
+# ---------------------------------------------------------------- 选型台账
+
+SELECTION_FIELDS = (
+    "model_no", "pump_name", "qty", "material", "motor_kw", "npshr_m", "margin_m", "note",
+)
+
+
+def model_key(conn: sqlite3.Connection, case_id: int) -> str:
+    """这个工况的模型身份键;没这个工况返回空串。
+
+    所有「按模型挂」的读写都走这里,别再各自从 cases 里直接取 model_name,
+    否则身份口径又会出现只改一处的分叉。
+    """
+    from app.design import model_identity
+
+    row = conn.execute(
+        "SELECT model_hash, model_name FROM cases WHERE id = ?", (case_id,)
+    ).fetchone()
+    if row is None:
+        return ""
+    return model_identity.key_of(row["model_hash"], row["model_name"])
+
+
+def read_pump_selection(conn: sqlite3.Connection, key: str, block: str) -> dict | None:
+    """某台泵手填的选型结果;没填过返回 None。"""
+    key = str(key or "").strip()
+    name = str(block or "").strip()
+    if not key or not name:
+        return None
+    row = conn.execute(
+        f"SELECT {', '.join(SELECTION_FIELDS)} FROM pump_selection "
+        "WHERE model_key = ? AND block = ?",
+        (key, name),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def save_pump_selection(
+    conn: sqlite3.Connection, key: str, block: str, values: dict
+) -> bool:
+    """写一台泵的选型结果;所有字段都空表示清除。返回是否写到东西。
+
+    values 已由 API 层校验,这里只做持久化:不补默认值、不算任何数值。
+    只更新传进来的字段,没传的保留原值(支持只改一个字段)。
+    """
+    key = str(key or "").strip()
+    name = str(block or "").strip()
+    if not key or not name:
+        return False
+    fields = [f for f in SELECTION_FIELDS if f in values]
+    vals = [values[f] for f in fields]
+    if not vals or all(v is None or v == "" for v in vals):
+        cur = conn.execute(
+            "DELETE FROM pump_selection WHERE model_key = ? AND block = ?", (key, name)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    cols = ", ".join(("model_key", "block", *fields, "updated_at"))
+    marks = ", ".join("?" for _ in range(len(fields) + 3))
+    updates = ", ".join(f"{f} = excluded.{f}" for f in fields)
+    conn.execute(
+        f"""
+        INSERT INTO pump_selection ({cols}) VALUES ({marks})
+        ON CONFLICT(model_key, block)
+        DO UPDATE SET {updates}, updated_at = excluded.updated_at
+        """,
+        (key, name, *vals, _now()),
+    )
+    conn.commit()
+    return True
+
+
+def read_cas_map(
+    conn: sqlite3.Connection, case_id: int, model_name: str | None = None
+) -> dict[str, str]:
     """组分 → CAS 的合并视图:Aspen / 模型文件读到的优先,读不到才用手填的。
 
     手填只补空缺 —— 读得到的时候以模型为准,免得手误覆盖真实读数。
+    手填表按**模型身份键**取(hash 优先、老工况退回文件名);第三参数只作
+    库里查不到该工况时的兜底,调用方不必再自己拼 model_name。
     """
     out = {
         r["component"]: r["cas"]
@@ -860,8 +1020,10 @@ def read_cas_map(conn: sqlite3.Connection, case_id: int, model_name: str) -> dic
             (case_id,),
         )
     }
-    for comp, cas in read_component_cas(conn, model_name).items():
-        out.setdefault(comp, cas)
+    key = model_key(conn, case_id) or str(model_name or "").strip()
+    if key:
+        for comp, cas in read_component_cas(conn, key).items():
+            out.setdefault(comp, cas)
     return out
 
 

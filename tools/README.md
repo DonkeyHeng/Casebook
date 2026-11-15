@@ -19,9 +19,10 @@
 | `fill_composition.py` | 给已存工况**批量补**流股组成(网页只能一条条点) | ✅ 且必须是同一运行 | 写库 |
 | `balance_report.py` | 批量生成《物料与能量衡算报告》.docx:`python -m tools.balance_report --case 40 [--blocks …] [--families …]`;与网页「衡算报告」页同一套代码 | ❌ | 写 `data/preview/`(或 `--out`) |
 | `selftest.py` | 判定 / 单位 / 焓平衡 / 管路选型回归自测,拿真实工况当固定样本 | ❌ | 只读库 |
+| `check_render.mjs` | 前端渲染回归(177 条):Node + DOM 桩跑真实 `app.js` 的泵设计块 / 流股表 / 首页 / 家族页签 / 折叠面板 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底 / 详细参数折叠,挡住「模板读 state 缺字段 → 整块静默空白」;`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
-| `ui_sweep.py` | 界面回归自检:无头浏览器过 6 个页签(浅色 + 深色),截图并收集控制台报错 | ❌ | 写 `data/preview/ui-check/` |
+| `ui_sweep.py` | 界面回归自检:无头浏览器过 7 个页签(浅色 + 深色),截图并收集 JS 异常 / `console.error` / 失败请求;需服务已启动 + 本机 Chrome/Edge | ❌ | 写 `data/preview/ui-check/`(不入库) |
 | `make_icon.py` | 源图 → `.ico`(圆形抠底 + 6 个尺寸) | ❌ | 写 `assets/` |
 | `check_public_safe.py` | 提交 / 发布前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
 | `build_exe.py` | 用 PyInstaller 打单文件 `Casebook.exe`(需要 `pip install pyinstaller`) | ❌ | 写 `data/preview/{dist,build}` |
@@ -34,6 +35,8 @@
 - 要确认「扬程 / 汽蚀余量 / 蒸气压 能不能直接从 Aspen 读」→ `probe_pump.py --attach --save`
 - 示例库要跟着新字段更新(读的字段变了、示例还是旧的)→ `build_sample.py`,只读重读一份并脱敏
 - 改了判定 / 单位 / 焓平衡口径 → 先跑 `selftest.py`;过了再 `repair_cases.py --apply`
+- 改了 `app/web/static/app.js` 的渲染逻辑 → `node --check` 查语法,再 `node tools/check_render.mjs` 查静默空白
+- 改了前端 / CSS 且服务已起来 → `python -m tools.ui_sweep`(无头浏览器过 7 页 × 两主题,抓控制台报错);脚本不会自己启动服务,截图不入库
 - 读完工况、想给整份工况补组成(导出样本 / 离线分析)→ `fill_composition.py --case N`,要趁 Aspen 还开着
 - 读得太慢 → `bench.py`
 - 提交前 / 发布前 → `check_public_safe.py --all`
