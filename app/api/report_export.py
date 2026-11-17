@@ -59,6 +59,15 @@ KINDS: dict[str, dict] = {
         "light": "DCE6F1",
         "zebra": "F7FAFD",
     },
+    # 管道册:墨绿。与物料册的冷蓝、能量册的暖砖红都能分开 —— 三册并排打印时
+    # 靠封面色带就能认出哪本是哪本,不必翻到封面标题。
+    "pipe": {
+        "title": "管道选型一览表",
+        "book": "管道专业 · 选型册",
+        "accent": "2E5E4E",
+        "light": "DFEAE5",
+        "zebra": "F6FAF8",
+    },
 }
 KIND_KEYS = tuple(KINDS)
 _ACTIVE_KIND = KINDS["all"]
@@ -66,6 +75,18 @@ _ACTIVE_KIND = KINDS["all"]
 
 def kind_meta(kind: str) -> dict:
     return KINDS.get(kind) or KINDS["all"]
+
+
+def activate(kind: str) -> dict:
+    """把全局主题切到某一册。
+
+    表格 / 标题 / 封面的主色都读这个全局值(它们是被各章反复调用的短函数,
+    逐个传 meta 会把签名铺得很长)。外部导出(如管道表)复用这套版式时,
+    先调它一次即可,不用自己拼颜色。
+    """
+    global _ACTIVE_KIND
+    _ACTIVE_KIND = kind_meta(kind)
+    return _ACTIVE_KIND
 
 
 # 焓平衡状态(库里存的就是这四个)
@@ -242,13 +263,51 @@ def _para(doc, text="", size=None, bold=False, align=None, space_after=None, nam
     return para
 
 
-def _heading(doc, text, level=1):
-    """章节标题:黑体,不依赖 docx 内置样式(样式名各版本不一致)。"""
-    from docx.shared import Pt
+# `w:pBdr` 在 CT_PPr 里排在表格样式之后、`w:shd` 之前。python-docx 只能
+# `append`,排在 `w:spacing` / `w:rPr` 后面就是非法顺序 —— Word 宽容、WPS 会丢,
+# 所以插边框一律走 `insert_element_before`,后面这些兄弟都要点名。
+_PPR_AFTER_PBDR = (
+    "w:shd",
+    "w:tabs",
+    "w:suppressAutoHyphens",
+    "w:kinsoku",
+    "w:wordWrap",
+    "w:overflowPunct",
+    "w:topLinePunct",
+    "w:autoSpaceDE",
+    "w:autoSpaceDN",
+    "w:bidi",
+    "w:adjustRightInd",
+    "w:snapToGrid",
+    "w:spacing",
+    "w:ind",
+    "w:contextualSpacing",
+    "w:mirrorIndents",
+    "w:suppressOverlap",
+    "w:jc",
+    "w:textDirection",
+    "w:textAlignment",
+    "w:textboxTightWrap",
+    "w:outlineLvl",
+    "w:divId",
+    "w:cnfStyle",
+    "w:rPr",
+    "w:sectPr",
+    "w:pPrChange",
+)
 
+
+def _heading(doc, text, level=1):
+    """章节标题:黑体,不依赖 docx 内置样式(样式名各版本不一致)。
+
+    层级靠三种记号分开,不靠字号堆叠:一级带主题色下横线、二级前加主题色竖块、
+    三级只加粗。灰度打印时横线与竖块仍在,"这是第几层"不依赖读者比字号。
+    """
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
+    from docx.shared import Pt
 
+    meta = _ACTIVE_KIND
     sizes = {1: Pt(15), 2: Pt(12.5), 3: Pt(11)}
     para = doc.add_paragraph()
     level_node = OxmlElement("w:outlineLvl")
@@ -256,9 +315,23 @@ def _heading(doc, text, level=1):
     para._p.get_or_add_pPr().insert_element_before(
         level_node, "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr", "w:pPrChange"
     )
-    para.paragraph_format.space_before = Pt(10)
-    para.paragraph_format.space_after = Pt(4)
-    _font(para.add_run(text), sizes.get(level, Pt(11)), True, "黑体")
+    para.paragraph_format.space_before = Pt(15 if level == 1 else 10)
+    para.paragraph_format.space_after = Pt(9 if level == 1 else 4)
+    para.paragraph_format.keep_with_next = True
+
+    if level == 2:
+        _font(para.add_run("▍"), sizes[2], True).font.color.rgb = _rgb(meta["accent"])
+    run = _font(para.add_run(text), sizes.get(level, Pt(11)), True, "黑体")
+    if level == 1:
+        run.font.color.rgb = _rgb(meta["accent"])
+        borders = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "6")  # 1/8 pt → 0.75 pt
+        bottom.set(qn("w:space"), "3")
+        bottom.set(qn("w:color"), meta["accent"])
+        borders.append(bottom)
+        para._p.get_or_add_pPr().insert_element_before(borders, *_PPR_AFTER_PBDR)
     return para
 
 
@@ -435,8 +508,12 @@ def _header_block(table, headers, size, header_extra, meta, fill):
     return header_row
 
 
-def _body_block(table, rows, head_rows, status_col, meta, fill):
-    """表体:逐行填格、斑马纹 / 超差底纹、状态列标记。"""
+def _body_block(table, rows, head_rows, status_col, meta, fill, center_cols=()):
+    """表体:逐行填格、斑马纹 / 超差底纹、状态列标记。
+
+    `center_cols` 点名"必须居中的列"(如管道表的材料 / 类型):默认规则是
+    "含数字就右对齐",`S30408` 这种带数字的材料名会被判成数值,贴在右边。
+    """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     stripe = 0
@@ -452,6 +529,8 @@ def _body_block(table, rows, head_rows, status_col, meta, fill):
             # 其余数值右对齐 —— 否则"液相"贴着右边,看着像数据错位
             if index == 0:
                 align = WD_ALIGN_PARAGRAPH.LEFT
+            elif index in center_cols:
+                align = WD_ALIGN_PARAGRAPH.CENTER
             elif text and not any(ch.isdigit() for ch in text):
                 align = WD_ALIGN_PARAGRAPH.CENTER
             else:
@@ -493,6 +572,8 @@ def _body_block(table, rows, head_rows, status_col, meta, fill):
 
 def _span_widths(table, widths, span_rows, head_rows):
     """分组行横向合并 + 逐列宽度(合并行不能按 row.cells 设宽度)。"""
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
     from docx.shared import Cm
 
     for index in span_rows or ():
@@ -517,6 +598,8 @@ def _span_widths(table, widths, span_rows, head_rows):
         for index, width in enumerate(widths):
             cells[index].width = Cm(width)
 
+    _set_table_width(table, sum(widths))
+
 
 def _three_line(
     doc,
@@ -528,6 +611,7 @@ def _three_line(
     header_extra=None,
     status_col=None,
     span_rows=(),
+    center_cols=(),
 ):
     """三线表:顶线 1.5 pt、表头下线 0.75 pt、底线 1.5 pt,无竖线无内部横线。
 
@@ -566,7 +650,7 @@ def _three_line(
             unit_run.font.color.rgb = _rgb("595959")
 
     _header_block(table, headers, size, header_extra, meta, fill)
-    _body_block(table, rows, head_rows, status_col, meta, fill)
+    _body_block(table, rows, head_rows, status_col, meta, fill, center_cols)
 
     _span_widths(table, widths, span_rows, head_rows)
     return table
@@ -662,43 +746,226 @@ def _body_section(doc, case: dict, kind: str = "all"):
     return section
 
 
-def _cover(doc, case: dict, kind: str = "all") -> None:
-    """封面:主题色带 + 主标题 + 册别 + 工况信息块。"""
+def _set_table_width(table, cm: float) -> None:
+    """把表宽写死成 dxa。
+
+    python-docx 建表时留 `w:tblW = 0 / auto`,而 `autofit = False` 只改
+    `tblLayout`。两者并存时 Word 会按内容重算表宽 —— 窄表被拉满整页、
+    九列宽表被压扁,上面辛苦分的列宽全成"建议值"。所以先删旧的再插新的。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    tbl_pr = table._tbl.tblPr
+    for old in tbl_pr.findall(qn("w:tblW")):
+        tbl_pr.remove(old)
+    node = OxmlElement("w:tblW")
+    node.set(qn("w:w"), str(int(round(cm * 567))))
+    node.set(qn("w:type"), "dxa")
+    tbl_pr.insert_element_before(
+        node,
+        "w:jc",
+        "w:tblCellSpacing",
+        "w:tblInd",
+        "w:tblBorders",
+        "w:shd",
+        "w:tblLayout",
+        "w:tblCellMar",
+        "w:tblLook",
+        "w:tblCaption",
+        "w:tblDescription",
+    )
+
+
+def _gap(doc, points: float):
+    """精确空档:行距设成固定值,不靠「几个空段落」凑高度。
+
+    空段落撑间距在 Word / WPS / 网页转换器里的行高各不相同,封面会整体跑位;
+    固定行距只有一个解释。
+    """
+    from docx.shared import Pt
+
+    para = doc.add_paragraph()
+    fmt = para.paragraph_format
+    fmt.space_before = Pt(0)
+    fmt.space_after = Pt(0)
+    fmt.line_spacing = Pt(max(points, 1.0))
+    _font(para.add_run(""), Pt(1))
+    return para
+
+
+def _tracked(run, twentieths: int = 40) -> None:
+    """给 run 加字距:`w:spacing` 以 1/20 pt 计,60 就是疏排 3 pt。
+
+    只用于封面那行西文小标签 —— 疏排之后它读起来像"抬头",不像正文首句。
+    """
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    node = OxmlElement("w:spacing")
+    node.set(qn("w:val"), str(twentieths))
+    run._element.get_or_add_rPr().insert_element_before(
+        node, "w:w", "w:kern", "w:position", "w:sz", "w:szCs", "w:highlight"
+    )
+
+
+def _band(doc, rows, width_cm: float = 16.0) -> None:
+    """满宽色带:`rows` 是 `[(填充色, 高度 cm), ...]`。
+
+    几行叠在同一张表里,而不是并排几张一行表 —— 相邻的 `w:tbl` 会被 Word
+    并成一张,行高按后一张算,双色带就退化成一条实线。
+    """
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+    from docx.shared import Cm, Pt
+
+    table = doc.add_table(rows=len(rows), cols=1)
+    table.autofit = False
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_width(table, width_cm)
+    for row, (color, height_cm) in zip(table.rows, rows):
+        cell = row.cells[0]
+        cell.width = Cm(width_cm)
+        _shade(cell, color)
+        row.height = Cm(height_cm)
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
+        para = cell.paragraphs[0]
+        para.paragraph_format.space_before = Pt(0)
+        para.paragraph_format.space_after = Pt(0)
+        para.paragraph_format.line_spacing = Pt(1)
+        _font(para.add_run(""), Pt(1))
+
+
+def _cover_meta(doc, rows, meta) -> None:
+    """封面信息块:两列无框表 —— 标签右对齐贴住值,值左对齐并受宽度约束。
+
+    原来用制表位排:模型名一长就顶出右边距,标签与值还会挤成一坨(制表位在
+    部分渲染器里根本不生效)。表格是最笨也最稳的做法。
+    """
     from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Cm, Pt
+
+    label_w, value_w = 3.6, 12.4
+    table = doc.add_table(rows=len(rows), cols=2)
+    table.autofit = False
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+
+    _set_table_width(table, label_w + value_w)
+
+    # 信息块只用上下两条细线框住,不画格线 —— 有格线就像一张数据表,
+    # 而这里只是"这份报告属于哪个工况"。
+    borders = OxmlElement("w:tblBorders")
+    for edge, sz in (("top", 4), ("bottom", 4), ("left", 0), ("right", 0)):
+        node = OxmlElement(f"w:{edge}")
+        if sz:
+            node.set(qn("w:val"), "single")
+            node.set(qn("w:sz"), str(sz))
+            node.set(qn("w:color"), meta["accent"])
+        else:
+            node.set(qn("w:val"), "none")
+            node.set(qn("w:sz"), "0")
+        borders.append(node)
+    table._tbl.tblPr.insert_element_before(
+        borders, "w:shd", "w:tblLayout", "w:tblCellMar", "w:tblLook"
+    )
+
+    table.columns[0].width = Cm(label_w)
+    table.columns[1].width = Cm(value_w)
+
+    for row, (label, value) in zip(table.rows, rows):
+        lab_cell, val_cell = row.cells
+        lab_cell.width = Cm(label_w)
+        val_cell.width = Cm(value_w)
+        for cell, text, bold, color, align in (
+            (lab_cell, label, False, "7F7F7F", WD_ALIGN_PARAGRAPH.RIGHT),
+            (val_cell, str(value or ""), True, "262626", WD_ALIGN_PARAGRAPH.LEFT),
+        ):
+            para = cell.paragraphs[0]
+            para.alignment = align
+            para.paragraph_format.space_before = Pt(0)
+            para.paragraph_format.space_after = Pt(0)
+            para.paragraph_format.line_spacing = 1.25
+            _font(para.add_run(text), Pt(9.5), bold).font.color.rgb = _rgb(color)
+
+
+def _cover(
+    doc,
+    case: dict,
+    kind: str = "all",
+    title: str | None = None,
+    book: str | None = None,
+    extra_rows=None,
+) -> None:
+    """封面:双色带 + 抬头 + 主标题 + 主题色横线 + 册别 + 工况信息块 + 生成时间。
+
+    `title` / `book` / `extra_rows` 让别的导出(如管道表)复用同一张封面 ——
+    版式只有一处可改,不会两册长得不一样。
+    """
+    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Cm, Pt
 
     meta = kind_meta(kind)
+    title = title or meta["title"]
+    book = book or meta["book"]
 
-    band = doc.add_table(rows=1, cols=1)
-    band.autofit = False
-    band.alignment = WD_TABLE_ALIGNMENT.CENTER
-    cell = band.rows[0].cells[0]
-    cell.width = Cm(16.0)
+    _band(doc, [(meta["accent"], 0.30), (meta["light"], 0.07)])
+
+    kicker = doc.add_paragraph()
+    kicker.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    kicker.paragraph_format.space_before = Pt(140)
+    kicker.paragraph_format.space_after = Pt(0)
+    head = _font(kicker.add_run("CASEBOOK · 流程模拟数据校核"), Pt(8.5), False)
+    head.font.color.rgb = _rgb("8C8C8C")
+    _tracked(head, 30)  # 1.5 pt 疏排:够拉开,又不至于读成"C A S E B O O K"
+
+    _gap(doc, 8)
+    _para(
+        doc, title, Pt(27), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=0, name="黑体"
+    ).runs[0].font.color.rgb = _rgb(meta["accent"])
+
+    # 主标题下的短横线:宽度固定 4.2cm,不随内容伸缩,位置由表格居中决定
+    _gap(doc, 30)
+    line = doc.add_table(rows=1, cols=1)
+    line.autofit = False
+    line.alignment = WD_TABLE_ALIGNMENT.CENTER
+    _set_table_width(line, 4.2)
+    cell = line.rows[0].cells[0]
+    cell.width = Cm(4.2)
     _shade(cell, meta["accent"])
-    band.rows[0].height = Cm(0.45)
+    # 行高必须定死:不设的话行高跟着段落走(正文 1.22 倍行距),
+    # 一条 1 mm 的装饰线会撑成 1 cm 的实心色块
+    line.rows[0].height = Cm(0.10)
+    line.rows[0].height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
     para = cell.paragraphs[0]
+    para.paragraph_format.space_before = Pt(0)
     para.paragraph_format.space_after = Pt(0)
+    para.paragraph_format.line_spacing = Pt(1)
     _font(para.add_run(""), Pt(1))
 
-    _para(doc, "", Pt(10), space_after=60)
-    _para(
-        doc, meta["title"], Pt(26), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=10, name="黑体"
-    ).runs[0].font.color.rgb = _rgb(meta["accent"])
-    _para(doc, meta["book"], Pt(13), False, WD_ALIGN_PARAGRAPH.CENTER, space_after=8)
+    _gap(doc, 16)
+    # 合订本时 book 只是「衡算报告」,与主标题重复 —— 只在分册时才打在副标题位
+    if book and book != title and kind != "all":
+        _para(doc, book, Pt(12), False, WD_ALIGN_PARAGRAPH.CENTER, space_after=0).runs[
+            0
+        ].font.color.rgb = _rgb("595959")
+        _gap(doc, 6)
     _para(
         doc,
         "（依据本工具工况快照生成 · 非工程设计依据）",
-        Pt(9.5),
+        Pt(9),
         False,
         WD_ALIGN_PARAGRAPH.CENTER,
-        space_after=80,
-    )
+        space_after=0,
+    ).runs[0].font.color.rgb = _rgb("8C8C8C")
 
+    _gap(doc, 78)
     rows = [
         ("工况", case.get("model_name") or ""),
         ("工况号", f"#{case.get('id')}"),
-        ("读取时间", case.get("read_at") or ""),
+        ("读取时间", (case.get("read_at") or "").replace("T", " ")),
         ("Aspen 版本", case.get("aspen_version") or ""),
         (
             "收敛判定",
@@ -708,28 +975,19 @@ def _cover(doc, case: dict, kind: str = "all") -> None:
         ),
         ("流股 / 设备", f"{case.get('stream_count') or 0} / {case.get('block_count') or 0}"),
     ]
-    # 用制表位排信息块,不用表格 —— 表格在部分渲染器里会画出一圈莫名其妙的框线
-    from docx.enum.text import WD_TAB_ALIGNMENT
+    rows.extend(extra_rows or ())
+    _cover_meta(doc, rows, meta)
 
-    for label, value in rows:
-        para = doc.add_paragraph()
-        para.alignment = WD_ALIGN_PARAGRAPH.LEFT
-        para.paragraph_format.space_after = Pt(5)
-        stops = para.paragraph_format.tab_stops
-        stops.add_tab_stop(Cm(8.2), WD_TAB_ALIGNMENT.RIGHT)  # 标签右端
-        stops.add_tab_stop(Cm(8.6), WD_TAB_ALIGNMENT.LEFT)  # 值左端
-        _font(para.add_run(label + "\t"), Pt(10.5), False).font.color.rgb = _rgb("595959")
-        # 模型名可能很长:让它自然折到第二行,不要撑出右边距(内容不截断)
-        _font(para.add_run(value), Pt(9.5), True)
-
-    _para(doc, "", Pt(10), space_after=44)
-    _para(
+    _gap(doc, 56)
+    stamp = _para(
         doc,
         f"生成时间:{datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        Pt(9.5),
+        Pt(8.5),
         False,
         WD_ALIGN_PARAGRAPH.CENTER,
-    ).runs[0].font.color.rgb = _rgb("808080")
+        space_after=0,
+    )
+    stamp.runs[0].font.color.rgb = _rgb("A6A6A6")
     doc.add_page_break()
 
 
