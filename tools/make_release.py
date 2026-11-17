@@ -9,6 +9,8 @@
    `Casebook.exe` + `安装说明.txt` + `LICENSE`,解压出来只有这三个文件,
    给不装 Python 的同学用。
 
+版本号取自 `app/version.py`(运行期与发布包共用一处),不在本脚本里另写一份。
+
 ```bash
 python -m tools.build_exe        # 先出 exe
 python -m tools.make_release     # 再打两个包(会打印大小与 SHA-256)
@@ -25,13 +27,15 @@ import sys
 import zipfile
 from pathlib import Path
 
+from app import version
+
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "data" / "preview" / "dist"
 TXT_SRC = ROOT / "docs" / "install-text.txt"
 TXT_NAME = "安装说明.txt"
 PREFIX = "Casebook"
 EXE = DIST / "Casebook.exe"
-VERSION = "1.3.0"
+VERSION = version.__version__
 
 
 def _sha256(path: Path) -> str:

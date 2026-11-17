@@ -49,10 +49,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from app import paths
+from app import paths, version
 from app.design import component_names
 from app.store import db, flowsheet, impact
-from app.api import read_job
+from app.api import read_job, update_check
 from app.api import window as win
 
 # 只读资源(网页、图标)与可写数据(data/)分开:打包成 exe 后前者在临时解包目录,
@@ -297,6 +297,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"ok": True, "message": "服务已停止"})
                 # 必须换个线程关,否则会在请求处理线程里自己等自己
                 threading.Timer(0.2, self.server.shutdown).start()
+                return
+            if path == "/api/update/check":
+                # 手动检查更新:唯一的出站请求,固定访问 GitHub,只带 User-Agent。
+                # 走 POST 是为了过 X-Casebook-Client 校验 —— 任意网页不能借本地
+                # 服务替用户发起外网请求。实现见 app/api/update_check.py。
+                self._json(update_check.check())
                 return
             if path == "/api/read":
                 self._start_read()
@@ -1027,6 +1033,16 @@ class Handler(BaseHTTPRequestHandler):
         query = query or {}
         if parts == ["api", "health"]:
             self._json({"ok": True, "db": self.db_path})
+            return
+        if parts == ["api", "version"]:
+            # 只回本地常量,不联网;exe 里没有 .git,版本号一律来自 app/version.py
+            self._json(
+                {
+                    "version": version.__version__,
+                    "releases_url": version.RELEASES_URL,
+                    "frozen": paths.is_frozen(),
+                }
+            )
             return
         if parts == ["api", "read", "status"]:
             self._json(read_job.snapshot())

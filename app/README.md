@@ -4,6 +4,7 @@
 
 ```
 app/
+  version.py 版本号与 GitHub 仓库常量的唯一来源(运行期 / 发布包共用;exe 内没有 .git)
   paths.py 运行期基准目录:只读资源(app/web、assets)与可写数据(data/)分开;
            打包成 exe 后前者在临时解包目录,后者在 exe 旁边
   aspen/   与 Aspen COM 打交道的唯一地方
@@ -17,6 +18,7 @@ app/
     impact.py     报错设备 → 受影响流股(纯函数,分「不可用 / 仅告警」)
   api/     HTTP 服务(标准库,零第三方 Web 框架)
     server.py     路由 + 静态文件 + 导出
+    update_check.py 「检查更新」的版本比对(HEAD 302 → tag);唯一的出站请求,不下载不安装
     read_job.py   「读取当前工况」后台任务(状态机 + 进度 + 卡住提示)
     composition.py 组成按需读(先校验模型与运行 ID,避免旧快照混入)
     aipack.py     分析数据包(Markdown + CSV + JSON → zip)

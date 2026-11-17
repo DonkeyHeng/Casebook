@@ -5,6 +5,8 @@
 
 | 方法 | 路径 | 作用 |
 | --- | --- | --- |
+| GET | `/api/version` | 当前版本号、Releases 页地址与运行形态(`frozen` = 是否为 exe);只读本地常量,**不联网** |
+| POST | `/api/update/check` | **手动检查更新**:向 GitHub 查最新 tag 并与本地版本比对;不下载、不安装、不写盘;需带 `X-Casebook-Client: 1` |
 | POST | `/api/read` | 起一次后台读取;已有任务在跑时返回 409。body 可选 `{"include_composition": true}`,勾选后连流股组成一起读(慢:每条流股 36 次 COM 调用) |
 | GET | `/api/read/status` | 读取进度 / 结果(前端每 0.6 s 轮询) |
 | GET | `/api/compare?base=1&other=2` | 逐流股 + 逐设备对比两个工况(A / B / 差值 / 状态变化) |
@@ -127,11 +129,35 @@ X-Casebook-Client: 1
 - 删除是物理删除,工况的明细(流股 / 设备 / 连接 / 塔板 / 组成)一并清掉。
 - 导出 Excel 需要 `openpyxl`(见 `requirements.txt`)。
 
+## 版本与检查更新 `/api/version`、`/api/update/check`
+
+`/api/version` 只回 `app/version.py` 里的常量,不联网、不读 git(exe 内没有 `.git`):
+`{"version": "1.3.0", "releases_url": "…", "frozen": false}`。
+
+`/api/update/check` 是工程中**唯一的出站请求**,由用户在侧栏点击触发。实现用 `HEAD` 请求
+`github.com/DonkeyHeng/Casebook/releases/latest`,从 302 的 `Location` 解析最新 tag;
+不用 REST API 是因为未认证请求限额为 60 次/小时/IP(GitHub 官方文档),而这个端点不占配额。
+请求只带 `User-Agent`,不跟随重定向、不携带任何本地数据、超时 5 秒。
+
+| 字段 | 内容 |
+| --- | --- |
+| `ok` | 是否取到远端版本;离线 / 超时 / 响应异常时为 `false`,并给 `message` |
+| `current` / `latest` | 本地版本号 / GitHub 最新 tag(可能为 `null`) |
+| `has_update` | `true` 有新版本、`false` 已是最新、`null` 版本号非三段数字无法比对 |
+| `release_url` / `releases_url` | 该 tag 的下载页 / Releases 总页;前端链接需过域名白名单 |
+| `frozen` | 是否为 PyInstaller 单文件 exe(决定提示下载哪个包) |
+
+**只提示,不执行**:接口不下载、不解压、不替换任何文件,升级由用户手动完成。
+检查失败时 HTTP 状态仍为 200、`ok=false` —— 离线属预期情况,不是请求格式错误。
+因为是 POST,同样要过 `X-Casebook-Client` 校验:任意网页不能借本地服务替用户发起外网请求。
+
 ## 相关代码
 
 | 文件 | 职责 |
 | --- | --- |
+| `app/version.py` | 版本号与 GitHub 仓库常量的唯一来源(运行期 / 发布包共用) |
 | `app/api/server.py` | 路由、静态文件、导出 |
+| `app/api/update_check.py` | 手动检查更新的版本比对与网络降级 |
 | `app/api/read_job.py` | 读取后台任务(进度 / 状态机) |
 | `app/api/composition.py` | 组成按需读与缓存 |
 | `app/api/aipack.py` | AI 分析包生成 |
