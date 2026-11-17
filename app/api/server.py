@@ -1196,6 +1196,9 @@ class Handler(BaseHTTPRequestHandler):
             if parts[3] == "export-family.xlsx":
                 self._export_family(conn, case_id, query)
                 return
+            if parts[3] == "pipes.docx":
+                self._pipes_docx(conn, case_id)
+                return
             if parts[3] == "export.ai.zip":
                 self._export_ai(conn, case_id)
                 return
@@ -1349,6 +1352,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _pipes_docx(self, conn, case_id: int) -> None:
+        """GET /api/cases/{id}/pipes.docx —— 管道选型一览表(单张 Word)。
+
+        不并进 Excel 工作簿:那 9 列是版面表(列宽/字体/跨页表头),Word 才装得下;
+        工作簿继续管它的流股 / 设备 / 计算书。
+        """
+        from app.api import pipe_docx
+
+        try:
+            data, fname = pipe_docx.build_pipe_docx(conn, case_id)
+        except ImportError:
+            self._error("服务器没有安装 python-docx,无法导出 Word。请先 pip install python-docx", 500)
+            return
+        except LookupError:
+            self._error(f"没有 id={case_id} 的工况", 404)
+            return
+        except Exception as exc:  # 标准表没录、流股缺数等:把原因原样说清,不造数
+            self._error(f"管道表生成失败:{exc}", 400)
+            return
+
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
         self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
         self.send_header("Content-Length", str(len(data)))
@@ -1941,7 +1975,7 @@ if __name__ == "__main__":
 
 
 def build_workbook(conn, case_id: int) -> bytes:
-    """按工况生成 Excel 工作簿字节(概览 / 流股 / 设备 / 泵 / 连接 / 塔剖面 / 管道)。
+    """按工况生成 Excel 工作簿字节(概览 / 流股 / 设备 / 泵 / 连接 / 塔剖面 / 管道计算书)。
 
     拆成模块函数,自测就能在内存里生成并逐字段比对,不用起 HTTP 服务。
 
@@ -2214,51 +2248,18 @@ def build_workbook(conn, case_id: int) -> bytes:
         for f in pchecks["findings"]:
             hit_by_stream.setdefault(f["stream"], []).append(f["code"])
 
-        phase_text = {"liquid": "液体", "gas": "气体", "two": "气液共存"}
-        ws = wb.create_sheet("管道")
-        fill_sheet(
-            ws,
-            [
-                "流股",
-                "温度 ℃",
-                "压力 MPa(绝)",
-                "状态",
-                "体积流量 m³/h",
-                "公称直径",
-                "壁厚 mm",
-                "管材",
-                "类型",
-                "等级号",
-                "校验",
-                "备注",
-            ],
-            [
-                (
-                    r["stream"],
-                    next((s["temperature_c"] for s in streams if s["name"] == r["stream"]), None),
-                    next(
-                        (s["pressure_bar"] / 10.0 for s in streams if s["name"] == r["stream"]),
-                        None,
-                    ),
-                    phase_text.get(r["phase"], r["phase"]),
-                    r["vol_flow_m3h"],
-                    r["dn"],
-                    r["wall_mm"],
-                    r["material"],
-                    "无缝",
-                    r["grade_code"],
-                    " ".join(hit_by_stream.get(r["stream"], [])),
-                    "; ".join(r["warnings"]),
-                )
-                for r in pres["rows"]
-            ],
-            [16, 12, 16, 12, 18, 12, 10, 12, 8, 12, 12, 52],
-        )
+        # 管道选型一览表不放进工作簿:那 9 列是版面表(列宽 / 宋体五号 / 跨页表头),
+        # 单独出 Word 才贴得进报告(见 app/api/pipe_docx.py 与「管道」页的「导出 Word」)。
+        # 工作簿这边只留审计用的「管道计算书」和未选型清单。
+        # 未选型的流股单独一张表:混在选型表里会破坏那 9 列的可粘贴性
         if pres["missing"]:
-            ws.append([])
-            ws.append(["未选型的流股(缺数据或超出 DN600)"])
-            for m in pres["missing"]:
-                ws.append([m["stream"], "", "", "", "", "", "", "", "", "", "", m["reason"]])
+            ws2 = wb.create_sheet("未选型流股")
+            fill_sheet(
+                ws2,
+                ["流股", "原因"],
+                [(m["stream"], m["reason"]) for m in pres["missing"]],
+                [16, 78],
+            )
 
         ws = wb.create_sheet("管道计算书")
         fill_sheet(
@@ -2282,6 +2283,8 @@ def build_workbook(conn, case_id: int) -> bytes:
                 "负偏差 mm",
                 "壁厚是否按下限",
                 "等级号",
+                "校验",
+                "备注",
             ],
             [
                 (
@@ -2307,10 +2310,12 @@ def build_workbook(conn, case_id: int) -> bytes:
                     ),
                     "是" if r.get("wall_floored") else "",
                     r["grade_code"],
+                    " ".join(hit_by_stream.get(r["stream"], [])),
+                    "; ".join(r["warnings"]),
                 )
                 for r in pres["rows"]
             ],
-            [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 14, 12, 14, 12],
+            [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 14, 12, 14, 12, 10, 46],
         )
     except pipe_calc.TablesNotReady as exc:  # 标准表没录:写明原因与补录办法,不造数
         ws = wb.create_sheet("管道")
