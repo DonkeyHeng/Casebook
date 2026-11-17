@@ -14,6 +14,7 @@ Open a solved Aspen Plus model, click **"Read Current Case"**, and inspect all p
 > **Disclaimer & Copyright Notice**
 > 1. **Sample Data**: The sample database bundled in this repository comes from the author's personal coursework and process design competitions. It is provided strictly for demonstration purposes and may contain engineering inaccuracies. **Do NOT use it as a basis for actual engineering design.** Always rely on your own validated models.
 > 2. **Software License**: This is an independent personal project and is not affiliated with, endorsed by, or sponsored by Aspen Technology, Inc. It contains no Aspen software. A valid, licensed installation of Aspen Plus is required prior to use.
+> 3. **Network & Privacy**: All case data stays in the local `data/` directory and is never uploaded. The only outbound request happens when you explicitly click **"Check for Updates"** in the sidebar: a single request to `github.com` reads the latest release tag. It carries no local data, and nothing is downloaded, installed, or replaced. Without that click the application makes no network requests; offline use is unaffected except for this check.
 
 ---
 
@@ -27,6 +28,7 @@ Casebook does one thing well: **it extracts existing simulation results into cle
 - **Local Offline Snapshots**: Saves full-flowsheet snapshots into a local SQLite database with one click, enabling offline browsing and exporting anytime.
 - **Smart Convergence & Error Diagnostics**: Scans hard errors and convergence statuses automatically. Non-converged models are **still imported and flagged clearly in yellow** to prevent accidental misuse.
 - **Multi-Format Deliverables**: Generates ready-to-submit Word (`.docx`) Mass & Energy Balance Reports, multi-sheet Excel workbooks, or structured JSON/CSV packages for downstream scripts and AI analysis.
+- **Version & Update Check**: The sidebar always shows the current version. "Check for Updates" is the only outbound request: a single call to `github.com` that reads the latest release tag. It uploads no local data and never downloads or installs anything.
 
 ---
 
@@ -92,12 +94,13 @@ On first launch, the local database is empty (`data/cases.db` is excluded from G
 
 ## Release History
 
-**Current Version: [v1.3.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.3.0)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for full changelogs)
+**Current Version: [v1.4.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.4.0)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for full changelogs)
 
 - **Phase 1 (Core Extraction & Sizing)**: Snapshots, streams/equipment/tray profiles/flowsheet viewer, multi-case comparison, pipe sizing, and data exports.
 - **Phase 2 (Engineering Depth & UX)**: Categorized equipment views, pump hydraulics & $\text{NPSH}_a$ calculation, category-filtered Excel exports, and dark mode (strictly read-only).
 - **v1.2.0 (Balance Reports)**: Added Word `.docx` Mass & Energy Balance Reports, interactive section/battery-limit boundary confirmation, plant-wide conservation checks, and enthalpy balance validation for columns and reactors.
 - **v1.2.1 (Robustness fixes)**: Hardened write paths found by a code review — malformed requests no longer clear the piping-class table, sample install uses a consistent backup plus atomic replace, standards tables switch via versioned directories, numeric inputs reject NaN/Inf, and the safety scan fails closed. Four long functions were split up.
+- **v1.4.0 (Pipe sizing per current codes & document layout)**: Pipe sizing now derives design pressure from operating pressure, computes wall thickness per GB/T 20801.3 and re-checks the minimum thickness implied by the pipe class rating; two-phase lines are limited by homogeneous dynamic head and may not be smaller than the upstream liquid feed; process lines are floored at DN15; the size series extends to DN1000 with automatic welded-pipe selection above DN600; cold lines get a `-C` insulation suffix. The pipe schedule is now a standalone Word document (nine columns, three-line table, institute-style layout, with cover, header and page numbers) while the Excel workbook keeps only the audit worksheet. Balance report covers and layout were rebuilt, with mass and energy books produced separately. The first screen promotes the convergence verdict to the single focal point, adds semantic landmarks, dialog focus management and table header semantics, and batches table rendering into one frame. The sidebar now shows the version and offers a manual "Check for Updates" (the only outbound request; no local data is uploaded and nothing is downloaded).
 - **v1.3.0 (Pump design & selection ledger)**: Pump design inputs (pipe length, Σζ, fitting counts, property overrides, friction-factor method) and the selection ledger are now persisted under a content-hash model identity, with ledger values recomputed from the current case. Three friction-factor methods are selectable (Colebrook, Gu Yuzhen, manual λ). The pump drawer uses three collapsible panels sharing one scroll container. Added DOM-stub render regression and a headless UI sweep. Existing databases migrate automatically and previously entered values remain valid.
 
 <details>

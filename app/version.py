@@ -13,7 +13,7 @@
 
 from __future__ import annotations
 
-__version__ = "1.3.0"
+__version__ = "1.4.0"
 
 REPO_OWNER = "DonkeyHeng"
 REPO_NAME = "Casebook"
