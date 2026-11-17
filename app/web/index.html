@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Casebook · 工况数据</title>
   <link rel="icon" href="/favicon.ico" type="image/x-icon">
-  <link rel="stylesheet" href="/static/style.css">
+  <!-- 资源带版本串:本地服务已经发 no-store,但浏览器/扩展仍可能拿旧副本;
+         带 ?v= 的 URL 与旧副本不同,任何一层缓存都无法命中。改前端后把 v 往前推一位。 -->
+  <link rel="stylesheet" href="/static/style.css?v=20261117f">
   <script>
     /* 尽量早地定下主题:深色用户加载时不会先白闪一下。
        真正的三态(auto/light/dark)逻辑在 app.js,这里只是先写属性。 */
@@ -35,10 +37,12 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
     <symbol id="i-auto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.4 5.7M20 5v6h-6"/></symbol>
   </svg>
   <!-- 左侧栏:品牌 + 当前工况(全局语境)+ 模块导航 + 退出 -->
   <aside class="sidebar">
-    <div class="brand">Casebook</div>
+    <!-- 全文档唯一的 h1:页面标题(h2)都在 .page-head 里 -->
+    <h1 class="brand">Casebook</h1>
 
     <div class="side-case">
       <label class="side-label" for="caseSelect">当前工况</label>
@@ -52,8 +56,8 @@
       <div id="caseInfo" class="side-meta"></div>
     </div>
 
-    <nav class="side-nav">
-      <a class="nav-item" data-tab="home" href="#home">首页</a>
+    <nav class="side-nav" aria-label="模块导航">
+      <a class="nav-item active" data-tab="home" href="#home" aria-current="page">首页</a>
       <a class="nav-item" data-tab="streams" href="#streams">流股</a>
       <a class="nav-item" data-tab="pipes" href="#pipes">管道</a>
       <a class="nav-item" data-tab="blocks" href="#blocks">设备</a>
@@ -63,6 +67,15 @@
     </nav>
 
     <div class="side-foot">
+      <!-- 版本号常驻;「检查更新」是唯一的出站入口,不点不联网。
+           结果放在按按钮定位的浮层里(见 </body> 前),不占侧栏布局 -->
+      <div class="side-version">Casebook <span id="appVersion">—</span></div>
+      <button id="updateBtn" class="btn block with-ico" type="button"
+              title="手动检查 GitHub 上是否有新版本;只访问 GitHub,不上传任何本地数据">
+        <svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg>
+        <span id="updateBtnLabel">检查更新</span>
+      </button>
+
       <!-- 三态:跟随系统 → 浅色 → 深色。按钮上的图标与文字由 app.js 换 -->
       <button id="themeBtn" class="btn block with-ico" type="button" title="外观:跟随系统">
         <svg class="ico" id="themeIcon"><use href="#i-auto"/></svg>
@@ -72,7 +85,7 @@
     </div>
   </aside>
 
-  <div class="workspace">
+  <main class="workspace">
     <div id="readStatus" class="read-status hidden"></div>
 
     <!-- 首页:工况信息 / 收敛状态 / 规模 / 焓平衡 / 异常模块 -->
@@ -86,7 +99,10 @@
         </div>
       </header>
 
-      <div id="banner" class="banner hidden"></div>
+      <!-- 不要叫 #banner / .banner:广告拦截扩展的通用规则(###banner、##.banner)
+           会把它 display:none 掉,表现就是"判定条闪一下就不见了"(AdLock 实测命中)。
+           这一类规则认的是 id/class 字面量,所以这里用 verdict 这个中性名。 -->
+      <div id="verdict" class="verdict hidden"></div>
       <div id="homeCards" class="cards"></div>
 
       <section id="homeProblemsCard" class="card wide hidden">
@@ -197,7 +213,7 @@
             <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
           </div>
           <div class="btn-group">
-            <button id="pipeExportXlsx" class="btn" title="导出整个工况的 Excel(含「管道」「管道计算书」两张表)">导出 Excel</button>
+            <button id="pipeExportDocx" class="btn" title="把这张管道选型表导成 Word(.docx),版式对齐报告附录:宋体五号、居中、三线表">导出 Word</button>
             <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
           </div>
           <div class="btn-group">
@@ -491,8 +507,10 @@
         <h2 id="pageTitle">流股</h2>
       </header>
 
-      <nav class="toolbar">
-        <input id="filter" type="search" placeholder="按名称筛选…" autocomplete="off">
+      <!-- 这是工具条不是导航:用 div + role=group,免得读屏把"筛选框 + 导出按钮"
+           念成第二个导航地标 -->
+      <div class="toolbar" role="group" aria-label="表格工具条">
+        <input id="filter" type="search" placeholder="按名称筛选…" autocomplete="off" aria-label="按名称筛选">
         <!-- 设备页的类型页签:按钮由 app.js 按 /api/block-families 现填 -->
         <span id="blockFamilies" class="segmented family-bar hidden" role="tablist" aria-label="设备类型"></span>
         <span id="compareScope" class="segmented hidden">
@@ -509,7 +527,7 @@
           <label>对比 <select id="otherSelect"></select></label>
           <span id="compareSummary" class="muted"></span>
         </span>
-      </nav>
+      </div>
 
       <!-- 请求提示:换工况 / 跑对比期间说清"屏幕上是哪一份数据",失败时说清原因 -->
       <p id="dataNotice" class="notice hidden" role="status" aria-live="polite"></p>
@@ -563,7 +581,10 @@
       </div>
       <p id="empty" class="empty hidden">还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。</p>
 
-      <section id="columnPanel" class="column-panel hidden">
+      <!-- tabindex:-1 让打开时能把焦点移进来(见 app.js focusIntoDrawer);
+           role=region + aria-labelledby 让读屏念出"这是哪个抽屉" -->
+      <section id="columnPanel" class="column-panel hidden" role="region"
+               aria-labelledby="columnTitle" tabindex="-1">
         <header class="panel-head">
           <h3 id="columnTitle">塔剖面</h3>
           <button id="closeColumn" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
@@ -574,7 +595,8 @@
         </div>
       </section>
 
-      <section id="pumpPanel" class="column-panel hidden">
+      <section id="pumpPanel" class="column-panel hidden" role="region"
+               aria-labelledby="pumpTitle" tabindex="-1">
         <header class="panel-head">
           <h3 id="pumpTitle">泵参数</h3>
           <button id="closePump" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
@@ -602,7 +624,8 @@
         </div>
       </section>
 
-      <section id="compPanel" class="column-panel comp-panel hidden">
+      <section id="compPanel" class="column-panel comp-panel hidden" role="region"
+               aria-labelledby="compTitle" tabindex="-1">
         <header class="panel-head">
           <h3 id="compTitle">流股组成</h3>
           <button id="closeComp" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
@@ -610,13 +633,26 @@
         <div id="compBody" class="comp-body"></div>
       </section>
     </section>
-  </div>
+  </main>
 
   <div id="chartTip" class="chart-tip hidden"></div>
 
+  <!-- 「检查更新」结果浮层:贴在按钮上方,不占侧栏布局;点空白 / Esc / ✕ 关闭。
+       focusable 是为了打开时能把焦点移进来(见 docs/ui-style.md §6) -->
+  <div id="updateNote" class="update-pop hidden" role="dialog" aria-modal="false"
+       aria-label="检查更新结果" tabindex="-1">
+    <div class="update-pop-head">
+      <span class="update-pop-title">检查更新</span>
+      <button id="updateClose" class="update-pop-close" type="button" title="关闭">
+        <svg class="ico" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <div id="updateNoteBody"></div>
+  </div>
+
   <!-- pipe.js 必须排在 app.js 前面:app.js 末尾会立刻调 init() → bindEvents(),
        那时管道页的 initPipePanel / renderPipes 必须已经存在 -->
-  <script src="/static/pipe.js"></script>
-  <script src="/static/app.js"></script>
+  <script src="/static/pipe.js?v=20261117f"></script>
+  <script src="/static/app.js?v=20261117f"></script>
 </body>
 </html>

@@ -293,33 +293,33 @@ function blockBadge(status) {
 /* ------------------------------------------------------------ 顶部 */
 
 function renderBanner() {
-  const el = document.getElementById("banner");
+  const el = document.getElementById("verdict");
   const c = state.current;
   // 对比页也保留这块位置:切换页签时顶部不跳,布局更稳
-  if (!c) { el.className = "banner hidden"; return; }
+  if (!c) { el.className = "verdict hidden"; return; }
 
   const s = SEVERITY[c.severity] || SEVERITY.warning;
   const list = c.reasons || [];
   const reasons = list.map((r) => `<div class="reason">· ${esc(r)}</div>`).join("");
   const hasReasons = list.length > 0;
 
-  el.className = `banner ${s.cls}` + (state.bannerCollapsed && hasReasons ? " collapsed" : "");
+  el.className = `verdict ${s.cls}` + (state.bannerCollapsed && hasReasons ? " collapsed" : "");
   el.innerHTML = `
-    <div class="banner-head">
-      <span class="banner-title">
+    <div class="verdict-head">
+      <span class="verdict-meta">
         <strong>${s.text}</strong>　流股 ${c.stream_count} 条 / 设备 ${c.block_count} 个${
           c.run_id ? `　运行 ID ${esc(c.run_id)}` : ""}
       </span>
-      ${hasReasons ? `<button class="banner-toggle" id="bannerToggle" type="button"
+      ${hasReasons ? `<button class="verdict-toggle" id="verdictToggle" type="button"
               title="${state.bannerCollapsed ? "展开问题清单" : "收起问题清单"}">
         ${state.bannerCollapsed ? "展开 ▾" : "收起 ▴"}
       </button>` : ""}
     </div>
-    <div class="banner-verdict">${esc(bannerVerdict(c))}</div>
-    ${hasReasons ? `<div class="banner-body">${reasons}</div>` : ""}`;
+    <div class="verdict-say">${esc(bannerVerdict(c))}</div>
+    ${hasReasons ? `<div class="verdict-body">${reasons}</div>` : ""}`;
 
   // 没有理由就不给「展开」—— 点开是空的,比没有按钮更让人困惑
-  const toggle = document.getElementById("bannerToggle");
+  const toggle = document.getElementById("verdictToggle");
   if (toggle) {
     toggle.addEventListener("click", () => {
       state.bannerCollapsed = !state.bannerCollapsed;
@@ -329,7 +329,7 @@ function renderBanner() {
 }
 
 /* 横幅里那句"所以能不能用" —— 只说结论,不复述状态码。
-   放在 .banner-body 外面,折叠时它仍然可见:收起的只是明细,结论不该被收起。 */
+   放在 .verdict-body 外面,折叠时它仍然可见:收起的只是明细,结论不该被收起。 */
 function bannerVerdict(c) {
   const errors = (c.block_errors || []).length;
   const warns = (c.block_warnings || []).length;
@@ -576,7 +576,7 @@ function readPumpBar() {
     wrap.classList.add("hidden");
     state.pump.margin = Number(sel.value) || 1;
   }
-  renderTable();
+  scheduleTableRender();   // 自定义余量是逐键输入的,合并到一帧
 }
 
 function rowsForTab() {
@@ -615,7 +615,7 @@ function renderStreams() {
   const hits = impactMap();
   const thead = document.querySelector("#table thead");
   const tbody = document.querySelector("#table tbody");
-  thead.innerHTML = `<tr>${cols.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr>`;
+  thead.innerHTML = `<tr>${cols.map((c) => `<th scope="col" class="${c.num ? "num" : ""}">${esc(c.label)}</th>`).join("")}</tr>`;
   tbody.innerHTML = rows.map((row) => {
     const hit = hits.get(row.name);
     const rowCls = hit ? (hit.severity === "error" ? " row-err" : " row-warn") : "";
@@ -631,12 +631,8 @@ function renderStreams() {
     }).join("")}</tr>`;
   }).join("");
 
-  tbody.querySelectorAll(".stream-link").forEach((a) => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      openComposition(a.dataset.stream);
-    });
-  });
+  // 流股名的点击统一由 #table tbody 上的事件委托处理(见 bindEvents),
+  // 每次重绘都重绑的话,120 行就是 120 个监听器
   let count = `${rows.length} 行`;
   const sm = state.impact && state.impact.summary;
   if (sm && sm.error) count += ` · ${sm.error} 条受报错影响`;
@@ -659,7 +655,7 @@ function renderBlocks() {
     const label = c.scaled && margin !== 1 ? `${c.label} ×${margin}` : c.label;
     const tip = c.tip === "motor" ? (spec ? spec.motor_rule : "")
       : c.tip === "npsh" ? (spec ? spec.npsh_rule : "") : "";
-    return `<th class="${c.num ? "num" : ""}"${tip ? ` title="${esc(tip)}"` : ""}>${esc(label)}</th>`;
+    return `<th scope="col" class="${c.num ? "num" : ""}"${tip ? ` title="${esc(tip)}"` : ""}>${esc(label)}</th>`;
   }).join("")}</tr>`;
   tbody.innerHTML = rows.map((row) => {
     const isColumn = COLUMN_TYPE.test(row.type || "");
@@ -714,18 +710,7 @@ function renderBlocks() {
     }).join("")}</tr>`;
   }).join("");
 
-  tbody.querySelectorAll(".col-link").forEach((a) => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      openColumn(a.dataset.block);
-    });
-  });
-  tbody.querySelectorAll(".pump-link").forEach((a) => {
-    a.addEventListener("click", (e) => {
-      e.preventDefault();
-      openPump(a.dataset.block);
-    });
-  });
+  // 塔名 / 泵名的点击同样走 #table tbody 上的事件委托(见 bindEvents)
   // 台账摘要:统计当前家族的焓平衡四态(表格只显示这一个家族,不能拿全量数字糊弄)
   const bs = { ok: 0, bad: 0, no_data: 0, skip: 0 };
   rows.forEach((b) => {
@@ -799,7 +784,7 @@ function renderCompare() {
   const head = ["流股"];
   COMPARE_FIELDS.forEach((f) => head.push(`${f.label} A`, `${f.label} B`, "Δ"));
   thead.innerHTML = `<tr>${head.map((h, i) =>
-    `<th class="${i === 0 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
+    `<th scope="col" class="${i === 0 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
 
   // 对比数据是接口给的;缺字段时只显示「—」,不抛 TypeError 让整块表格空白
   const q = String(state.filter || "").trim().toLowerCase();
@@ -835,7 +820,7 @@ function renderCompareBlocks(thead, tbody, data) {
   const head = ["设备", "类型", "状态", "焓平衡"];
   BLOCK_COMPARE_FIELDS.forEach((f) => head.push(`${f.label} A`, `${f.label} B`, "Δ"));
   thead.innerHTML = `<tr>${head.map((h, i) =>
-    `<th class="${i === 0 ? "cmp-name" : i < 4 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
+    `<th scope="col" class="${i === 0 ? "cmp-name" : i < 4 ? "" : "num"}">${esc(h)}</th>`).join("")}</tr>`;
 
   const q = String(state.filter || "").trim().toLowerCase();
   const rows = (data.blocks || []).filter(
@@ -900,6 +885,18 @@ function renderTable() {
   syncTableEmpty();
 }
 
+/* 一帧只重画一次:筛选框与余量输入都是逐键触发的,直接 renderTable() 的话
+   打一个 5 字的词要重绘 5 遍(120 行 × 11 列 ≈ 1300 个单元格)。
+   合并到下一帧后,连续按键只留下最后状态,与"看得见的延迟"没有区别。 */
+let tableRenderFrame = 0;
+function scheduleTableRender() {
+  if (tableRenderFrame) return;
+  tableRenderFrame = requestAnimationFrame(() => {
+    tableRenderFrame = 0;
+    renderTable();
+  });
+}
+
 /* 表画完再决定 #empty 露不露。
    原来这里无条件 add("hidden"),把「还没有工况」的引导也一起藏了 ——
    空库点进流股页只剩一张只有表头、写着「0 行」的白表,没有任何下一步。 */
@@ -957,8 +954,10 @@ function isOutsideDrawerClick(evt) {
   return true;
 }
 
-/* Esc 关抽屉:三个抽屉都有 ✕ 按钮,键盘用户也该能关 */
-function closeDataDrawers() {
+/* Esc 关抽屉:三个抽屉都有 ✕ 按钮,键盘用户也该能关。
+   restore=true 时把焦点还给打开它的那一行(屏幕阅读器/键盘用户才回得到原位);
+   换页、换页签、点空白这些"用户已经去了别处"的收法不还,否则焦点会被抢回来。 */
+function closeDataDrawers({ restore = false } = {}) {
   let closed = false;
   ["columnPanel", "pumpPanel", "compPanel"].forEach((id) => {
     const el = document.getElementById(id);
@@ -967,7 +966,31 @@ function closeDataDrawers() {
       closed = true;
     }
   });
+  if (closed && restore) restoreDrawerFocus();
   return closed;
+}
+
+/* 抽屉的焦点接管 —— 与 pipe.js 的 focusIntoModal / restoreModalFocus 同一口径。
+   抽屉不是 modal(点外面能关),所以不做焦点陷阱,但必须:
+   打开时把焦点移进去(否则 Tab 还在背后的表格里走),关闭时还回触发它的那一行。 */
+const drawerFocus = { trigger: null };
+
+function focusIntoDrawer(panel) {
+  if (!panel) return;
+  const active = document.activeElement;
+  // 从另一个抽屉跳过来时不覆盖触发点:还回去的应该是最初那一行
+  if (!active || !active.closest || !active.closest(".column-panel")) {
+    drawerFocus.trigger = active;
+  }
+  panel.focus({ preventScroll: true });
+}
+
+function restoreDrawerFocus() {
+  const t = drawerFocus.trigger;
+  drawerFocus.trigger = null;
+  if (!t || !document.contains(t)) return;
+  if (t.closest && t.closest(".column-panel")) return;   // 触发点自己在抽屉里,别还
+  if (typeof t.focus === "function") t.focus({ preventScroll: true });
 }
 
 /* ------------------------------------------------------------ 塔剖面 */
@@ -1184,6 +1207,7 @@ function openPump(block) {
   document.getElementById("pumpTitle").textContent = `泵参数 · ${block}`;
   panel.classList.remove("hidden");
   markDrawerOpened();
+  focusIntoDrawer(panel);
   // 抽屉本身不滚,滚的是里面那条唯一的滚动容器
   const scroll = panel.querySelector(".pump-panel-scroll");
   if (scroll) scroll.scrollTop = 0;
@@ -1223,7 +1247,7 @@ function openPump(block) {
     kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),
   ];
   document.querySelector("#pumpTable thead").innerHTML =
-    '<tr><th>参数</th><th class="num">值</th><th>来源</th></tr>';
+    '<tr><th scope="col">参数</th><th scope="col" class="num">值</th><th scope="col">来源</th></tr>';
   document.querySelector("#pumpTable tbody").innerHTML = rows.join("");
   fillPumpParamsBrief(row);
   bindPumpFold(document.getElementById("pumpParams"), "params");
@@ -1236,7 +1260,7 @@ function openPump(block) {
       copyBtn.textContent = ok ? "已复制" : "复制失败,请手动选中";
       setTimeout(() => {
         copyBtn.textContent = "复制选型参数";
-      }, 1500);
+      }, 700);
     };
   }
 
@@ -1692,6 +1716,7 @@ async function openColumn(block) {
   document.getElementById("columnTitle").textContent = `塔剖面 · ${block}`;
   panel.classList.remove("hidden");
   markDrawerOpened();
+  focusIntoDrawer(panel);
   panel.scrollTop = 0;   // 看另一座塔时别带着上一座的滚动位置
 
   // 先给占位:接口慢或失败时原来是一块白板(openColumn 的 reject 没人接)
@@ -1741,8 +1766,8 @@ async function openColumn(block) {
 
   const thead = document.querySelector("#columnTable thead");
   const tbody = document.querySelector("#columnTable tbody");
-  thead.innerHTML = `<tr><th>级</th><th class="num">温度 ℃</th><th class="num">压力 bar</th>
-    <th class="num">液流量</th><th class="num">气流量</th><th class="num">热负荷 kW</th></tr>`;
+  thead.innerHTML = `<tr><th scope="col">级</th><th scope="col" class="num">温度 ℃</th><th scope="col" class="num">压力 bar</th>
+    <th scope="col" class="num">液流量</th><th scope="col" class="num">气流量</th><th scope="col" class="num">热负荷 kW</th></tr>`;
   tbody.innerHTML = rows.map((r) => `<tr>
     <td>${r.stage}</td>
     <td class="num">${fmt(r.temperature_c, 2)}</td>
@@ -1819,7 +1844,34 @@ function phaseRow(label, key, comps, sum) {
   </div>`;
 }
 
-const compState = { seq: 0 };
+/* 气相 / 液相各占多少 —— 一条独立的 "气液比"。
+   除以摩尔流量: Aspen 的汽化率(VFRAC)本身就是摩尔基准,直接乘总摩尔流量就是
+   两相各自的摩尔流量,不用估;换成质量基准要按每个组分的分子量折算,而抽屉里
+   没有分子量,那样算出来是估数,不如不给。
+   组分条回答"气相里有什么",这一条回答"气相有多少" —— 两个问题不一样。 */
+function flowSplitRow(row) {
+  const vf = row && typeof row.vap_frac === "number" ? row.vap_frac : null;
+  const total = row && typeof row.mole_flow_kmolh === "number" ? row.mole_flow_kmolh : null;
+  if (vf === null || total === null) return "";
+
+  const vap = total * vf;
+  const liq = total - vap;
+  const share = Math.min(100, Math.max(0, vf * 100));
+  const ratio = vf >= 1 ? null : vf <= 0 ? 0 : vf / (1 - vf);
+  const ratioText = ratio === null ? "全气相" : ratio === 0 ? "全液相" : `气/液 ${ratio.toFixed(2)}`;
+  const legend = `液相 ${fmt(liq, 2)} · 气相 ${fmt(vap, 2)} kmol/h · ${ratioText}`;
+
+  return `<div class="phase-row flow-row">
+    <span class="phase-label">气/液</span>
+    <span class="phase-bar">
+      <i class="phase-seg" style="width:${(100 - share).toFixed(2)}%;background:${cssVar("--chart-1")}"></i>
+      <i class="phase-seg" style="width:${share.toFixed(2)}%;background:${cssVar("--chart-2")}"></i>
+    </span>
+    <span class="phase-legend" title="按摩尔流量拆分:总摩尔流量 × 汽化率 = 气相,余下为液相。气/液 = 汽化率 /（1 − 汽化率)">${esc(legend)}</span>
+  </div>`;
+}
+
+const compState = { seq: 0, stream: null };   // stream:重绘(切零组分/CAS)时还要知道是哪条流股
 
 async function openComposition(stream) {
   const panel = document.getElementById("compPanel");
@@ -1829,7 +1881,9 @@ async function openComposition(stream) {
     '<p class="comp-note">正在读取…(工况里存过就直接取;没存过会去当前打开的 Aspen 现读一次,约 0.3 秒)</p>';
   panel.classList.remove("hidden");
   markDrawerOpened();
+  focusIntoDrawer(panel);
 
+  compState.stream = stream;   // 之后的重绘(切零组分、补 CAS)要靠它取气液比
   // 连点不同流股时,只认最后一次请求的结果,避免慢的响应盖掉新的
   const seq = ++compState.seq;
   let data;
@@ -1842,7 +1896,7 @@ async function openComposition(stream) {
     return;
   }
   if (seq !== compState.seq) return;
-  renderComposition(data);
+  renderComposition(data, stream);
 }
 
 /* 含量为 0 的组分默认收起来:一屏几十行 0 既占地方又没信息量。
@@ -1864,7 +1918,7 @@ function casCheckOk(raw) {
   return sum % 10 === check;
 }
 
-function renderComposition(data) {
+function renderComposition(data, streamName) {
   const body = document.getElementById("compBody");
   const comps = data.components || [];
   const zeroCount = comps.filter(compIsZero).length;
@@ -1918,13 +1972,14 @@ function renderComposition(data) {
     ${tools.length ? `<div class="comp-tools">${tools.join("")}</div>` : ""}
     <div class="comp-table-wrap">
       <table>
-        <thead><tr><th>组分</th><th class="num">液相摩尔分数 x</th><th class="num">气相摩尔分数 y</th></tr></thead>
+        <thead><tr><th scope="col">组分</th><th scope="col" class="num">液相摩尔分数 x</th><th scope="col" class="num">气相摩尔分数 y</th></tr></thead>
         <tbody>${emptyRows}</tbody>
       </table>
     </div>
     <div class="comp-foot">
       ${phaseRow("液相", "x_liq", comps, data.sum_x)}
       ${phaseRow("气相", "y_vap", comps, data.sum_y)}
+      ${flowSplitRow(state.streams.find((r) => r.name === (streamName || compState.stream)))}
       <p class="comp-sum">共 ${data.count} 个组分${
         zeroCount && !compShowAll ? ` · 显示 ${shown.length} 个` : ""} · 合计 x = ${fmt(data.sum_x, 4)} · 合计 y = ${fmt(data.sum_y, 4)}${
         data.cas_total ? ` · CAS ${data.cas_found}/${data.cas_total}` : ""}${
@@ -3415,8 +3470,13 @@ function setPage(page, { push = true } = {}) {
   // 只是把整页藏起来的话,绕一圈回到设备页它又会冒出来
   closeDataDrawers();
   state.page = page;
-  document.querySelectorAll(".side-nav .nav-item").forEach((b) =>
-    b.classList.toggle("active", b.dataset.tab === page));
+  // aria-current 与 .active 同步:视觉上"你在这页"只靠底色,读屏听不出来
+  document.querySelectorAll(".side-nav .nav-item").forEach((b) => {
+    const on = b.dataset.tab === page;
+    b.classList.toggle("active", on);
+    if (on) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
 
   const isHome = page === "home";
   const isFlow = page === "flow";
@@ -3572,6 +3632,12 @@ function renderHome() {
   } else {
     problemsCard.classList.add("hidden");
   }
+
+  /* 卡片画完再对一次判定条:首页既然有数据,判定条就不该是 hidden。
+     它俩是一个整体(横幅说"能不能用",卡片说"用了哪些数"),任何一路把横幅
+     收起来都是不自洽的状态。renderBanner 很便宜(几百个字符),多画一次换掉
+     一整类"横幅不见了但卡片还在"的怪状态。 */
+  if (state.current) renderBanner();
 }
 
 /* 删除当前工况:不可恢复,所以确认框里把"删的是哪一个"写全(模型名 + 时间 + 规模)*/
@@ -3615,6 +3681,150 @@ async function deleteCurrentCase() {
   }
 }
 
+/* ================================================================
+   侧栏「检查更新」:只有用户点按钮才产生出站请求。
+   结果放在按按钮位置定位的浮层里,不占侧栏布局;点空白 / Esc / ✕ 关闭。
+   服务端固定访问 GitHub 的 /releases/latest,只带版本号做 User-Agent,
+   不发送任何本地工况数据;不下载、不解压、不安装(见 app/api/update_check.py)。
+   ================================================================ */
+let updateReleasesUrl = "https://github.com/DonkeyHeng/Casebook/releases";
+let updatePopOpen = false;
+let updateDismissed = false;   // 检查途中被用户关掉:结果回来不再自动弹出
+
+function verLabel(value) {
+  const text = String(value ?? "").trim();
+  return text.startsWith("v") ? text : `v${text}`;
+}
+
+/* 远端返回的地址一律过白名单:只认本仓库的 Releases 前缀。
+   万一 GitHub 改了重定向格式,页面也不会出现来路不明的链接。 */
+function updateLink(url, text) {
+  const base = updateReleasesUrl;
+  const safe = typeof url === "string" && (url === base || url.startsWith(`${base}/`))
+    ? url : base;
+  return `<a href="${esc(safe)}" target="_blank" rel="noopener noreferrer">${esc(text)}</a>`;
+}
+
+/* 浮层贴在按钮上方;上方放不下就翻到下方。宽度按视口收窄,窄屏不溢出。 */
+function positionUpdatePop() {
+  const pop = document.getElementById("updateNote");
+  const btn = document.getElementById("updateBtn");
+  if (!pop || !btn) return;
+  const rect = btn.getBoundingClientRect();
+  const width = Math.min(300, window.innerWidth - 24);
+  pop.style.width = `${width}px`;
+  const height = pop.offsetHeight;
+  const left = Math.max(12, Math.min(rect.left, window.innerWidth - width - 12));
+  const above = rect.top - height - 8;
+  const top = above >= 12 ? above : rect.bottom + 8;
+  pop.style.left = `${left}px`;
+  pop.style.top = `${Math.max(12, Math.min(top, window.innerHeight - height - 12))}px`;
+}
+
+function openUpdatePop() {
+  const pop = document.getElementById("updateNote");
+  if (!pop) return;
+  pop.classList.remove("hidden");
+  updatePopOpen = true;
+  positionUpdatePop();
+  pop.focus({ preventScroll: true });   // 打开时焦点移进来,关闭时还给按钮
+}
+
+/* byUser:用户主动关闭(点空白 / Esc / ✕)。关掉之后,还在路上的检查结果不再自动弹窗 */
+function closeUpdatePop({ byUser = false } = {}) {
+  const pop = document.getElementById("updateNote");
+  if (!pop) return false;
+  if (byUser) updateDismissed = true;
+  if (!updatePopOpen) return false;
+  pop.classList.add("hidden");
+  updatePopOpen = false;
+  if (byUser) {
+    const btn = document.getElementById("updateBtn");
+    if (btn) btn.focus({ preventScroll: true });
+  }
+  return true;
+}
+
+function showUpdateNote(html, { err = false } = {}) {
+  const pop = document.getElementById("updateNote");
+  const body = document.getElementById("updateNoteBody");
+  if (!pop || !body) return;
+  pop.classList.toggle("err", err);
+  body.innerHTML = html;
+  if (!updateDismissed) {
+    openUpdatePop();
+  } else if (updatePopOpen) {
+    positionUpdatePop();   // 已开着但内容高度变了:重新贴一次
+  }
+}
+
+/* 当前版本只读本地 /api/version,不联网;离线也能显示。 */
+async function loadAppVersion() {
+  const el = document.getElementById("appVersion");
+  if (!el) return;
+  try {
+    const res = await fetch("/api/version");
+    const data = await res.json();
+    el.textContent = data.version ? verLabel(data.version) : "—";
+    if (typeof data.releases_url === "string" && data.releases_url.startsWith("https://github.com/")) {
+      updateReleasesUrl = data.releases_url.replace(/\/$/, "");
+    }
+  } catch (err) {
+    el.textContent = "—";
+  }
+}
+
+async function checkForUpdate() {
+  const btn = document.getElementById("updateBtn");
+  const label = document.getElementById("updateBtnLabel");
+  const fallback = () => `也可手动打开 ${updateLink(updateReleasesUrl, "Releases 页面")} 查看。`;
+  updateDismissed = false;   // 新的一次检查:之前手动关掉的不影响这次展示
+  if (btn) btn.disabled = true;
+  if (label) label.textContent = "正在检查…";
+  showUpdateNote("正在向 GitHub 查询最新版本号…");
+  try {
+    const res = await fetch("/api/update/check", writeInit({ method: "POST" }));
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `请求失败:${res.status}`);
+    if (typeof data.releases_url === "string" && data.releases_url.startsWith("https://github.com/")) {
+      updateReleasesUrl = data.releases_url.replace(/\/$/, "");
+    }
+    if (!data.ok) {
+      showUpdateNote(`检查失败:${esc(data.message || "网络不可用")}。<br>${fallback()}`, { err: true });
+      return;
+    }
+    if (data.has_update === true) {
+      const how = data.frozen
+        ? "下载 Windows 包后解压覆盖,<strong>保留自己的 data/ 目录</strong>。"
+        : "下载源码包解压覆盖(或 git pull),<strong>保留自己的 data/ 目录</strong>。";
+      showUpdateNote(
+        `发现新版本 <strong>${esc(verLabel(data.latest))}</strong>`
+        + `（当前 ${esc(verLabel(data.current))}）。<br>`
+        + `${updateLink(data.release_url, "打开下载页")}　${how}<br>${fallback()}`
+      );
+    } else if (data.has_update === false) {
+      showUpdateNote(
+        `当前 ${esc(verLabel(data.current))} · GitHub 最新 ${esc(verLabel(data.latest))},`
+        + `未发现更新版本。<br>${fallback()}`
+      );
+    } else {
+      showUpdateNote(
+        `当前 ${esc(verLabel(data.current))},GitHub 上最新为 ${esc(verLabel(data.latest))}。<br>`
+        + `${esc(data.message || "版本号无法自动比对")}<br>${fallback()}`
+      );
+    }
+  } catch (err) {
+    // fetch 本身失败时浏览器抛的是 "Failed to fetch" 这类英文串,不能直接给用户看
+    const raw = String((err && err.message) || "");
+    const reason = /^(failed to fetch|networkerror|load failed|fetch failed)$/i.test(raw)
+      ? "无法连接到本地服务" : (raw || "未知错误");
+    showUpdateNote(`检查失败:${esc(reason)}。<br>${fallback()}`, { err: true });
+  } finally {
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = "检查更新";
+  }
+}
+
 /* 退出:停服务并关掉窗口(应用窗口模式下 window.close() 生效) */
 async function quitApp() {
   if (!confirm("确定退出 Casebook 吗?\n后台服务会一起停止。")) return;
@@ -3637,6 +3847,26 @@ async function quitApp() {
 function bindEvents() {
   initPipePanel();      // 管道页的参数面板与事件(pipe.js)
 
+  document.getElementById("updateBtn").addEventListener("click", checkForUpdate);
+  document.getElementById("updateClose").addEventListener("click", () => {
+    closeUpdatePop({ byUser: true });
+  });
+  // 点浮层与触发按钮之外的地方都算「空白」;打开那一下的冒泡由 contains 判断挡掉
+  document.addEventListener("click", (event) => {
+    if (!updatePopOpen) return;
+    const pop = document.getElementById("updateNote");
+    const btn = document.getElementById("updateBtn");
+    if (pop && pop.contains(event.target)) return;
+    if (btn && btn.contains(event.target)) return;
+    closeUpdatePop({ byUser: true });
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && updatePopOpen) closeUpdatePop({ byUser: true });
+  });
+  window.addEventListener("resize", () => {
+    if (updatePopOpen) positionUpdatePop();
+  });
+
   document.getElementById("caseSelect").addEventListener("change", (e) => {
     loadCase(Number(e.target.value));
   });
@@ -3656,8 +3886,9 @@ function bindEvents() {
 
   document.getElementById("filter").addEventListener("input", (e) => {
     state.filter = e.target.value;
+    // 对比页有自己的渲染入口,其余两种走同一帧合并
     if (state.tab === "compare") renderCompare();
-    else renderTable();
+    else scheduleTableRender();
   });
 
   // 泵参数条:余量一改就重算表格(只改显示,不写库)
@@ -3666,14 +3897,23 @@ function bindEvents() {
     if (el) el.addEventListener("input", readPumpBar);
   });
 
-  // p_v 是逐台输入框,表格会整块重绘,所以用事件委托挂一次就够
-  const blockTable = document.querySelector("#table tbody");
-  if (blockTable) {
-    blockTable.addEventListener("input", (e) => {
+  // p_v 与表格里的可点名称都挂在 #table tbody 上:表格整块重绘,委托一次就够。
+  // 以前每次重绘都要给每一行重绑 —— 120 行就是 120 个监听器,还都要被回收一遍。
+  const tableBody = document.querySelector("#table tbody");
+  if (tableBody) {
+    tableBody.addEventListener("input", (e) => {
       const box = e.target.closest("input[data-pv]");
       if (!box) return;
       box.classList.remove("pv-bad");
       schedulePvSave(box.dataset.pv, box.value);
+    });
+    tableBody.addEventListener("click", (e) => {
+      const link = e.target.closest(".stream-link, .col-link, .pump-link");
+      if (!link) return;
+      e.preventDefault();
+      if (link.classList.contains("stream-link")) openComposition(link.dataset.stream);
+      else if (link.classList.contains("col-link")) openColumn(link.dataset.block);
+      else openPump(link.dataset.block);
     });
   }
 
@@ -3685,12 +3925,11 @@ function bindEvents() {
   document.querySelectorAll("#compareScope button").forEach((b) =>
     b.addEventListener("click", () => setCompareScope(b.dataset.scope)));
   document.getElementById("compareHint").addEventListener("click", () => setPage("compare"));
-  document.getElementById("closeColumn").addEventListener("click", () =>
-    document.getElementById("columnPanel").classList.add("hidden"));
-  document.getElementById("closeComp").addEventListener("click", () =>
-    document.getElementById("compPanel").classList.add("hidden"));
-  document.getElementById("closePump").addEventListener("click", () =>
-    document.getElementById("pumpPanel").classList.add("hidden"));
+  // 三个抽屉的 ✕:与 Esc 同一条路径,关掉并把焦点还给打开它的那一行
+  ["closeColumn", "closeComp", "closePump"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener("click", () => closeDataDrawers({ restore: true }));
+  });
 
   // 点抽屉外面的空白处也能关(三个抽屉共用;判定见 isOutsideDrawerClick)
   document.addEventListener("click", (e) => {
@@ -3886,7 +4125,7 @@ function bindEvents() {
         if (state.flow.focus) clearFlowFocus();
         return;
       }
-      closeDataDrawers();   // 数据页的三个抽屉(塔剖面 / 泵参数 / 流股组成)
+      closeDataDrawers({ restore: true });   // 数据页的三个抽屉(塔剖面 / 泵参数 / 流股组成)
     });
   }
   document.getElementById("deleteBtn").addEventListener("click", deleteCurrentCase);
@@ -3923,6 +4162,7 @@ async function installSampleData() {
 async function init() {
   initTheme();
   bindEvents();
+  loadAppVersion();   // 本地常量,不联网;失败也不影响主流程
 
   try {
     await refreshCases(null);
