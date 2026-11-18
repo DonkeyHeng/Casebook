@@ -114,12 +114,13 @@ PUMP_HEADERS = (
     "出口压力 bar",
     "压升 bar",
     "密度 kg/m³",
+    "粘度 cP",
     "进口汽化率",
     "p_v bar",
     "NPSHₐ m",
     "提示",
 )
-PUMP_WIDTHS = (14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 12, 10, 12, 50)
+PUMP_WIDTHS = (14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 50)
 
 
 def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, str]:
@@ -169,6 +170,7 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
                 b["p_out_bar"],
                 b["dp_bar"],
                 _r(b["rho_kgm3"], 1),
+                _r(b["mu_cp"], 4),
                 _r(b["pump_vap_frac"], 4),
                 _r(b["pv_bar"], 4),
                 npsh(b),
@@ -193,6 +195,18 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
         ws.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{len(rows) + 1}"
     for i, width in enumerate(widths, 1):
         ws.column_dimensions[get_column_letter(i)].width = width
+
+    # 泵分类多带一页选型提示词:把这个 Excel 直接丢给 AI 时,选型口径随文件一起走,
+    # 用户忘了点页面上的「复制选泵提示词」也不至于让 AI 自己猜。
+    # 正文逐行放在 A 列,整列复制即得完整提示词;A1 不加说明行,免得复制时混进去。
+    if family == "pump":
+        from app.design import pump_prompt
+
+        ps = wb.create_sheet("选泵提示词")
+        ps.sheet_properties.tabColor = "F59E0B"
+        for row_no, line in enumerate(pump_prompt.PUMP_SELECTION_PROMPT.splitlines(), start=1):
+            ps.cell(row=row_no, column=1, value=line)
+        ps.column_dimensions["A"].width = 120
 
     buf = io.BytesIO()
     wb.save(buf)

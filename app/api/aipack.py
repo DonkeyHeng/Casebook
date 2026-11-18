@@ -415,6 +415,7 @@ PUMP_HEADERS = [
     "出口压力bar",
     "压升bar",
     "密度kg/m³",
+    "粘度cP",
     "进口汽化率",
     "p_v bar",
     "NPSHa m",
@@ -448,6 +449,7 @@ def _pumps_csv(pumps) -> bytes:
                 _num(b["p_out_bar"]),
                 _num(b["dp_bar"]),
                 _num(b["rho_kgm3"]),
+                _num(b["mu_cp"]),
                 _num(b["pump_vap_frac"]),
                 _num(b["pv_bar"]),
                 _num(npsh),
@@ -480,6 +482,7 @@ def _case_json(
         files["column_profiles.csv"] = "塔逐板剖面"
     if has_pumps(blocks):
         files["pumps.csv"] = "泵参数(流量/扬程/效率/电机/p_v/NPSHa;标注哪几个是算的)"
+        files["pump_prompt.md"] = "泵选型的提示词(配合 pumps.csv 一起给 AI;与工具里「复制选泵提示词」同源)"
     if connections:
         files["connections.csv"] = "设备 ↔ 流股连接关系(拓扑)"
     if composition["rows"]:
@@ -644,6 +647,7 @@ def _readme_fields(w, blocks, composition, connections) -> None:
             "| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |"
         )
         w("| 密度kg/m³ | `RHO_LIQ`(摩尔密度)× `MW_LIQ` |")
+        w("| 粘度cP | 进口流股 `STRM_UPP\\MUMX`(混合物粘度);模型没挂 MUMX 时留空 |")
         w("| 进口汽化率 | 进口流股的汽化率;> 0 视为两相,不给 NPSHa |")
         w("| p_v bar | 进口流股的泡点压力(读取工况时取 Aspen 值);读不到时可由用户手填 |")
         w("| NPSHa m | **算的**:`(进口压力 − p_v)×10⁵ ÷ (ρ·g)`。**空 = 没算,不等于「不会汽蚀」** |")
@@ -785,6 +789,9 @@ def _readme(
         w(f"| `column_profiles.csv` | 塔逐板剖面 | {sum(stage_counts)} 行 |")
     if composition["rows"]:
         w(f"| `composition.csv` | 已读流股的逐组分摩尔分数 | {len(composition['rows'])} 行 |")
+    if has_pumps(blocks):
+        w("| `pumps.csv` | 泵参数(流量/扬程/效率/轴功率/电机/p_v/NPSHₐ) | — |")
+        w("| `pump_prompt.md` | 泵选型提示词:与 `pumps.csv` 一起给 AI | — |")
     w(f"| `case.json` | 机器可读元数据(同样的信息,便于程序解析) | — |")
     w("")
     w("CSV 一律 **UTF-8 带 BOM、逗号分隔、首行是列名**。")
@@ -1018,6 +1025,11 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     pumps = _pump_blocks(blocks)
     if pumps:
         files.append(("pumps.csv", _pumps_csv(pumps)))
+        # 选型提示词与工具里「复制选泵提示词」按钮、分类 Excel 的「选泵提示词」
+        # 工作表同一份(app/design/pump_prompt.py)
+        from app.design import pump_prompt
+
+        files.append(("pump_prompt.md", pump_prompt.PUMP_SELECTION_PROMPT.encode("utf-8")))
     if columns:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
     if comp_rows:

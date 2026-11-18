@@ -468,8 +468,11 @@ select {
 .verdict.err, .verdict.error { background: var(--err-fill); border-color: var(--err-line); color: var(--err); }
 .verdict.warn, .verdict.warning { background: var(--warn-fill); border-color: var(--warn-line); color: var(--warn); }
 .verdict.ok { background: var(--ok-fill); border-color: var(--ok-line); color: var(--ok); }
-/* 没 Run 过的模型:灰色 —— 既不是"好",也不是"模型有错" */
-.verdict.empty { background: var(--gap-fill); border-color: var(--gap-line); color: var(--gap-text); }
+/* 没 Run 过的模型:灰色 —— 既不是"好",也不是"模型有错"。
+   类名必须是 verdict 专属的 idle,不能复用 .empty:后者是空表占位样式
+   (padding:40px + text-align:center),套上来会把首屏判定条撑成巨型居中卡片,
+   连"收起"按钮一起飘到卡片中间(2026-11-18 截图实测)。 */
+.verdict.idle { background: var(--gap-fill); border-color: var(--gap-line); color: var(--gap-text); }
 
 .verdict-head {
   display: flex;
@@ -1377,6 +1380,30 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .update-pop-close:hover { opacity: 1; background: var(--surface-head); }
 .update-pop a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .update-pop strong { font-weight: 600; }
+
+/* 复制选泵提示词后的操作指引。固定右下角,不参与布局;内容是三步操作,
+   不自动消失 —— 用户要照着它去开 AI 窗口、传文件。 */
+.prompt-tip {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 46;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .2);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+.prompt-tip-head { display: flex; align-items: center; gap: 8px; }
+.prompt-tip-title { font-weight: 600; }
+.prompt-tip p { margin: 8px 0 0; color: var(--muted); }
+.prompt-tip p:first-of-type { color: var(--text); }
+[data-theme="dark"] .prompt-tip { box-shadow: 0 12px 32px rgba(0, 0, 0, .6); }
 
 .workspace { flex: 1; min-width: 0; height: 100vh; overflow: hidden;
   display: flex; flex-direction: column; }

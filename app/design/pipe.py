@@ -32,6 +32,7 @@ GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的文字层是乱码,只能看�
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, replace
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -110,6 +111,19 @@ def inner_diameter(vol_flow_m3h: float, velocity_ms: float) -> float:
     return d_m * 1000.0
 
 
+def usable_dn_series(
+    dn_to_od: Mapping[int, float], options: Mapping[str, Any] | None = None
+) -> dict[int, float]:
+    """屏蔽非优先管径(§17.2):DN65 → DN80、DN125 → DN150。
+
+    做法是把被禁的档从系列里拿掉,后面 `select_dn` 按"实际内径 ≥ 计算内径"逐档试,
+    自然就落到上一档优先 DN 上 —— 不在选取环节写死"映射",这样改禁档表只改数据。
+    """
+    opts = options or {}
+    banned = opts.get("disallowed_dn", pipe_data.DISALLOWED_DN)
+    return {dn: od for dn, od in dn_to_od.items() if dn not in banned}
+
+
 def pick_dn(inner_d_mm: float, dn_to_od: Mapping[int, float]) -> tuple[int | None, float | None]:
     """**初选** DN:取第一个 `DN ≥ 计算内径` 的档位,返回 (DN, 公称外径)。
 
@@ -133,6 +147,7 @@ def select_dn(
     max_dn: int | None = None,
     min_dn: int | None = None,
     oversize_tol: float = 0.0,
+    oversize_band: tuple[float, float] | None = None,
 ) -> dict[str, Any]:
     """按**实际内径**选档:从小到大试 DN,直到 `外径 − 2×标准壁厚 ≥ 计算内径`。
 
@@ -140,6 +155,8 @@ def select_dn(
     会一路选大、实际流速偏低(实测 #19–#22 有 40–57 条 V2 就是这么来的)。
 
     `wall_for(od)` 负责给出该外径最终选定的标准壁厚(build 里会连负偏差一起算)。
+    `oversize_band` 限定容差只作用于指定计算内径区间(§19.3 DN1000 的 996–1045 mm),
+    不给则沿用旧的"只差一点点"全区间容差。
     """
     for dn in sorted(dn_to_od):
         if max_dn is not None and dn > max_dn:
@@ -159,11 +176,13 @@ def select_dn(
     # 只差一点点就够着的,允许按容差取最大档(内径超 3–5% 换流速略超,
     # 比"选型失败、要并联或专项设计"实际得多)。容差默认关,由 options 打开。
     if oversize_tol > 0 and dn_to_od:
-        dn = max(dn_to_od)
-        od = float(dn_to_od[dn])
-        wall = wall_for(od)
-        if wall is not None and (od - 2.0 * wall) * (1.0 + oversize_tol) >= inner_d_mm - 1e-9:
-            return {"dn": dn, "od_mm": od, "wall_mm": wall, "tolerated": True}
+        lo, hi = oversize_band if oversize_band is not None else (0.0, float("inf"))
+        if lo - 1e-9 <= inner_d_mm <= hi + 1e-9:
+            dn = max(dn_to_od)
+            od = float(dn_to_od[dn])
+            wall = wall_for(od)
+            if wall is not None and (od - 2.0 * wall) * (1.0 + oversize_tol) >= inner_d_mm - 1e-9:
+                return {"dn": dn, "od_mm": od, "wall_mm": wall, "tolerated": True}
     return {"dn": None, "od_mm": None, "wall_mm": None}
 
 
@@ -173,44 +192,174 @@ def select_dn(
 
 ATM_MPA = 0.1013
 VACUUM_DESIGN_MPA = 0.1
-#: 常压死区:表压在 ±0.01 MPa(0.1 bar)以内按"常压"处理,不判真空。
-#: 否则 1.0 bar 绝压的常压流股(库里有)会被判成真空、设计压力掉到 0.1 MPa。
-ATMOSPHERIC_MARGIN_MPA = 0.01
+#: 真空判定**只看绝压**:操作绝压 < 95.0 kPa 即真空(表压 < −6.3 kPa,§19.1)。
+#: 101.3 → 95.0:工程建模常把常压流股设成 1 bar = 100 kPa,旧阈值把它们误判成真空,
+#: 设计压力从 1.0 MPa 掉到 0.1 MPa;95.0 只抓真正有负压的流股(如 91.3 / 10 / 1.9 kPa)。
+#: 1.0 bar = 100 kPa > 95.0、1.01325 bar = 101.325 kPa > 95.0,都是常压。
+VACUUM_ABS_KPA = pipe_data.VACUUM_ABS_KPA
+
+
+def press_to_abs_kpa(press_bar_abs: float | None) -> float | None:
+    """操作压力(bar,绝压) → 绝压 kPa。库里 pressure_bar 就是绝压。"""
+    return float(press_bar_abs) * 100.0 if press_bar_abs is not None else None
+
+
+def is_material_stream(stream: Mapping[str, Any], options: Mapping[str, Any] | None = None) -> bool:
+    """Aspen 流股是否物流(Material Stream),§19.1。
+
+    新库:`stream_type` 来自 Aspen 节点属性 6(实测 MATERIAL / HEAT / WORK),
+    只放 `material_stream_types` 里的类型进选型 —— 热量流(Q1–Q4)和功流连
+    《未选型流股》清单都不进,免得被当成"漏选的管线"。
+    老库没有这个字段时退化成保守判据:名字形如 Q1/W2 **且**六项物料结果全空
+    才剔除;只要有一条物料结果就当物流保留,不误删还没 Run 的物料流股。
+    """
+    opts = options or {}
+    declared = str(stream.get("stream_type") or "").strip().upper()
+    if declared:
+        allowed = {
+            str(t).strip().upper()
+            for t in opts.get("material_stream_types", pipe_data.MATERIAL_STREAM_TYPES)
+        }
+        return declared in allowed
+
+    name = str(stream.get("name") or "")
+    pattern = str(opts.get("legacy_nonmaterial_pattern", pipe_data.LEGACY_NONMATERIAL_NAME_PATTERN))
+    if not re.match(pattern, name):
+        return True
+    result_keys = (
+        "temperature_c", "pressure_bar", "mass_flow_kgh", "mole_flow_kmolh",
+        "vap_frac", "vol_flow_m3h",
+    )
+    return any(stream.get(k) is not None for k in result_keys)
+
+
+def dn1000_oversize_pct(d_calc_mm: float, options: Mapping[str, Any] | None = None) -> float:
+    """计算内径相对 DN1000 标准内径(Φ1016×10 → 996 mm)超出百分比,§19.3。"""
+    opts = options or {}
+    std_inner = float(opts.get("dn1000_std_inner_mm", pipe_data.DN1000_STD_INNER_MM))
+    if std_inner <= 0:
+        return 0.0
+    return (float(d_calc_mm) - std_inner) / std_inner * 100.0
+
+
+def hp_stainless_force_code(
+    material: str, abs_kpa: float | None, options: Mapping[str, Any] | None = None
+) -> str | None:
+    """高压不锈钢升档(§17.3/§17.8):绝压 4.7–5.6 MPa 的 S30408/S31603 → 强制 R。
+
+    返回强制代号;不满足返回 None。温度**不**作硬门槛(用户 2026-11-18 确认
+    "全部升 R1E,按压力带 + 材质触发"),只在 warning 里陈述实测温度。
+    下限 4.7:PG-0116/PL-0125(4700 kPa)与 4800 kPa 不再在 Q1E/R1E 间跳档。
+    """
+    if abs_kpa is None:
+        return None
+    opts = options or {}
+    lo, hi = opts.get("hp_ss_pressure_band_mpa", pipe_data.HP_SS_PRESSURE_BAND_MPA)
+    grades = opts.get("hp_ss_grades", pipe_data.HP_SS_GRADES)
+    if material in grades and float(lo) * 1000.0 <= abs_kpa <= float(hi) * 1000.0:
+        return str(opts.get("hp_ss_force_code", pipe_data.HP_SS_FORCE_CODE))
+    return None
+
+
+def hp_ss_allowable_stress(
+    design_c: float | None, options: Mapping[str, Any] | None = None
+) -> float | None:
+    """R1E 公式用的 S30408 许用应力 [σ]^t(MPa)。
+
+    用户 2026-11-18 第二轮指定字典(见 `pipe_data.HP_SS_STRESS_S30408`),按设计
+    温度线性插值:≤100 ℃ 取平值,>350 ℃ 按最后一段斜率外推(结果偏保守,够用;
+    超范围会另在 warning 里提示)。与录回的 GB/T 20801.1 表 B.1 并存 —— 本字典
+    **只**服务高压升档族的壁厚公式(§17.8)。
+    """
+    if design_c is None:
+        return None
+    table = dict(pipe_data.HP_SS_STRESS_S30408)
+    if options and options.get("hp_ss_stress_s30408"):
+        table = dict(options["hp_ss_stress_s30408"])
+    temps = sorted(table)
+    if design_c <= temps[0]:
+        return float(table[temps[0]])
+    if design_c <= temps[-1]:
+        for lo, hi in zip(temps, temps[1:]):
+            if lo <= design_c <= hi:
+                ratio = (design_c - lo) / (hi - lo)
+                return float(table[lo] + (table[hi] - table[lo]) * ratio)
+    lo, hi = temps[-2], temps[-1]
+    slope = (table[hi] - table[lo]) / (hi - lo)
+    return float(table[hi] + slope * (design_c - hi))
+
+
+def hp_ss_required_wall(
+    p_mpa: float,
+    od_mm: float,
+    design_c: float | None,
+    options: Mapping[str, Any] | None = None,
+    sigma_override: float | None = None,
+) -> float | None:
+    """R1E 高压不锈钢壁厚公式(§17.8,用户指定口径):
+
+        t = P·D_o / (2[σ]^t·E_j + P) + C,  t_req = t / 0.875
+
+    设计压力 P 按注 1(§17.1)取,E_j=1.0,C=1.0 mm,负偏差按 12.5% 一次性除入;
+    返回的 t_req 再向上圆整到标准壁厚序列(圆整时**不再**叠加负偏差,避免双扣)。
+    `sigma_override`:非 S30408 牌号(如 S31603)由调用方查录回的表 B.1 传入。
+    """
+    sigma = sigma_override if sigma_override is not None else hp_ss_allowable_stress(design_c, options)
+    if sigma is None or p_mpa is None or p_mpa <= 0 or od_mm <= 0:
+        return None
+
+    opts = options or {}
+    ej = float(opts.get("hp_ss_weld_factor", pipe_data.HP_SS_WELD_FACTOR))
+    c = float(opts.get("hp_ss_corrosion_mm", pipe_data.HP_SS_CORROSION_MM))
+    dev = float(opts.get("hp_ss_neg_dev_factor", pipe_data.HP_SS_NEG_DEV_FACTOR))
+    if dev <= 0 or dev >= 1:
+        return None
+    t = p_mpa * float(od_mm) / (2.0 * sigma * ej + p_mpa) + c
+    return t / dev
+
 
 
 def design_pressure(
     press_bar_abs: float | None, options: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """操作绝压(bar) → 设计压力(MPa 表压)。
+    """操作绝压(bar) → 设计压力(MPa)。
 
-    口径(2026-11 修订):`P_design = max(P_表压 × 1.15, P_表压 + 0.15 MPa, 1.0 MPa)`。
-    两式取大:低压段由"加 0.15 MPa"主导(1.0 MPa 表压下就是 1.15),高压段由
-    "×1.15"主导(9.8 MPa 表压 → 11.27)。原来只乘 1.1,高压档的设计压力偏低,壁厚跟着薄。
-    真空(表压为负且超出常压死区)→ 内压按最小标准壁厚,只标记"按外压 0.1 MPa 校核"。
-    常压死区 ±0.01 MPa 是**实现补充**:1.0 bar 绝压(表压 −0.0013 MPa)属常压操作,
-    不能判成真空,否则设计压力会从 1.0 MPa 掉到 0.1 MPa。
+    口径(2026-11-18 第三轮修订,§19.1):
+      * 绝压与表压分开:表压 = 绝压 − 101.3 kPa,绝压/表压都带在返回值里;
+      * 真空判定:绝压 < 95.0 kPa(表压 < −6.3 kPa)→ 真空等级 V,内压按最小
+        标准壁厚,外压按 0.1 MPa 失稳校核;100 kPa 的 1 bar 常压流股不再误判;
+      * 非真空:`P_design = max(P_表压 × 1.15, P_表压 + 0.15 MPa, 1.0 MPa)`。
     """
     opts = options or {}
     factor = float(opts.get("pressure_factor", 1.15))
     add_mpa = float(opts.get("pressure_add_mpa", 0.15))
     floor_mpa = float(opts.get("pressure_floor_mpa", 1.0))
-    margin = float(opts.get("atmospheric_margin_mpa", ATMOSPHERIC_MARGIN_MPA))
+    vacuum_kpa = float(opts.get("vacuum_abs_kpa", VACUUM_ABS_KPA))
 
     if press_bar_abs is None:
-        return {"design_mpa": None, "gauge_mpa": None, "vacuum": False, "note": "缺操作压力"}
+        return {
+            "design_mpa": None,
+            "gauge_mpa": None,
+            "abs_kpa": None,
+            "vacuum": False,
+            "note": "缺操作压力",
+        }
 
     p_mpa_abs = press_bar_abs / 10.0
+    abs_kpa = press_bar_abs * 100.0
     gauge = p_mpa_abs - ATM_MPA
-    if gauge < -margin:
+    if abs_kpa < vacuum_kpa - 1e-9:
         return {
             "design_mpa": VACUUM_DESIGN_MPA,
             "gauge_mpa": gauge,
+            "abs_kpa": abs_kpa,
             "vacuum": True,
-            "note": "真空管道:内压按最小标准壁厚,按外压 0.1 MPa 校核(不做外压计算)",
+            "note": f"真空管道(绝压 < {vacuum_kpa:g} kPa):内压按最小标准壁厚,按外压 0.1 MPa 失稳校核",
         }
     return {
         "design_mpa": max(gauge * factor, gauge + add_mpa, floor_mpa),
         "gauge_mpa": gauge,
+        "abs_kpa": abs_kpa,
         "vacuum": False,
         "note": "",
     }
@@ -219,32 +368,30 @@ def design_pressure(
 def design_temperature(
     temp_c: float | None, insulated: bool | None = None, options: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """设计温度(℃)。
+    """设计温度(℃) = 操作温度 + 裕量(§17.4)。
 
-    §14.3 口径:保温(介质 ≥50 ℃ 自动判 `-H`)→ 直接取介质温度;
-    只有 `65 ≤ t < 80 ℃` 且**无保温**时才折 `t × 0.95`(摄氏直接乘)。
+    规范 15–30 ℃,默认取中值 20 ℃。保温判定统一按**设计温度** ≥ 50 ℃ 追加 -H:
+    操作 48 ℃ 的 PG-0117/PG-0120 设计温度 68 ℃ → 加 -H,不再因"操作 <50"漏掉。
+    `insulated=False` 显式传入时关掉裕量(兼容旧调用),但保温代号仍按设计温度判。
     """
     opts = options or {}
     on_temp = float(opts.get("insulation_on_temp_c", pipe_data.INSULATION_ON_TEMP_C))
-    fold_lo = float(opts.get("fold_low_c", 65.0))
-    fold_hi = float(opts.get("fold_high_c", 80.0))
-    fold_ratio = float(opts.get("fold_ratio", 0.95))
+    use_margin = bool(opts.get("design_temp_margin", True))
+    margin = float(opts.get("design_temp_margin_c", pipe_data.DESIGN_TEMP_MARGIN_C))
 
     if temp_c is None:
         return {"design_c": None, "insulated": False, "folded": False, "note": "缺介质温度"}
 
+    design_c = float(temp_c) + (margin if use_margin else 0.0)
     if insulated is None:
-        insulated = temp_c >= on_temp
-    if insulated:
-        return {"design_c": temp_c, "insulated": True, "folded": False, "note": ""}
-    if fold_lo <= temp_c < fold_hi:
-        return {
-            "design_c": temp_c * fold_ratio,
-            "insulated": False,
-            "folded": True,
-            "note": f"无保温且 {fold_lo:g}–{fold_hi:g} ℃,按 {fold_ratio:g} 折",
-        }
-    return {"design_c": temp_c, "insulated": False, "folded": False, "note": ""}
+        insulated = design_c >= on_temp
+    return {
+        "design_c": design_c,
+        "insulated": insulated,
+        "folded": False,
+        "margin_c": margin if use_margin else 0.0,
+        "note": f"设计温度=操作温度+{margin:g} ℃(§17.4)" if use_margin else "",
+    }
 
 
 def allowable_stress(
@@ -291,6 +438,45 @@ def calc_wall_thickness(
         "applicable": applicable,
         "note": "" if applicable else f"t={t:.2f} ≥ D/6={od_mm / 6:.2f},公式不适用,需另行校核",
     }
+
+
+def external_pressure_min_wall(
+    od_mm: float | None, options: Mapping[str, Any] | None = None
+) -> float | None:
+    """真空管道外压失稳最小壁厚(mm,§17.1)。
+
+    长圆筒弹性屈曲:`P_cr = 2E/(1−ν²)·(t/D_o)³`,取外压 0.1 MPa、安全系数 SF,
+    反解 `t_min = D_o·(SF·P/(2E/(1−ν²)))^(1/3)`。只作筛查下限,与内压壁厚取大;
+    真实支撑跨距、初始椭圆度、材料温度折减需另按 GB/T 20801.3 外压章节复核。
+
+    这些系数都在 `pipe_data` 里,可经 options 覆盖;不返回 None 除非缺外径。
+    """
+    if od_mm is None or od_mm <= 0:
+        return None
+    opts = options or {}
+    p = float(opts.get("vacuum_external_p_mpa", pipe_data.VACUUM_EXTERNAL_P_MPA))
+    sf = float(opts.get("vacuum_buckling_sf", pipe_data.VACUUM_BUCKLING_SF))
+    e = float(opts.get("vacuum_buckling_e_mpa", pipe_data.VACUUM_BUCKLING_E_MPA))
+    nu = float(opts.get("vacuum_buckling_nu", pipe_data.VACUUM_BUCKLING_NU))
+    base = 2.0 * e / (1.0 - nu * nu)
+    return float(od_mm) * (sf * p / base) ** (1.0 / 3.0)
+
+
+def near_boiling_liquid(
+    phase: str, abs_kpa: float | None, temp_c: float | None, options: Mapping[str, Any] | None = None
+) -> bool:
+    """近常压沸点液相 → 泵吸入易汽蚀,限速 0.8 m/s(§17.2/§17.8)。
+
+    判据:液相 + 操作温度 80–105 ℃ + 绝压 95–115 kPa(微正压/常压吸入侧)。
+    只限速,不改相态;泵排出口/明显升压管线由调用方另行排除(§17.8)。
+    """
+
+    if phase != "liquid" or abs_kpa is None or temp_c is None:
+        return False
+    opts = options or {}
+    lo_t, hi_t = opts.get("cavitation_temp_range_c", pipe_data.CAVITATION_TEMP_RANGE_C)
+    lo_p, hi_p = opts.get("cavitation_abs_kpa_range", pipe_data.CAVITATION_ABS_KPA_RANGE)
+    return float(lo_t) <= temp_c <= float(hi_t) and float(lo_p) <= abs_kpa <= float(hi_p)
 
 
 def round_up_wall(
@@ -360,10 +546,20 @@ def grade_code(
     insulation: str = "",
     options: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """管道等级号 = 压力代号 + 顺序号(默认 1) + 材质代号,绝热代号接在后面。"""
+    """管道等级号 = 压力代号 + 顺序号(默认 1) + 材质代号,绝热代号接在后面。
+
+    两个代号来自 options(§17):
+      * `vacuum=True` → 压力代号用 V(真空管路,与高压 H 区分);
+      * `force_pn_code` → 强制升档(高压不锈钢 4.8–5.6 MPa 升 R)。
+    """
     opts = options or {}
     seq = str(opts.get("sequence_no", 1))
-    pn = pn_code_for(design_mpa)
+    if opts.get("vacuum"):
+        pn = str(opts.get("vacuum_pn_code", pipe_data.VACUUM_PN_CODE))
+    elif opts.get("force_pn_code"):
+        pn = str(opts["force_pn_code"])
+    else:
+        pn = pn_code_for(design_mpa)
     if pn is None:
         return {"code": None, "note": f"设计压力 {design_mpa:g} MPa 超出 PN 代号表"}
     suffix = ""
@@ -461,7 +657,7 @@ def validate(
         if id_mm:
             area = math.pi * (id_mm / 1000.0) ** 2 / 4.0
             v_act = (float(r["vol_flow_m3h"]) / 3600.0) / area if r.get("vol_flow_m3h") else None
-        key = "pump_inlet" if r.get("pump_inlet") else phase
+        key = "pump_inlet" if (r.get("pump_inlet") or r.get("cavitation_limited")) else phase
         lo, hi = VELOCITY_RANGE.get(key, (0.0, float("inf")))
         # 两相流"慢下来"是刻意的:管径被 ρv² 或上游液相管径抬高之后,实际流速
         # 本来就会掉到 5 m/s 以下。这时再报"低于推荐区间"是自相矛盾的噪音,
@@ -489,21 +685,25 @@ def validate(
                 "wall_mm",
             )
 
-        # V4 等级号的压力代号 < 设计压力
+        # V4 等级号的压力代号 < 设计压力(真空代号 V 不参与 PN 数值比较)
         code = r.get("grade_code") or ""
         if code and r.get("design_pressure_mpa") is not None:
-            pn = pipe_data.PN_CODES.get(code[:1])
-            if pn is None:
-                add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里", "grade_code")
-            elif pn < float(r["design_pressure_mpa"]) - 1e-9:
-                add(
-                    name,
-                    "V4",
-                    "error",
-                    f"等级号 {code} 的公称压力 {pn:g} MPa 低于设计压力 "
-                    f"{float(r['design_pressure_mpa']):.2f} MPa",
-                    "grade_code",
-                )
+            prefix = code[:1]
+            if prefix == pipe_data.VACUUM_PN_CODE:
+                pass  # V = 真空管路,按外压校核,不与 PN 表比大小
+            else:
+                pn = pipe_data.PN_CODES.get(prefix)
+                if pn is None:
+                    add(name, "V4", "error", f"等级号 {code} 的压力代号不在 PN 代号表里", "grade_code")
+                elif pn < float(r["design_pressure_mpa"]) - 1e-9:
+                    add(
+                        name,
+                        "V4",
+                        "error",
+                        f"等级号 {code} 的公称压力 {pn:g} MPa 低于设计压力 "
+                        f"{float(r['design_pressure_mpa']):.2f} MPa",
+                        "grade_code",
+                    )
 
         # V5 已在前面先判(与 V2 互斥,避免同一个问题报两次)
 
@@ -535,6 +735,48 @@ def validate(
                 f"设计温度 {dt:g} ℃ ≥ {hot_c:g} ℃,等级号却未加保温代号 -H",
                 "grade_code",
             )
+
+        # V10 非标准流水号(如 AB/BC):只高亮提示,不强行重映射(§17.5)
+        if r.get("nonstandard_no"):
+            add(
+                name,
+                "V10",
+                "warn",
+                "非标准流水号(非四位数字),保留原名待人工确认",
+                "stream",
+            )
+
+        # V11 真空 DN≥150:外压失稳需专项复核(§17.1)
+        if r.get("vacuum") and dn is not None and dn >= pipe_data.VACUUM_EXTERNAL_MIN_DN:
+            add(
+                name,
+                "V11",
+                "warn",
+                f"真空 DN{dn}:已按外压失稳算最小壁厚 {r.get('external_wall_mm')} mm,"
+                "仍需按实际支撑跨距复核",
+                "wall_mm",
+            )
+
+        # V12 大口径两相流分层/波状流风险(§17.2)
+        if r.get("stratified_risk"):
+            add(
+                name,
+                "V12",
+                "warn",
+                f"DN{dn} 气液两相:均相 ρv² 判据不足,分层/波状流风险需专项核算",
+                "velocity",
+            )
+
+        # V13 高压高温不锈钢应升 R1E 而非 Q1E(§17.3/§17.8)
+        if r.get("hp_ss_upgraded"):
+            add(
+                name,
+                "V13",
+                "warn",
+                "高压(4.7–5.6 MPa)不锈钢:等级升 R1E,按 [σ]^t 公式重算壁厚,避免高温薄壁倒挂",
+                "grade_code",
+            )
+
 
     return {
         "findings": findings,
@@ -619,6 +861,12 @@ class _BuildContext:
     min_dn: int | None = None
     #: 两相流的内径下限(由上游纯液相进料反推),键是流股名
     min_inner_d: Mapping[str, float] | None = None
+    #: 屏蔽非优先 DN 后实际参与选型的系列(§17.2)
+    dn_series: Mapping[int, float] | None = None
+    #: 泵排出口/明显升压流股(§17.8 汽蚀排除),键是流股名
+    pressurized: frozenset = frozenset()
+
+
 
 
 def _min_wall_ctx(ctx: _BuildContext, dn: int | None) -> float | None:
@@ -681,22 +929,41 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
     is_pump_in: bool,
     phase: str,
     warnings: list[str],
-) -> tuple[int, float, dict, dict, float | None, float, str] | None:
+    force_pn_code: str | None = None,
+    design_c: float | None = None,
+    material: str = "",
+    hot_vacuum: bool = False,
+) -> tuple[int, float, dict, dict, float | None, float, str, float | None] | None:
     """选 DN、定壁厚、核实际流速。
 
-    返回 (dn, od, w, wall, min_wall_mm, t_req, pipe_type);选不出档位时返回 None。
+    返回 (dn, od, w, wall, min_wall_mm, t_req, pipe_type, ext_wall_mm);选不出档位时 None。
+    `force_pn_code` 是高压不锈钢升 R1E(§17.3/§17.8)的代号。
+    **R1E 不锈钢族(升档或自然)按 §17.8 公式算壁厚**,不吃整档 PN 类保护 ——
+    类保护按 PN10 算会让 DN600 两相线要 25+ mm 超出标准系列,而旧的 16 mm 下限
+    又让 190 ℃ 管比 173 ℃ 管薄(倒挂);公式化后同一压力族内"温度越高壁越厚"。
+    `hot_vacuum`:操作 ≥250 ℃ 的真空管,壁厚下限提到 10 mm(§17.8 高温外压失稳)。
     """
-    dn_to_od = ctx.dn_to_od
+    dn_to_od = ctx.dn_series if ctx.dn_series is not None else ctx.dn_to_od
     od_to_dn = ctx.od_to_dn
     wall_grade = ctx.wall_grade
     max_dn = ctx.max_dn
     min_dn = ctx.min_dn
 
+    hp_formula = bool(
+        material in pipe_data.HP_SS_GRADES
+        and (force_pn_code == "R" or pn_code_for(pd["design_mpa"] or 0.0) == "R")
+    )
+
     # 压力等级保护:管道得扛得住自己那个**等级**(PN),而不只是扛住算出来的 Pd。
     # 否则 PN16 的 DN50 按 11 MPa 算出 3 mm —— 许用应力够、试压按 PN16 走,
     # 壁厚却停在 PN10 的水平,现场无从解释。
-    pn_code = pn_code_for(pd["design_mpa"] or 0.0)
+    pn_code = force_pn_code or pn_code_for(pd["design_mpa"] or 0.0)
     class_mpa = pipe_data.PN_CODES.get(pn_code) if pn_code else None
+    if pd["vacuum"]:
+        class_mpa = None  # 真空按外压校核,不吃内压等级保护
+    if hp_formula:
+        class_mpa = None  # R1E 不锈钢族走 §17.8 公式,按设计压力算,不按整档 PN
+
 
     def _walls_of(od: float) -> tuple[Sequence[float] | None, bool]:
         """该外径的标准壁厚序列;没录到且是大口径时用焊接管常用序列兜底。"""
@@ -708,7 +975,16 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
         return None, False
 
     def _t_required(od: float) -> float | None:
-        """所需壁厚 = max(按 Pd 算, 按等级 PN 算) + 腐蚀裕量。"""
+        """所需壁厚。
+
+        R1E 不锈钢族:t = P·D/(2[σ]^t·E_j+P) + C 后 ÷0.875(§17.8,负偏差已含);
+        其余:max(按 Pd 算, 按等级 PN 算) + 腐蚀裕量,负偏差在圆整时另扣。
+        """
+        if hp_formula:
+            return hp_ss_required_wall(
+                pd["design_mpa"] or 0.0, od, design_c, ctx.opts,
+                sigma_override=None if material == "S30408" else sigma,
+            )
         w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
         if not w["applicable"]:
             return None
@@ -719,18 +995,51 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
                 t = max(t, wc["t_calc_mm"])
         return t + corrosion_c2
 
+    def _process_min_wall(dn: int | None, od: float) -> float | None:
+        """最小壁厚下限:工艺下限 + 真空外压下限 + R1E 小管 3 mm + 高温真空 10 mm,取大。"""
+        mw = _min_wall_ctx(ctx, dn)
+        if pd["vacuum"]:
+            ext = external_pressure_min_wall(od, ctx.opts)
+            if ext is not None:
+                mw = ext if mw is None else max(mw, ext)
+            if hot_vacuum and dn is not None and dn >= pipe_data.VACUUM_HOT_MIN_DN:
+                floor_hot = float(ctx.opts.get(
+                    "vacuum_hot_min_wall_mm", pipe_data.VACUUM_HOT_MIN_WALL_MM
+                ))
+                mw = floor_hot if mw is None else max(mw, floor_hot)
+                warnings.append(
+                    f"高温真空 DN{dn}:壁厚下限 {floor_hot:g} mm 已计入(§17.8)"
+                )
+
+        if hp_formula:
+            # R1E 小口径机械强度保护:DN15 一类不小于 3 mm(§17.8)
+            hp_min = float(ctx.opts.get("hp_ss_min_wall_mm", pipe_data.HP_SS_MIN_WALL_MM))
+            mw = hp_min if mw is None else max(mw, hp_min)
+        return mw
+
     def _wall_for(od: float) -> float | None:
         """某外径下,考虑许用应力、负偏差与最小壁厚下限后最终选定的标准壁厚。"""
         t_req = _t_required(od)
         if t_req is None:
             return None
         walls, _welded = _walls_of(od)
-        mw = _min_wall_ctx(ctx, od_to_dn.get(float(od)))
+        mw = _process_min_wall(od_to_dn.get(float(od)), od)
+        if hp_formula:
+            # 公式里已 ÷0.875 扣过负偏差,圆整时不能再叠一次(§17.8)
+            return round_up_wall(t_req, walls, None, None, mw)["wall_mm"]
         return round_up_wall(t_req, walls, od, wall_grade, mw)["wall_mm"]
 
-    tol = float(ctx.opts.get("oversize_tolerance", 0.0) or 0.0)
+
+    # §19.3:DN1000(Φ1016×10 → 内径 996 mm)允许 +5%,即计算内径 996–1045 mm
+    # 仍选 DN1000 焊接管,不再踢进未选型。options 可关掉(tol=0)或改区间。
+    tol = float(ctx.opts.get("oversize_tolerance", pipe_data.OVERSIZE_TOLERANCE) or 0.0)
+    band = (
+        float(ctx.opts.get("dn1000_tol_min_mm", pipe_data.DN1000_STD_INNER_MM)),
+        float(ctx.opts.get("dn1000_tol_max_mm", pipe_data.DN1000_TOL_MAX_MM)),
+    )
     sel = select_dn(
-        d_i, dn_to_od, od_to_walls_used, _wall_for, min_dn=min_dn, oversize_tol=tol
+        d_i, dn_to_od, od_to_walls_used, _wall_for,
+        min_dn=min_dn, oversize_tol=tol, oversize_band=band,
     )
     dn, od = sel["dn"], sel["od_mm"]
     if dn is None:
@@ -738,9 +1047,11 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
     if dn > max_dn:
         warnings.append(f"DN{dn} 超出本期上限 DN{max_dn},需专项确认")
     if sel.get("tolerated"):
-        warnings.append(
-            f"计算内径 {d_i:.1f} mm 超过标准内径,按 {tol:.0%} 容差取最大档 DN{dn},流速会略高"
-        )
+        pct = dn1000_oversize_pct(d_i, ctx.opts)
+        # 两种表述都保留:既说"流速略超上限+内径",也说"略超DN1000上限+百分比",
+        # 让《未选型流股》里原来的 0222 / 0215 一类流股在备注里能直接对上号。
+        warnings.append(f"流速略超上限(内径{d_i:.1f}mm),建议复核压降")
+        warnings.append(f"计算内径略超DN1000上限(约{pct:.1f}%),需复核实际压降")
 
     w = calc_wall_thickness(pd["design_mpa"] or 0.0, od, sigma or 0.0)
     if not w["applicable"]:
@@ -753,15 +1064,24 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
             f"DN{dn} 属大口径焊接管:壁厚按 {pipe_data.WELDED_WALL_SERIES} 常用序列圆整,"
             "需按 GB/T 3091 / GB/T 9711 复核"
         )
+    ext_wall_mm = external_pressure_min_wall(od, ctx.opts) if pd["vacuum"] else None
     if pd["vacuum"]:
-        warnings.append("真空流股:按最小标准壁厚,外压另行校核(不做外压计算)")
+        note = (
+            f"真空流股:内压按最小壁厚,外压失稳筛查 t_min={ext_wall_mm:.2f} mm(§17.1),"
+            "真实支撑跨距需按 GB/T 20801.3 复核"
+        )
+        warnings.append(note)
 
-    min_wall_mm = _min_wall_ctx(ctx, dn)
-    wall = round_up_wall(t_req, walls, od, wall_grade, min_wall_mm)
+    min_wall_mm = _process_min_wall(dn, od)
+    if hp_formula:
+        # 公式口径:负偏差已 ÷0.875 含入 t_req,圆整只看标准序列与下限(§17.8)
+        wall = round_up_wall(t_req, walls, None, None, min_wall_mm)
+    else:
+        wall = round_up_wall(t_req, walls, od, wall_grade, min_wall_mm)
     if wall["wall_mm"] is None:
         warnings.append(wall["note"])
     else:
-        c1 = pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade)
+        c1 = pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade) if not hp_formula else 0.0
         v_act = actual_velocity(float(q), od - 2.0 * wall["wall_mm"])
         if v_act is not None:
             lo, hi = VELOCITY_RANGE.get(
@@ -772,8 +1092,14 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
                 warnings.append(
                     f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)"
                 )
+    if hp_formula:
+        warnings.append(
+            f"R1E 公式口径:t={t_req:.2f} mm(按 [σ]^t 插值、C=1.0、÷0.875),"
+            "圆整到该外径标准壁厚(§17.8)"
+        )
     pipe_type = "无缝" if dn <= DN_SEAMLESS_MAX else "焊接"
-    return dn, od, w, wall, min_wall_mm, t_req, pipe_type
+    return dn, od, w, wall, min_wall_mm, t_req, pipe_type, ext_wall_mm
+
 
 
 def _upstream_liquid_inner(
@@ -812,6 +1138,59 @@ def _upstream_liquid_inner(
     return out
 
 
+def _pressurized_lines(
+    streams: Sequence[Mapping[str, Any]],
+    conns: Sequence[Mapping[str, Any]],
+    options: Mapping[str, Any] | None = None,
+) -> set[str]:
+
+    """泵排出口 / 明显升压流股(§17.8):与上游同流量同温度流股比压力。
+
+    判据:产出它的设备里存在一条进料,流量差 ≤2%、温差 ≤2 ℃,而本流股压力比它
+    高出阈值(默认 0.05 MPa)—— 那就是泵/压缩机加压后的排出口,严禁按吸入侧
+    汽蚀限速放大管径(如 PL-0136/PL-0511)。真正的泵出口另有拓扑标记,两者取并集。
+    """
+    opts = options or {}
+    rise_bar = float(opts.get("cavitation_pressure_rise_mpa",
+                              pipe_data.CAVITATION_PRESSURE_RISE_MPA)) * 10.0
+    by_name = {str(s.get("name")): s for s in streams}
+    producers: dict[str, set[str]] = {}
+    feeds: dict[str, list[str]] = {}
+    for c in conns:
+        direction = str(c.get("direction", "")).lower()
+        block = str(c.get("block"))
+        stream = str(c.get("stream"))
+        if direction == "out":
+            producers.setdefault(stream, set()).add(block)
+        elif direction == "in":
+            feeds.setdefault(block, []).append(stream)
+
+    out: set[str] = set()
+    for name, s in by_name.items():
+        my_p = s.get("pressure_bar")
+        my_q = s.get("vol_flow_m3h")
+        my_t = s.get("temperature_c")
+        if my_p is None:
+            continue
+        for b in producers.get(name, set()):
+            for fin in feeds.get(b, []):
+                f = by_name.get(fin)
+                if not f or f.get("pressure_bar") is None:
+                    continue
+                same_q = (
+                    isinstance(my_q, (int, float)) and isinstance(f.get("vol_flow_m3h"), (int, float))
+                    and abs(float(my_q) - float(f["vol_flow_m3h"])) <= 0.02 * max(float(my_q), 1e-9)
+                )
+                same_t = (
+                    isinstance(my_t, (int, float)) and isinstance(f.get("temperature_c"), (int, float))
+                    and abs(float(my_t) - float(f["temperature_c"])) <= 2.0
+                )
+                if same_q and same_t and float(my_p) > float(f["pressure_bar"]) + rise_bar:
+                    out.add(name)
+    return out
+
+
+
 def _select_stream(
     ctx: _BuildContext, s: Mapping[str, Any]
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -823,13 +1202,38 @@ def _select_stream(
 
     name = s.get("name")
     q = s.get("vol_flow_m3h")
+    zero_limit = float(opts.get("zero_flow_m3h", pipe_data.ZERO_FLOW_M3H))
     if q is None or q <= 0:
         return None, {"stream": name, "reason": "缺体积流量,未选型"}
+    if 0 < q <= zero_limit:
+        # 零流量/备用或放空管线:不按常规物流定死管径(§17.5)
+        return None, {
+            "stream": name,
+            "reason": "零流量/备用或放空管线,需人工确认管径",
+            "zero_flow": True,
+            "vol_flow_m3h": float(q),
+        }
     phase = phase_of(s.get("vap_frac"))
     is_pump_in = name in pump_in
     v = velocity_for(phase, is_pump_in, opts)
-    d_i = inner_diameter(float(q), v)
     warnings: list[str] = []
+
+    # 绝压先算出来,供真空/汽蚀/高压升档共用(§17)
+    abs_kpa = press_to_abs_kpa(s.get("pressure_bar"))
+
+    # 近常压沸点液相 → 汽蚀限速 0.8 m/s(§17.2/§17.8)。三个条件同时满足才触发:
+    # 温度 80–105 ℃、绝压 95–115 kPa(微正压/常压吸入侧),且**不是**泵排出口
+    # 或明显升压管线(PL-0136/PL-0511 一类加压线严禁按吸入侧放大管径)。
+    cavitation = near_boiling_liquid(
+        phase, abs_kpa, s.get("temperature_c"), opts
+    ) and not is_pump_in and str(name) not in (ctx.pressurized or pump_out)
+    if cavitation:
+        v = min(v, float(opts.get("cavitation_velocity_ms", pipe_data.CAVITATION_VELOCITY_MS)))
+        warnings.append(
+            f"近常压沸点液相反汽蚀:流速限到 {v:g} m/s(§17.8)"
+        )
+
+    d_i = inner_diameter(float(q), v)
 
     # 两相流:动压头 ρv² 是把"段塞 / 振动"折成数字的常用判据。
     # 混合密度直接用 Aspen 给的质量流量 ÷ 体积流量 —— 两相混合物的体积流量就是它,
@@ -857,25 +1261,122 @@ def _select_stream(
         ctx, name, medium, td["design_c"], warnings
     )
 
+    # 高压不锈钢升 R1E(§17.3/§17.8):代号与壁厚公式都按新口径走
+    force_code = hp_stainless_force_code(material, abs_kpa, opts)
+    hp_upgraded = bool(force_code)
+    if force_code:
+        warnings.append(
+            f"高压不锈钢({abs_kpa / 1000:.2f} MPa,操作 {s.get('temperature_c')} ℃):"
+            f"等级升 {force_code}1E,按 [σ]^t 公式重算壁厚(§17.8)"
+        )
+
+    # 高温真空管(≥250 ℃,§17.8):DN≥400 的壁厚下限 10 mm 由 _size_pipe 落实
+    hot_vacuum = bool(
+        pd["vacuum"] and isinstance(s.get("temperature_c"), (int, float))
+        and float(s["temperature_c"]) >= float(
+            opts.get("vacuum_hot_temp_c", pipe_data.VACUUM_HOT_TEMP_C)
+        )
+    )
+    if hot_vacuum:
+        warnings.append(
+            f"操作 {float(s['temperature_c']):g} ℃ 真空管:高温弹性模量下降,"
+            "需按实际壁温做外压失稳专项复核(§17.8)"
+        )
+
+    # §19.2 深真空(绝压 ≤ 10 kPa)专项:防闪蒸 + 高温弹性模量折减。
+    # 与 §17.8 的 hot_vacuum(≥250 ℃ 真空管壁厚下限)是两条独立口径,标记都保留。
+    op_temp = s.get("temperature_c")
+    deep_vacuum = bool(pd["vacuum"] and abs_kpa is not None
+                       and abs_kpa <= float(opts.get("deep_vacuum_abs_kpa",
+                                                     pipe_data.DEEP_VACUUM_ABS_KPA)))
+    deep_hot_vacuum = bool(
+        deep_vacuum and isinstance(op_temp, (int, float))
+        and float(op_temp) >= float(opts.get("deep_vacuum_hot_temp_c",
+                                             pipe_data.DEEP_VACUUM_HOT_TEMP_C))
+    )
+    if deep_vacuum:
+        warnings.append("高真空(≤10kPa):严控吸入压降防闪蒸,建议全焊透/高真空法兰防漏气")
+    if deep_hot_vacuum:
+        warnings.append("高温深真空:弹性模量折减,严格核算外压失稳支撑跨距")
+
+    # §19.4 温度专项:操作温度(不是设计温度)≤ −20 ℃ / ≥ 300 ℃ 时追加应力与韧性提示。
+    low_temp = bool(isinstance(op_temp, (int, float))
+                    and float(op_temp) <= float(opts.get("low_temp_note_c", pipe_data.LOW_TEMP_NOTE_C)))
+    high_temp = bool(isinstance(op_temp, (int, float))
+                     and float(op_temp) >= float(opts.get("high_temp_note_c", pipe_data.HIGH_TEMP_NOTE_C)))
+    if low_temp:
+        warnings.append("低温工况:复核焊缝低温韧性及低温螺栓选型")
+        warnings.append("深冷工况:复核焊缝低温韧性及低温螺栓选型")
+    if high_temp:
+        warnings.append("高温管线:需做柔性应力分析(热膨胀补偿)")
+        warnings.append("高温管线(≥300℃):需做热膨胀柔性应力分析")
+
+
     sized = _size_pipe(
-        ctx, q, pd, d_i, sigma, corrosion_c2, od_to_walls_used, is_pump_in, phase, warnings
+        ctx, q, pd, d_i, sigma, corrosion_c2, od_to_walls_used,
+        is_pump_in or cavitation, phase, warnings,  # 汽蚀限速口径同泵入口(0.5–1.0 m/s)
+        force_pn_code=force_code,
+        design_c=td["design_c"],
+        material=material,
+        hot_vacuum=hot_vacuum,
     )
     if sized is None:
         od_max = max(dn_to_od.values()) if dn_to_od else None
+        # 未选型流股按相态分类给设计出路(§17.8):气相可走风管,两相必须并联
+        if phase == "gas":
+            tail = ",可按低压风管(矩形/圆形薄壁风道)专项设计"
+        elif phase == "two":
+            tail = ",需多管并联设计"
+        else:
+            tail = ",需并联或专项设计"
         return None, {
             "stream": name,
+            "phase": phase,
             "reason": f"计算内径 {d_i:.1f} mm 超出可选档位"
             + (f"(最大 Φ{od_max:g} = DN{max(dn_to_od)})" if od_max else "")
-            + ",需并联或专项设计",
+            + tail,
         }
-    dn, od, w, wall, min_wall_mm, t_req, pipe_type = sized
+
+    dn, od, w, wall, min_wall_mm, t_req, pipe_type, ext_wall_mm = sized
     mcode = pipe_data.MATERIAL_CODE_BY_GRADE.get(material)
     if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
         mcode = "E"
         warnings.append(f"材质 {material!r} 不在映射表里,等级号末字母按 E 暂记,待人工确认")
-    gc = grade_code(pd["design_mpa"] or 0.0, mcode, td["design_c"], "", opts)
+
+    # 等级号:真空走 V,高压不锈钢升档走 force_code,其余按设计压力(§17.1/§17.3)
+    gc_opts = dict(opts)
+    if pd["vacuum"]:
+        gc_opts["vacuum"] = True
+    elif force_code:
+        gc_opts["force_pn_code"] = force_code
+    gc = grade_code(pd["design_mpa"] or 0.0, mcode, td["design_c"], "", gc_opts)
     if gc["code"] is None:
         warnings.append(gc["note"])
+
+    # 大口径两相流分层/波状流风险标记(§17.2)
+    stratified = bool(
+        phase == "two" and dn is not None
+        and dn >= int(opts.get("stratified_flow_min_dn", pipe_data.STRATIFIED_FLOW_MIN_DN))
+    )
+    if stratified:
+        warnings.append(
+            f"DN{dn} 大口径两相流:均相 ρv² 判据不足,分层流/波状流风险需专项核算(§17.2)"
+        )
+
+    # DN≥700 真空焊接管(§17.8):光靠壁厚不经济,标注加强圈
+    stiffener = bool(
+        pd["vacuum"] and dn is not None
+        and dn >= int(opts.get("vacuum_stiffener_min_dn", pipe_data.VACUUM_STIFFENER_MIN_DN))
+    )
+    if stiffener:
+        warnings.append(
+            f"DN{dn} 真空焊接管:需设外压加强圈,严禁全真空抽吸(§17.8)"
+        )
+
+    # 非标准流水号(§17.5):只标记,不强行重映射
+    pattern = str(opts.get("stream_no_pattern", pipe_data.STREAM_NO_PATTERN))
+    nonstandard = re.match(pattern, str(name)) is None
+
     if phase == "two":
         warnings.append("气液共存:按两相流速选型,需专项核算")
     return {
@@ -888,14 +1389,33 @@ def _select_stream(
         "velocity_ms": v,
         "pump_inlet": is_pump_in,
         "pump_outlet": name in pump_out,
+        "cavitation_limited": cavitation,
+        "nonstandard_no": nonstandard,
+        "hp_ss_upgraded": hp_upgraded,
+        "stratified_risk": stratified,
+        "hot_vacuum": hot_vacuum,
+        "vacuum_stiffener": stiffener,
+        # §19 第三轮新增标记:Word 表「校核备注」与命令行审计共用
+        "deep_vacuum": deep_vacuum,
+        "deep_hot_vacuum": deep_hot_vacuum,
+        "low_temp": low_temp,
+        "high_temp": high_temp,
+        "oversize_tolerated": bool(
+            wall["wall_mm"] is not None
+            and d_i > od - 2.0 * wall["wall_mm"] + 1e-9
+        ),
+        "operating_temp_c": float(op_temp) if isinstance(op_temp, (int, float)) else None,
         "inner_d_mm": d_i,
+
         "dn": dn,
         "od_mm": od,
         "pipe_type": pipe_type,
         "vol_flow_m3h": float(q),
         "design_pressure_mpa": pd["design_mpa"],
         "gauge_pressure_mpa": pd["gauge_mpa"],
+        "abs_pressure_kpa": abs_kpa,
         "vacuum": pd["vacuum"],
+        "external_wall_mm": ext_wall_mm,
         "design_temp_c": td["design_c"],
         "insulated": td["insulated"],
         "material": material,
@@ -930,15 +1450,25 @@ def build(
               不传则用 `pipe_data` 里的(目前是空的 → 会明确报 TablesNotReady)
     """
     opts = dict(options or {})
-    tbl, od_to_walls, stress, dn_to_od, snap = _tables_for(tables)
+    tbl, od_to_walls, stress, dn_to_od_full, snap = _tables_for(tables)
+    # 屏蔽非优先 DN(§17.2);od_to_dn 反查表跟着筛选后的系列走
+    dn_to_od = usable_dn_series(dn_to_od_full, opts)
     blocks = list(blocks or [])
     conns = list(connections or [])
     pump_in, pump_out = _pump_streams(conns, blocks)
+    all_streams = list(streams)
+    stream_list = list(all_streams)
+    # 泵排出口/明显升压流股(§17.8):汽蚀限速的排除名单
+    pressurized = frozenset(_pressurized_lines(stream_list, conns, opts)) | frozenset(pump_out)
+    # §19.1:Aspen 热量流(HEAT,如 Q1–Q4)与功流(WORK)不是物流,直接剔除;
+    # 它们既不进主表也不进《未选型流股》清单(与"未选中的管线"是两回事)。
+    stream_list = [s for s in stream_list if is_material_stream(s, opts)]
     ctx = _BuildContext(
+
         opts=opts,
         tbl=tbl,
         snap=snap,
-        dn_to_od=dn_to_od,
+        dn_to_od=dn_to_od_full,
         od_to_walls=od_to_walls,
         stress=stress,
         max_dn=int(opts.get("max_dn", pipe_data.MAX_DN)),
@@ -954,10 +1484,12 @@ def build(
         pump_out=pump_out,
         min_dn=int(opts["min_dn_process"]) if opts.get("min_dn_process") is not None
         else int(pipe_data.MIN_DN_PROCESS),
+        dn_series=dn_to_od,
+        pressurized=pressurized,
     )
 
-    stream_list = list(streams)
     rows: list[dict[str, Any]] = []
+
     missing: list[dict[str, Any]] = []
     for s in stream_list:
         row, miss = _select_stream(ctx, s)
@@ -979,13 +1511,24 @@ def build(
             else:
                 rows.append(row)
 
+    # 零流量/备用流股单列,不与"内径超限"混在一起(§17.5)
+    flagged = [m for m in missing if m.get("zero_flow")]
     return {
         "rows": rows,
         "missing": missing,
+        "flagged": flagged,
         "summary": {
             "streams": len(rows) + len(missing),
+            "excluded_nonmaterial": len(all_streams) - len(stream_list),
+            "deep_vacuum": sum(1 for r in rows if r["deep_vacuum"]),
+            "low_temp": sum(1 for r in rows if r["low_temp"]),
+            "high_temp": sum(1 for r in rows if r["high_temp"]),
+            "oversize_tolerated": sum(1 for r in rows if r["oversize_tolerated"]),
             "selected": len(rows),
             "missing": len(missing),
+            "zero_flow": len(flagged),
+            "vacuum": sum(1 for r in rows if r["vacuum"]),
+            "upgraded": sum(1 for r in rows if r["hp_ss_upgraded"]),
             "warned": sum(1 for r in rows if r["warnings"]),
         },
     }

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -1329,27 +1330,37 @@ def test_pipe() -> None:
     )
     check_eq("pipe: 无表时 pick_dn 返回 None(不当 0)", pipe_calc.pick_dn(20.0, {})[0], None)
 
-    # ④ 设计压力:绝压 11 bar → 表压 0.9987 → ×1.1 ≈ 1.0986 MPa
+    # ④ 设计压力:绝压 11 bar → 表压 0.9987 → ×1.15 ≈ 1.1487 MPa
     pd = pipe_calc.design_pressure(11.0)
-    check_close("pipe: 11 bar 绝压 → 设计压力 ≈1.0986 MPa", pd["design_mpa"], 1.09857, tol=1e-4)
+    check_close("pipe: 11 bar 绝压 → 设计压力 ≈1.1487 MPa", pd["design_mpa"], 1.1487, tol=1e-4)
     check("pipe: 11 bar 不算真空", pd["vacuum"] is False)
-    # 常压死区:1.0 bar 绝压(表压 −0.0013 MPa)属常压操作,不能判真空
-    pa = pipe_calc.design_pressure(1.0)
-    check("pipe: 1.0 bar 绝压不算真空", pa["vacuum"] is False)
-    check_close("pipe: 1.0 bar 绝压 → 1.0 MPa 下限", pa["design_mpa"], 1.0)
-    # 真正低于常压(0.5 bar 绝压 = 表压 −0.05 MPa)才算真空
-    pv = pipe_calc.design_pressure(0.05)
-    check("pipe: 绝压 0.05 bar → 真空", pv["vacuum"] is True)
+    check_close("pipe: 11 bar 绝压带出 abs_kpa=1100", pd["abs_kpa"], 1100.0)
+    # 标准大气压 1.01325 bar = 101.325 kPa > 101.3,不是真空
+    pa = pipe_calc.design_pressure(1.01325)
+    check("pipe: 101.325 kPa 不算真空", pa["vacuum"] is False)
+    check_close("pipe: 101.325 kPa → 1.0 MPa 下限", pa["design_mpa"], 1.0)
+    # §17.1 微负压 91.3 kPa 必须判真空(旧死区 0.01 MPa 会漏掉它)
+    pv = pipe_calc.design_pressure(0.913)
+    check("pipe: 91.3 kPa 微负压 → 真空", pv["vacuum"] is True)
     check_close("pipe: 真空设计压力取 0.1 MPa", pv["design_mpa"], 0.1)
+    pv2 = pipe_calc.design_pressure(0.05)
+    check("pipe: 绝压 0.05 bar → 真空", pv2["vacuum"] is True)
 
-    # ⑤ 设计温度:≥50 ℃ 自动算保温(取介质温度);65–80 且无保温才折 0.95
+    # ⑤ 设计温度(§17.4):操作 +20 ℃;≥50 ℃ 自动保温;显式关裕量兼容旧调用
     check_close(
-        "pipe: 60 ℃ 自动保温 → 取 60 ℃", pipe_calc.design_temperature(60.0)["design_c"], 60.0
+        "pipe: 60 ℃ → 设计 80 ℃", pipe_calc.design_temperature(60.0)["design_c"], 80.0
     )
-    t70 = pipe_calc.design_temperature(70.0, insulated=False)
-    check_close("pipe: 70 ℃ 无保温 → 66.5 ℃", t70["design_c"], 66.5)
-    check("pipe: 70 ℃ 无保温标记 folded", t70["folded"] is True)
-    check_close("pipe: 90 ℃ → 取 90 ℃(不折)", pipe_calc.design_temperature(90.0)["design_c"], 90.0)
+    t70 = pipe_calc.design_temperature(70.0, options={"design_temp_margin": False})
+    check_close("pipe: 关裕量 70 ℃ → 70 ℃", t70["design_c"], 70.0)
+    check_close(
+        "pipe: 操作 48 ℃ → 设计 68 ℃ ≥50 保温",
+        pipe_calc.design_temperature(48.0)["design_c"], 68.0,
+    )
+    check("pipe: 操作 48 ℃ 设计温度触发保温", pipe_calc.design_temperature(48.0)["insulated"])
+    check("pipe: 操作 40 ℃ 不触发保温(§17.8 阈值 65)",
+          pipe_calc.design_temperature(40.0)["insulated"] is False)
+    check_close("pipe: 90 ℃ → 设计 110 ℃", pipe_calc.design_temperature(90.0)["design_c"], 110.0)
+
 
     # ⑥ 许用应力:缺温度内插;T<40 取 40 ℃ 值;超范围返回 None(不猜)
     stress = SYNTH_TABLES["stress"]
@@ -1402,7 +1413,7 @@ def test_pipe() -> None:
     check_close("pipe: 下限 DN65 → 3.0", pd_mod.minimum_wall(65), 3.0)
     check_close("pipe: 下限 DN80 → 3.0", pd_mod.minimum_wall(80), 3.0)
     check_close("pipe: 下限 DN100 → 3.0", pd_mod.minimum_wall(100), 3.0)
-    check_eq("pipe: DN125 起不设下限", pd_mod.minimum_wall(125), None)
+    check_close("pipe: DN1000 焊接管下限 10 mm(§17.2)", pd_mod.minimum_wall(1000), 10.0)
     check_close(
         "pipe: 需 0.3 mm + 下限 2.0 → 取 2.0",
         pipe_calc.round_up_wall(0.3, (0.5, 0.7, 1.0, 2.0, 3.0), min_wall=2.0)["wall_mm"],
@@ -1453,6 +1464,12 @@ def test_pipe() -> None:
         "pipe: 设计温度 90 ℃ → 自动加 -H", pipe_calc.grade_code(1.6, "E", 90.0)["code"], "M1E-H"
     )
     check_eq("pipe: 设计温度 30 ℃ → 不加后缀", pipe_calc.grade_code(1.6, "E", 30.0)["code"], "M1E")
+    # §17.8:-H 阈值改按设计温度 65 ℃(操作 ≥ 45 ℃),40 ℃ 常温线不再误判保温
+    check_eq("pipe: 设计温度 60 ℃ → 不加 -H(§17.8)", pipe_calc.grade_code(1.6, "E", 60.0)["code"], "M1E")
+    check_eq(
+        "pipe: 设计温度 65 ℃ → 加 -H(边界)", pipe_calc.grade_code(1.6, "E", 65.0)["code"], "M1E-H"
+    )
+
 
     # ⑩ 端到端 build():泵入口流速、DN 超限提示、缺流量流股、表未录入的明确报错
     streams = [
@@ -1565,6 +1582,13 @@ def test_pipe_checks() -> None:
         ["V9"],
     )
     check_eq("checks: 有保温代号就不再报 V9", codes({"design_temp_c": 90.0}), [])
+    # §17 新增 V10–V14
+    check_eq("checks: 非标编号 → V10", codes({"nonstandard_no": True}), ["V10"])
+    check_eq("checks: 真空 DN200 → V11",
+             codes({"vacuum": True, "dn": 200, "external_wall_mm": 2.0}), ["V6", "V11"])
+    check_eq("checks: 大口径两相分层流 → V12", codes({"stratified_risk": True}), ["V12"])
+    check_eq("checks: 高压升 R1E → V13", codes({"hp_ss_upgraded": True}), ["V13"])
+    check_eq("checks: 真空代号 V1E 不误报 V4", codes({"grade_code": "V1E", "vacuum": True}), ["V6"])
 
     # 端到端:build 出来的行直接喂给 validate,字段要能对上
     streams = [
@@ -2004,6 +2028,47 @@ def test_pump_pv_read() -> None:
     got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.5, "")}), "0133")
     check_eq("泵 p_v:单位认不出时留空", got, None)
 
+    # V11 布局(2026-11-18 实测,22/22 台):PBUB 下面没有 TOTAL 层,值是 MIXED\LIQUID。
+    # 只按 `...\MIXED\TOTAL` 取值会逐台返回 None,泵页 p_v 整列变空 —— 这条守住它。
+    v11 = base + r"\STRM_UPP\PBUB\MIXED\LIQUID"
+    got = reader.read_stream_vapor_pressure(_Session({v11: _Node(0.18812677, "bar")}), "0133")
+    check(
+        "泵 p_v:V11 布局(PBUB\\MIXED\\LIQUID)也能读到",
+        got is not None and abs(got - 0.1881) < 1e-3,
+        f"实际 {got}",
+    )
+
+    # 从容器节点取:PBUB(值恒 1)→ MIXED → LIQUID,下钻命中真值
+    got = reader.read_stream_vapor_pressure(
+        _Session(
+            {
+                base + r"\STRM_UPP\PBUB": _Node(1, "bar", [_Kid("MIXED")]),
+                base + r"\STRM_UPP\PBUB\MIXED": _Node(1, "bar", [_Kid("LIQUID")]),
+                base + r"\STRM_UPP\PBUB\MIXED\LIQUID": _Node(3.33615131, "bar"),
+            }
+        ),
+        "0133",
+    )
+    check(
+        "泵 p_v:容器 PBUB 按相下钻,不把标志位 1 当读数",
+        got is not None and abs(got - 3.3362) < 1e-3,
+        f"实际 {got}",
+    )
+
+    # PL 的液相叶子是按组分的分压,认不出组分名时必须放弃,不能拿第一个组分顶上
+    got = reader.read_stream_vapor_pressure(
+        _Session(
+            {
+                base + r"\STRM_UPP\PL": _Node(1, "bar", [_Kid("MIXED")]),
+                base + r"\STRM_UPP\PL\MIXED": _Node(1, "bar", [_Kid("LIQUID")]),
+                base + r"\STRM_UPP\PL\MIXED\LIQUID": _Node(1, "bar", [_Kid("H2O")]),
+                base + r"\STRM_UPP\PL\MIXED\LIQUID\H2O": _Node(0.0424791, "bar"),
+            }
+        ),
+        "0133",
+    )
+    check_eq("泵 p_v:PL 的组分分压不当混合物 p_v", got, None)
+
 
 def test_side_temperatures() -> None:
     """enrich_side_temperatures():进出/冷侧温度取自连接流股,不需要 Aspen。"""
@@ -2068,6 +2133,7 @@ def test_family_export() -> None:
                     "p_out_bar": 2.1,
                     "dp_bar": 0.3,
                     "rho_kgm3": 900.0,
+                    "mu_cp": 0.845,
                     "pump_vap_frac": 0.0,
                     "pv_bar": 0.3,
                     "raw": {},
@@ -2127,12 +2193,34 @@ def test_family_export() -> None:
             f"实际 {row[npsh_col]!r}",
         )
         check_eq("分类导出:泵行 p_v 取 4 位", row[head.index("p_v bar")], 0.3)
+        check("分类导出:泵表头含粘度", "粘度 cP" in head, str(head))
+        check_eq("分类导出:泵行粘度 0.845 cP", row[head.index("粘度 cP")], 0.845)
+
+        # 泵分类多带一页选型提示词:与页面按钮、AI 包同一份正文
+        from app.design import pump_prompt
+
+        wb_pump = openpyxl.load_workbook(io.BytesIO(data))
+        check_eq("分类导出:泵分类多带提示词页", wb_pump.sheetnames, ["泵", "选泵提示词"])
+        sheet_lines = [
+            "" if cell.value is None else str(cell.value)
+            for (cell,) in wb_pump["选泵提示词"].iter_rows(min_col=1, max_col=1)
+        ]
+        check_eq(
+            "分类导出:提示词页逐行等于常量",
+            "\n".join(sheet_lines).rstrip("\n"),
+            pump_prompt.PUMP_SELECTION_PROMPT.rstrip("\n"),
+        )
 
         data, label, _ = family_export.build_family_workbook(conn, cid, "heat")
         ws = openpyxl.load_workbook(io.BytesIO(data)).active
         head = [c.value for c in ws[1]]
         check_eq("分类导出:换热页表名", label, "换热")
         check("分类导出:换热表头含热负荷与状态", "热负荷 kW" in head and "状态" in head, str(head))
+        check_eq(
+            "分类导出:非泵分类不带提示词页",
+            openpyxl.load_workbook(io.BytesIO(data)).sheetnames,
+            ["换热"],
+        )
         check(
             "分类导出:换热表头含面积与冷热侧温度",
             "面积 m²" in head and "冷侧进 ℃" in head and "进口 ℃" in head,
@@ -2170,6 +2258,51 @@ def test_family_export() -> None:
             scratch.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def test_pump_prompt() -> None:
+    """选泵提示词:一份正文、三个出口(页面按钮 / Excel 工作表 / AI 包)。
+
+    最要紧的是字段覆盖断言 —— 导出加了列而提示词没提,AI 会把那列当没看见,
+    而这种漏改在页面上完全看不出来(上一轮加粘度列就差点漏掉提示词)。
+    """
+    import re as _re
+    from pathlib import Path as _P
+
+    from app.api import family_export
+    from app.design import pump_prompt
+
+    text = pump_prompt.PUMP_SELECTION_PROMPT
+    check("提示词:正文非空", len(text) > 1500, f"实际 {len(text)} 字符")
+    check("提示词:开头是角色设定", text.startswith("# 角色与任务"), text[:16])
+
+    missing = [h for h in family_export.PUMP_HEADERS if h not in text]
+    check(
+        "提示词:覆盖泵表每一列",
+        not missing,
+        f"没提到 {missing};导出加列时同步改 app/design/pump_prompt.py",
+    )
+
+    html = _P("app/web/index.html").read_text(encoding="utf-8")
+    check("提示词:泵页有复制按钮", 'id="pumpPromptCopy"' in html)
+    check("提示词:有操作指引浮层", 'id="pumpPromptTip"' in html)
+    check(
+        "提示词:浮层文案含三段要点",
+        "已复制 AI 选泵提示词！" in html
+        and "上传刚导出的 Excel 文件并粘贴提示词" in html
+        and "剧毒（如 HCN）" in html,
+    )
+    js = _P("app/web/static/app.js").read_text(encoding="utf-8")
+    check(
+        "提示词:前端从接口取正文",
+        "fetchPumpPromptText" in js and "/api/pump-prompt" in js,
+        "前端不许内置第二份",
+    )
+    server_src = _P("app/api/server.py").read_text(encoding="utf-8")
+    check(
+        "提示词:接口已注册",
+        bool(_re.search(r'parts == \["api",\s*"pump-prompt"\]', server_src)),
+    )
 
 
 def test_block_columns() -> None:
@@ -2566,6 +2699,7 @@ def test_export_consistency() -> None:
         ("效率%", "效率 %", None),
         ("轴功率kW", "轴功率 kW", "power_kw"),
         ("建议电机kW", "建议电机 kW", "motor_kw"),
+        ("粘度cP", "粘度 cP", "mu_cp"),
         ("NPSHa m", "NPSHₐ m", None),
         ("p_v bar", "p_v bar", "pv_bar"),
     ]
@@ -2603,6 +2737,16 @@ def test_export_consistency() -> None:
         "对比字段:前端字段都在接口里",
         js_fields <= server_fields,
         f"前端多出 {sorted(js_fields - server_fields)}",
+    )
+
+    # 泵页表格列:粘度列在页面与三个导出里都要有(接口有 mu_cp 而页面不显示 = 白读)
+    hit_pump_cols = re.search(r"pump:\s*\[(.*?)\]", js, re.S)
+    pump_cols = hit_pump_cols.group(1) if hit_pump_cols else ""
+    check("泵页列:表格含粘度列(visc)", '"visc"' in pump_cols, pump_cols)
+    check(
+        "泵页列:粘度列取 mu_cp",
+        bool(re.search(r'visc:\s*\{\s*key:\s*"mu_cp"', js)),
+        "BLOCK_COLS.visc 未指向 mu_cp",
     )
 
 
@@ -2769,7 +2913,7 @@ def test_hydraulics() -> None:
     check_eq("粘度: 认不出的单位返回 None", reader_mod._to_cp("1.2", "kgf/m2"), None)
     check_eq("粘度: 非数字返回 None", reader_mod._to_cp("abc", "cP"), None)
 
-    # --- _visc_leaf:MIXED 是目录时要钻到 TOTAL,不能把标志位 1 当读数
+    # --- _lower_leaf:MIXED 是目录时要钻到 TOTAL,不能把标志位 1 当读数
     # (实测 STRM_UPP\PL\MIXED 与 PBUB\MIXED 直接取值都是 1 bar,那是目录/标志节点)
     def _kids_of(tree, path):
         """按 key 前缀合成子节点名 —— 真实 Aspen 的 Elements 也会列出子目录。"""
@@ -2816,7 +2960,7 @@ def test_hydraulics() -> None:
     }
     check_eq(
         "粘度: MIXED 是叶子时直接取",
-        round(reader_mod._visc_leaf(_Stub(flat_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")[0], 2),
+        round(reader_mod._lower_leaf(_Stub(flat_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")[0], 2),
         1.23,
     )
 
@@ -2824,7 +2968,7 @@ def test_hydraulics() -> None:
         r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": (["TOTAL"], 1, "bar"),
         r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED\TOTAL": ([], 0.483, "cP"),
     }
-    value, unit = reader_mod._visc_leaf(_Stub(nested_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")
+    value, unit = reader_mod._lower_leaf(_Stub(nested_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")
     check_eq("粘度: MIXED 是目录时钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
 
     # MUMX(M=混合物粘度)是首选属性,真值同样在 MIXED\TOTAL 下
@@ -2832,7 +2976,7 @@ def test_hydraulics() -> None:
         r"\Data\Streams\S\Output\STRM_UPP\MUMX\MIXED": (["TOTAL"], 1, "cP"),
         r"\Data\Streams\S\Output\STRM_UPP\MUMX\MIXED\TOTAL": ([], 0.483, "cP"),
     }
-    value, unit = reader_mod._visc_leaf(_Stub(mumx_tree), r"\Data\Streams\S\Output\STRM_UPP\MUMX")
+    value, unit = reader_mod._lower_leaf(_Stub(mumx_tree), r"\Data\Streams\S\Output\STRM_UPP\MUMX")
     check_eq("粘度: MUMX 下钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
     check(
         "粘度: MUMX 排在 VISC 前面",
@@ -2846,7 +2990,7 @@ def test_hydraulics() -> None:
     }
     check_eq(
         "粘度: 认不出的目录不硬猜",
-        reader_mod._visc_leaf(_Stub(unknown_dir), r"\Data\Streams\S\Output\STRM_UPP\VISC"),
+        reader_mod._lower_leaf(_Stub(unknown_dir), r"\Data\Streams\S\Output\STRM_UPP\VISC"),
         (None, ""),
     )
 
@@ -3530,6 +3674,199 @@ def test_lambda_method() -> None:
             pass
 
 
+def test_pipe_2026_rules() -> None:
+    """2026-11-18 工程校核口径(§17):真空 V1E / 外压 / 升 R1E / 非优先 DN / 汽蚀 / 零流量。"""
+    from app.design import pipe as pc
+    from app.design import pipe_data as pdata
+
+    # §17.1 真空代号 + 外压失稳最小壁厚
+    check_eq("rules: 真空压力代号 V", pdata.VACUUM_PN_CODE, "V")
+    check_eq("rules: 真空等级号 V1E", pc.grade_code(0.1, "E", 30.0, options={"vacuum": True})["code"], "V1E")
+    t_ext = pc.external_pressure_min_wall(219.0)
+    check("rules: DN200 真空外压 t_min 在 0–5 mm", t_ext is not None and 0 < t_ext < 5.0)
+    check("rules: 外压 t_min 随外径增大", pc.external_pressure_min_wall(630.0) > t_ext)
+
+    # §17.2 非优先 DN 屏蔽:计算内径落 DN65/DN125 区间时上圆整
+    full = {15: 18.0, 25: 32.0, 50: 57.0, 65: 76.0, 80: 89.0, 100: 108.0, 125: 133.0, 150: 159.0}
+    series = pc.usable_dn_series(full)
+    check("rules: DN65 已屏蔽", 65 not in series and 80 in series)
+    check("rules: DN125 已屏蔽", 125 not in series and 150 in series)
+    check_eq("rules: 92 mm 内径仍选 DN100", pc.pick_dn(92.0, series)[0], 100)
+    check_eq("rules: 70 mm 内径原落 DN65,屏蔽后上圆整到 DN80",
+             pc.pick_dn(70.0, series)[0], 80)
+    # §17.2 汽蚀:液相 86 ℃ / 101.3 kPa 命中;气相不命中
+    check("rules: 近常压沸点液相反汽蚀", pc.near_boiling_liquid("liquid", 101.3, 86.0))
+    check("rules: 气相不算汽蚀", not pc.near_boiling_liquid("gas", 101.3, 86.0))
+    check("rules: 低温液不算汽蚀", not pc.near_boiling_liquid("liquid", 101.3, 25.0))
+    check_close("rules: DN1000 焊接管下限 10 mm", pdata.minimum_wall(1000), 10.0)
+
+    # §17.3/§17.8 高压不锈钢升 R1E(压力带含 4700 kPa,免与 4800 kPa 跳档)
+    check_eq("rules: 5.0 MPa S30408 → R", pc.hp_stainless_force_code("S30408", 5000.0), "R")
+    check_eq("rules: 边界 4.7 MPa → R(合并邻近等级)", pc.hp_stainless_force_code("S30408", 4700.0), "R")
+    check_eq("rules: 4.6 MPa 不升档", pc.hp_stainless_force_code("S30408", 4600.0), None)
+    check_eq("rules: 碳钢不升档", pc.hp_stainless_force_code("20#", 5000.0), None)
+    check_eq("rules: 升档等级号 R1E-H",
+             pc.grade_code(5.0, "E", 200.0, options={"force_pn_code": "R"})["code"], "R1E-H")
+
+    # §17.8 R1E 公式化壁厚:t = PD/(2[σ]^t·E_j+P) + C 后 ÷0.875
+    check_close("rules: [σ] 100 ℃ → 137", pc.hp_ss_allowable_stress(100.0), 137.0)
+    check_close("rules: [σ] 125 ℃ 内插 → 130", pc.hp_ss_allowable_stress(125.0), 130.0)
+    check_close("rules: [σ] 90 ℃ 取平值 137", pc.hp_ss_allowable_stress(90.0), 137.0)
+    w1 = pc.hp_ss_required_wall(6.0935, 426.0, 210.0)
+    check_close("rules: 6.09 MPa/Φ426/210 ℃ → t_req≈13.84", w1, 13.84, tol=0.02)
+    w2 = pc.hp_ss_required_wall(5.635, 18.0, 230.0)
+    check("rules: DN15 小管公式值 < 3 mm 下限", w2 is not None and w2 < 3.0)
+    # 高温 → 同压力同外径壁厚单调增(消除倒挂的本质)
+    w_hot = pc.hp_ss_required_wall(6.0, 426.0, 250.0)
+    w_cold = pc.hp_ss_required_wall(6.0, 426.0, 150.0)
+    check("rules: 同 P 同 D,温度高 → 所需壁厚更厚(无倒挂)", w_hot > w_cold)
+
+    # §17.8 汽蚀:排除泵排出口/升压管线
+    check("rules: 汽蚀 110 kPa 命中", pc.near_boiling_liquid("liquid", 110.0, 86.0))
+    check("rules: 汽蚀 120 kPa 不命中(收紧到 95–115)", not pc.near_boiling_liquid("liquid", 120.0, 86.0))
+    cstream = [{"name": "C1", "vol_flow_m3h": 20.0, "temperature_c": 90.0,
+                "pressure_bar": 1.02, "vap_frac": 0.0}]
+    cblocks = [{"name": "P1", "type": "Pump"}]
+    cconns = [{"block": "P1", "direction": "in", "stream": "C0"},
+              {"block": "P1", "direction": "out", "stream": "C1"}]
+    cres = pc.build(cstream, cblocks, cconns, tables=SYNTH_TABLES)
+    check("rules: 泵排出口不触发汽蚀限速",
+          cres["rows"][0]["cavitation_limited"] is False and cres["rows"][0]["pump_outlet"])
+
+    # §17.8 未选型流股按相态分类
+    big_gas = [{"name": "G1", "vol_flow_m3h": 900000.0, "temperature_c": 60.0,
+                "pressure_bar": 1.01325, "vap_frac": 1.0}]
+    gres = pc.build(big_gas, tables=SYNTH_TABLES)
+    check("rules: 气相未选型 → 风管专项设计", "风管" in gres["missing"][0]["reason"])
+    big_two = [{"name": "T1", "vol_flow_m3h": 900000.0, "temperature_c": 60.0,
+                "pressure_bar": 1.01325, "vap_frac": 0.5}]
+    tres = pc.build(big_two, tables=SYNTH_TABLES)
+    check("rules: 两相未选型 → 多管并联", "并联" in tres["missing"][0]["reason"])
+
+    # §17.5 零流量 + 非标编号
+
+    tiny = [{"name": "Z1", "vol_flow_m3h": 0.001, "temperature_c": 25.0,
+             "pressure_bar": 1.01325, "vap_frac": 0.0}]
+    zres = pc.build(tiny, tables=SYNTH_TABLES)
+    check_eq("rules: 零流量进 flagged", len(zres["flagged"]), 1)
+    check("rules: 零流量标注人工确认", "需人工确认管径" in zres["flagged"][0]["reason"])
+    vres = pc.build([{"name": "AB", "vol_flow_m3h": 10.0, "temperature_c": 60.0,
+                      "pressure_bar": 11.0, "vap_frac": 0.0}], tables=SYNTH_TABLES)
+    check("rules: AB 标非标编号", vres["rows"][0]["nonstandard_no"] is True)
+    vfind = pc.validate(vres["rows"])["findings"]
+    check("rules: 非标编号触发 V10", any(f["code"] == "V10" for f in vfind))
+
+
+def test_pipe_third_round() -> None:
+    """§19 第三轮:非物流剔除 / 95 kPa / 深真空 / DN1000 容差 / 温度备注。"""
+    from app.design import pipe as pc
+    from app.design import pipe_data as pdata
+
+    # §19.1 流股类型:Aspen 属性 6 的三种值
+    heat = {"name": "Q1", "stream_type": "HEAT", "vol_flow_m3h": 10.0}
+    work = {"name": "W1", "stream_type": "WORK", "vol_flow_m3h": 10.0}
+    mat = {"name": "0101", "stream_type": "MATERIAL", "vol_flow_m3h": 10.0}
+    check("rules: HEAT 剔除", pc.is_material_stream(heat) is False)
+    check("rules: WORK 剔除", pc.is_material_stream(work) is False)
+    check("rules: MATERIAL 保留", pc.is_material_stream(mat) is True)
+    # 老库没有 stream_type:名字像 Q1 但物料结果非空 → 仍当物流保留
+    check("rules: 老库有物料结果不被误删",
+          pc.is_material_stream({"name": "Q1", "temperature_c": 25.0}) is True)
+    check("rules: 老库空结果 Q1 剔除",
+          pc.is_material_stream({"name": "Q1", "temperature_c": None}) is False)
+    check("rules: 老库无类型普通流股保留", pc.is_material_stream({"name": "0101"}) is True)
+
+    # §19.1 真空阈值 95 kPa
+    check_eq("rules: 真空阈值 95.0", pc.VACUUM_ABS_KPA, 95.0)
+    check("rules: 1 bar(100 kPa)不是真空", pc.design_pressure(1.0)["vacuum"] is False)
+    check("rules: 1.01325 bar 不是真空", pc.design_pressure(1.01325)["vacuum"] is False)
+    check_close("rules: 1 bar 设计压力回到 1.0 MPa", pc.design_pressure(1.0)["design_mpa"], 1.0)
+    check("rules: 94.9 kPa 判真空", pc.design_pressure(0.949)["vacuum"] is True)
+    check("rules: 95.0 kPa 边界不是真空", pc.design_pressure(0.95)["vacuum"] is False)
+
+    # DN1000 容差上限常量
+    check_close("rules: DN1000 标准内径 996", pdata.DN1000_STD_INNER_MM, 996.0)
+    check_close("rules: DN1000 +5% 上限 1045", pdata.DN1000_TOL_MAX_MM, 1045.0)
+    check_close("rules: 1008.4 mm 超径约 1.2%",
+                pc.dn1000_oversize_pct(1008.4), 1.24, tol=0.05)
+    check_close("rules: 1035.3 mm 超径约 3.9%",
+                pc.dn1000_oversize_pct(1035.3), 3.95, tol=0.05)
+
+    # §19.2/§19.4 深真空 + 温度备注:用合成表跑完整 build
+    base = {"name": "0330", "stream_type": "MATERIAL", "vol_flow_m3h": 50.0,
+            "pressure_bar": 0.019, "temperature_c": 292.4, "vap_frac": 0.0}
+    rows = pc.build([base], tables=SYNTH_TABLES)["rows"]
+    r = rows[0]
+    check("rules: 深真空标记", r["deep_vacuum"] is True)
+    check("rules: 高温深真空标记", r["deep_hot_vacuum"] is True)
+    joined = ";".join(r["warnings"])
+    check("rules: 高真空防闪蒸备注", "高真空(≤10kPa)" in joined and "防漏气" in joined)
+    check("rules: 高温深真空备注", "高温深真空" in joined and "外压失稳支撑跨距" in joined)
+
+    hotter = dict(base, name="0402", temperature_c=306.5, pressure_bar=1.01325)
+    hrows = pc.build([hotter], tables=SYNTH_TABLES)["rows"]
+    check("rules: 高温标记", hrows[0]["high_temp"] is True)
+    hjoined = ";".join(hrows[0]["warnings"])
+    check("rules: 高温柔性应力备注", "高温管线:需做柔性应力分析(热膨胀补偿)" in hjoined)
+    check("rules: 高温 ≥300℃ 备注", "高温管线(≥300℃):需做热膨胀柔性应力分析" in hjoined)
+
+    cold = dict(base, name="0402", temperature_c=-25.0, pressure_bar=1.01325)
+    crows = pc.build([cold], tables=SYNTH_TABLES)["rows"]
+    check("rules: 深冷标记", crows[0]["low_temp"] is True)
+    cjoined = ";".join(crows[0]["warnings"])
+    check("rules: 低温韧性备注", "低温工况:复核焊缝低温韧性及低温螺栓选型" in cjoined)
+    check("rules: 深冷韧性备注", "深冷工况:复核焊缝低温韧性及低温螺栓选型" in cjoined)
+
+    # §19.3 DN1000 容差:给一张含 DN1000 的合成表,计算内径 1008.4 / 1035.3
+    big_dn = dict(SYNTH_TABLES["dn_to_od"])
+    big_dn[1000] = 1016.0
+    big_walls = dict(SYNTH_TABLES["od_to_walls"])
+    big_walls[1016.0] = (10.0, 12.0)
+    big_tables = {
+        "dn_to_od": big_dn,
+        "od_to_walls": big_walls,
+        "stress": dict(SYNTH_TABLES["stress"]),
+    }
+    for nm, d_calc in (("0222", 1008.4), ("0215", 1035.3)):
+        # 反算流量:v=15 m/s 的气相,体积流量使计算内径恰为 d_calc
+        q = math.pi * (d_calc / 1000.0) ** 2 / 4.0 * 15.0 * 3600.0
+        srow = pc.build([{"name": nm, "stream_type": "MATERIAL", "vol_flow_m3h": q,
+                          "pressure_bar": 1.01325, "temperature_c": 25.0, "vap_frac": 1.0}],
+                        tables=big_tables)["rows"]
+        check(f"rules: {nm} 容差后选中 DN1000", srow[0]["dn"] == 1000)
+        check(f"rules: {nm} 壁厚 10 mm", srow[0]["wall_mm"] == 10.0)
+        check(f"rules: {nm} 标记容差", srow[0]["oversize_tolerated"] is True)
+        sjoined = ";".join(srow[0]["warnings"])
+        check(f"rules: {nm} 流速略超备注", f"内径{d_calc:.1f}mm" in sjoined)
+        check(f"rules: {nm} 超径百分比备注", "计算内径略超DN1000上限" in sjoined)
+
+    # 容差只作用于 996–1045:1500 mm 仍不选型
+    q_huge = math.pi * (1.5) ** 2 / 4.0 * 15.0 * 3600.0
+    huge = pc.build([{"name": "9999", "stream_type": "MATERIAL", "vol_flow_m3h": q_huge,
+                      "pressure_bar": 1.01325, "temperature_c": 25.0, "vap_frac": 1.0}],
+                    tables=big_tables)
+    check("rules: 1500 mm 仍不选型", huge["rows"] == [] and len(huge["missing"]) == 1)
+
+    # §19.5 封面统计与主表同源:焊接管 / 保冷管都从同一份 rows 现算
+    cover_rows = [
+        {"name": f"S{i}", "stream_type": "MATERIAL", "vol_flow_m3h": 20.0,
+         "pressure_bar": 1.01325, "temperature_c": t, "vap_frac": 0.0}
+        for i, t in enumerate((25.0, 120.0, -25.0))
+    ]
+    cover = pc.build(cover_rows, tables=SYNTH_TABLES)
+    n_weld = sum(1 for r in cover["rows"] if (r.get("pipe_type") or "无缝") == "焊接")
+    n_cold = sum(1 for r in cover["rows"] if str(r.get("grade_code") or "").endswith("-C"))
+    check_eq("rules: 封面管路条数 = 主表行数", len(cover["rows"]), 3)
+    check("rules: 封面保冷管统计来自主表", n_cold >= 1 and n_cold <= len(cover["rows"]))
+    check("rules: 封面焊接管统计来自主表", 0 <= n_weld <= len(cover["rows"]))
+
+    # 非物流不进未选型清单
+    mix = pc.build([heat, work, mat], tables=SYNTH_TABLES)
+    check("rules: 非物流不进主表/未选型",
+          len(mix["rows"]) + len(mix["missing"]) == 1)
+    check("rules: 剔除条数入 summary", mix["summary"]["excluded_nonmaterial"] == 2)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="判定 / 焓平衡 / 波及范围的回归自测")
     parser.add_argument("--db", default="", help="额外检查这个工况库(如 data/cases.db)")
@@ -3548,7 +3885,9 @@ def main(argv: list[str] | None = None) -> int:
         ("衡算报告-勾选设备", test_report_picked),
         ("报错波及范围 impact.build()", test_impact),
         ("管路选型 design.pipe", test_pipe),
-        ("选型校验 validate() V1–V9", test_pipe_checks),
+        ("2026 工程校核 §17", test_pipe_2026_rules),
+        ("第三轮精细化 §19", test_pipe_third_round),
+        ("选型校验 validate() V1–V14", test_pipe_checks),
         ("标准表补录说明 setup_guide()", test_pipe_setup),
         ("标准表导入 import_standards()", test_std_import),
         ("管道等级表 piping-class", test_piping_class),
@@ -3559,6 +3898,7 @@ def main(argv: list[str] | None = None) -> int:
         ("设备表泵列 blocks", test_block_columns),
         ("设备进出温度", test_side_temperatures),
         ("分类导出 excel", test_family_export),
+        ("选泵提示词 pump_prompt", test_pump_prompt),
         ("泵 p_v 存储", test_pump_pv_store),
         ("泵 p_v 沿用", test_pump_pv_inherit),
         ("单位表 units", test_units),

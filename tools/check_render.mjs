@@ -380,6 +380,25 @@ const emptyHome = byId("homeCards").innerHTML;
 ok("⑦ 无工况时首页不静默空白", emptyHome.length > 0);
 has("⑦ 无工况时渲染出引导卡片", emptyHome, "还没有工况");
 
+// ⑦b 判定条:empty 状态必须用 verdict 专属类名,不能撞上 .empty 空表占位样式
+//     (padding:40px + text-align:center 会把首屏判定条撑成巨型居中卡片)
+console.log("\n[新增组 ⑦b] renderBanner —— 空结果判定条类名不撞 .empty");
+vm.runInContext(`
+  state.current = {
+    id: 2, model_name: "EMPTY-STUB", model_path: "", read_at: "2026-01-01 00:00:00",
+    run_id: "", elapsed_sec: 0,
+    stream_count: 3, block_count: 2, connection_count: 0,
+    converged: false, reasons: ["桩值:没有结果"], status: {},
+    severity: "empty",
+  };
+  state.bannerCollapsed = false;
+  renderBanner();
+`, ctx);
+const verdictClass = byId("verdict").className;
+ok("⑦b 空结果判定条不套 .empty 类", !/(^|\s)empty(\s|$)/.test(verdictClass));
+has("⑦b 空结果用 idle 类", verdictClass, "idle");
+has("⑦b 空结果仍显示原判定文案", byId("verdict").innerHTML, "没有结果");
+
 // ⑧ 设备家族页签:state.blocks / families / family → blockFamilies
 console.log("\n[新增组 ⑧] renderFamilyBar —— 设备家族页签(state.blocks / families / family)");
 vm.runInContext(`

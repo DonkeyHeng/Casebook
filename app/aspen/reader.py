@@ -269,6 +269,24 @@ def judge(codes: dict, errtxt, tears: list[dict], blocks: list[dict] | None = No
 # ---------------------------------------------------------------- 流股
 
 
+def stream_type(session, sid: str) -> str:
+    """Aspen 流股节点的可读类型(实测属性 6):MATERIAL / HEAT / WORK。
+
+    用 `AttributeValue(6)` —— 与设备 `AttributeValue(6)` 拿到 Heater / Pump 是
+    同一个属性。读不到就返回空串(不猜),由下游 `pipe.is_material_stream()` 决定
+    怎么处理。只读,不改模型(§19.1)。
+    """
+    node = session.find(rf"\Data\Streams\{sid}")
+    if node is None:
+        return ""
+    try:
+        if node.HasAttribute(6):
+            return str(node.AttributeValue(6) or "").strip().upper()
+    except Exception:
+        pass
+    return ""
+
+
 def read_streams(
     session, progress: Progress | None = None, include_composition: bool = False
 ) -> list[dict]:
@@ -277,7 +295,7 @@ def read_streams(
     out: list[dict] = []
     for n, sid in enumerate(ids, 1):
         base = rf"\Data\Streams\{sid}\Output"
-        rec: dict = {"name": sid, "composition": None}
+        rec: dict = {"name": sid, "composition": None, "stream_type": stream_type(session, sid)}
         raw = {}
         for key, field, quantity in STREAM_FIELDS:
             value, unit = fetch(session, rf"{base}\{field}")
@@ -916,15 +934,23 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
 
 # ---------------------------------------------------------------- 泵参数
 
-# 进口流股 p_v(蒸气压)的读取路径,实测 2026-11-14(华东理工模型,Aspen Plus V12.1):
-#   `Output\STRM_UPP\PBUB\MIXED\TOTAL` = 泡点压力(bar)。单相液相时它就是蒸气压,
-#   正好是 NPSHₐ 公式里的 p_v;20/20 台泵进口流股都有值。
+# 进口流股 p_v(蒸气压)的读取路径。同一属性在不同版本下**叶子层数不一样**:
+#   * 2026-11-14(华东理工模型,V12.1):`STRM_UPP\PBUB\MIXED\TOTAL`,20/20 台有值;
+#   * 2026-11-18(浙大 1 模型,V11):写成 `STRM_UPP\PBUB\MIXED\LIQUID`,22/22 台有值,
+#     少了 TOTAL 这一层 —— 只按 TOTAL 取值会逐台返回 None(泵页 p_v 整列变空)。
+# 所以容器路径也列进来,取值统一交给 `_lower_leaf` 按 TOTAL → MIXED → LIQUID 下钻,
+# 两种布局都能读到,也不用为一个版本再加一条硬编码路径。
 # ⚠️ 不要读 `Output\PL`:它是**目录节点**(值恒为 1,还带单位,极像读数);
-#   真正的分压在 `PL\MIXED\LIQUID\<组分>`,没有混合物总压叶子。
-#   所以读取时必须跳过有子节点的节点,再用 pump.sanitize_pv_bar 挡住 0/负值。
+#   真正的分压在 `PL\MIXED\LIQUID\<组分>`,没有混合物总压叶子 —— 下钻到组分名
+#   时认不出,自动返回 None,不会把标志位当读数。
+#   最后仍用 pump.sanitize_pv_bar 挡住 0/负值。
 PV_STREAM_PATHS = (
     r"STRM_UPP\PBUB\MIXED\TOTAL",
     r"PBUB\MIXED\TOTAL",
+    r"STRM_UPP\PBUB\MIXED\LIQUID",  # V11 实测布局
+    r"PBUB\MIXED\LIQUID",
+    r"STRM_UPP\PBUB",
+    r"PBUB",
     r"STRM_UPP\PL\MIXED\TOTAL",
 )
 
@@ -935,10 +961,11 @@ def read_stream_vapor_pressure(session, stream_name: str):
 
     base = rf"\Data\Streams\{stream_name}\Output"
     for rel in PV_STREAM_PATHS:
-        node = session.find(rf"{base}\{rel}")
-        if node is None or child_names(node):  # 目录节点(PL)的值是标志位,不是读数
+        # 有子节点的是目录(PBUB / PL 的值恒为 1),按相下钻到真值叶子;
+        # 钻不到叶子时 _lower_leaf 返回 (None, ""),自然跳到下一条候选路径。
+        value, unit = _lower_leaf(session, rf"{base}\{rel}")
+        if value is None:
             continue
-        value, unit = fetch(session, rf"{base}\{rel}")
         pv = pump_rules.sanitize_pv_bar(units.convert("pressure", value, unit))
         if pv is not None:
             return pv
@@ -1001,19 +1028,22 @@ def _to_cp(value, unit) -> float | None:
 
 
 # 目录里再往下找时优先看的子节点名:Aspen 的 TOTAL 就是"混合物总物性",
-# LIQUID / LIQ 是液相。顺序有讲究 —— 单相液相流股优先取液相值。
-_VISC_DESCEND = ("total", "mixed", "liquid", "liq")
+# MIXED 是混合相,LIQUID / LIQ 是液相。顺序有讲究 —— 单相液相流股优先取液相值。
+# 粘度(VISC/MUMX)与蒸气压(PBUB)共用这一套下钻规则,见 `_lower_leaf`。
+_DESCEND_NAMES = ("total", "mixed", "liquid", "liq")
 
-# 探针一次最多下钻几层:Output\STRM_UPP\VISC\MIXED\TOTAL 是 4 层,再留 1 层余量
-_VISC_MAX_DEPTH = 5
+# 一次最多下钻几层:Output\STRM_UPP\VISC\MIXED\TOTAL 是 4 层,再留 1 层余量
+_DESCEND_MAX_DEPTH = 5
 
 
-def _visc_leaf(session, path: str, depth: int = _VISC_MAX_DEPTH):
+def _lower_leaf(session, path: str, depth: int = _DESCEND_MAX_DEPTH):
     r"""从 path 往下钻到叶子,返回 (值, 单位);钻不到或认不出返回 (None, "")。
 
     为什么要钻:实测 STRM_UPP\PL\MIXED 与 STRM_UPP\PBUB\MIXED 直接取值都是
-    **1 且带 bar 单位** —— 那是 Aspen 的目录/标志节点,极像读数。真正的值在
-    MIXED\TOTAL。所以看到有子节点不能直接当读数,也不能直接放弃,得按名字往下找。
+    **1 且带 bar 单位** —— 那是 Aspen 的目录/标志节点,极像读数。真正的值在叶子上,
+    但不同版本层数不同(V12.1 是 MIXED\TOTAL,V11 是 MIXED\LIQUID),
+    所以看到有子节点不能直接当读数,也不能直接放弃,得按名字往下找。
+    组分名(PL\MIXED\LIQUID\<组分>)认不出,返回 None —— 正好挡住 PL。
     """
     if depth <= 0:
         return None, ""
@@ -1022,9 +1052,9 @@ def _visc_leaf(session, path: str, depth: int = _VISC_MAX_DEPTH):
         value, unit = fetch(session, path)
         return value, unit
     lowered = {str(k).lower(): k for k in kids}
-    for want in _VISC_DESCEND:
+    for want in _DESCEND_NAMES:
         if want in lowered:
-            return _visc_leaf(session, rf"{path}\{lowered[want]}", depth - 1)
+            return _lower_leaf(session, rf"{path}\{lowered[want]}", depth - 1)
     return None, ""
 
 
@@ -1032,7 +1062,7 @@ def read_stream_viscosity(session, stream_name: str):
     """进口流股粘度(cP)。读不到返回 None —— 不拿水的粘度之类的常见值顶替。"""
     base = rf"\Data\Streams\{stream_name}\Output"
     for rel in VISC_STREAM_PATHS:
-        value, unit = _visc_leaf(session, rf"{base}\{rel}")
+        value, unit = _lower_leaf(session, rf"{base}\{rel}")
         cp = _to_cp(value, unit)
         if cp is not None:
             return cp

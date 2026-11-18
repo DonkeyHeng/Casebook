@@ -243,6 +243,9 @@ _STREAM_ADDED_COLUMNS = (
     ("enthalpy_kjkg", "REAL"),
     ("enthalpy_kjkmol", "REAL"),
     ("enthalpy_flow_kw", "REAL"),
+    # Aspen 节点属性 6 的可读类型(MATERIAL / HEAT / WORK),§19.1。
+    # 老库是 NULL:选型侧按保守的名字 + 空结果判据退化,不误删物料流股。
+    ("stream_type", "TEXT"),
 )
 
 # stream_components 表后加的列(组分质量流量,物料平衡表用)
@@ -370,8 +373,8 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
         """
         INSERT INTO streams (case_id, name, temperature_c, pressure_bar, mass_flow_kgh,
                              mole_flow_kmolh, vap_frac, vol_flow_m3h,
-                             enthalpy_kjkg, enthalpy_kjkmol, enthalpy_flow_kw, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+                             enthalpy_kjkg, enthalpy_kjkmol, enthalpy_flow_kw, stream_type, raw_json)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -386,6 +389,7 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 s.get("enthalpy_kjkg"),
                 s.get("enthalpy_kjkmol"),
                 s.get("enthalpy_flow_kw"),
+                s.get("stream_type") or None,
                 json.dumps(s.get("raw", {}), ensure_ascii=False),
             )
             for s in case.get("streams", [])

@@ -620,7 +620,7 @@ unit = u() if callable(u) else u
    例外是 P0101:自算 3.59 m、Aspen 4.26 m —— 就是下面第 1 条那台密度差 24% 的泵,
    按流量优先取了流股 m/V,差异方向偏保守。
 
-### 13.2 蒸气压 p_v:在进口流股的 `STRM_UPP\PBUB\MIXED\TOTAL`
+### 13.2 蒸气压 p_v:在进口流股的 `STRM_UPP\PBUB` 下,叶子层数随版本变
 
 实测 2026-11-14(Aspen Plus V12.1,华东理工模型,20 台泵进口流股):
 
@@ -630,6 +630,20 @@ unit = u() if callable(u) else u
   各组分分压在 `PL\MIXED\LIQUID\<组分>`(如 WATER = 0.6529 bar),**没有混合物总压叶子**。
 - 取法(`reader.read_stream_vapor_pressure`):跳过有子节点的节点 → 按 `pressure` 换算成 bar
   → 必须 `> 0`(`pump.sanitize_pv_bar`)。读不到就留空,页面可手填。
+
+实测 2026-11-18(Aspen Plus V11,浙大 1 模型,22 台泵进口流股):**同一属性少了 `TOTAL` 一层**,
+真值是 `Output\STRM_UPP\PBUB\MIXED\LIQUID`,22/22 有值(V11 里 `MUMX` 也在 `MIXED\LIQUID`)。
+两条布局的区别只在下钻层数,不是「模型没挂物性集」:
+
+```
+V12.1: STRM_UPP\PBUB\MIXED\TOTAL   ← 混合物总物性
+V11  : STRM_UPP\PBUB\MIXED\LIQUID  ← 液相值,total 层不存在
+```
+
+所以取 p_v 与取粘度共用同一套下钻规则(`reader._lower_leaf`,按
+`TOTAL → MIXED → LIQUID/LIQ` 找叶子);**只硬编码 `...\MIXED\TOTAL` 会让 V11 模型整列 p_v 变空**,
+而粘度因为本来就走下钻,同一份模型里反而有值 —— 这个不对称是最容易误判成「物性集没挂上」的地方。
+`PL\MIXED\LIQUID` 下面是组分名,认不出就返回空,标志位仍然挡得住。
 
 这个值要让 Aspen 算出来,需要一次性设置(步骤依据 Aspen Plus V15,详见
 `docs/pump-selection-plan.md` §3.6):物性组新建 `pv` → 添加物性 `PL`、`PBUB`(bar)

@@ -7,7 +7,7 @@
   <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <!-- 资源带版本串:本地服务已经发 no-store,但浏览器/扩展仍可能拿旧副本;
          带 ?v= 的 URL 与旧副本不同,任何一层缓存都无法命中。改前端后把 v 往前推一位。 -->
-  <link rel="stylesheet" href="/static/style.css?v=20261117f">
+  <link rel="stylesheet" href="/static/style.css?v=20261118c">
   <script>
     /* 尽量早地定下主题:深色用户加载时不会先白闪一下。
        真正的三态(auto/light/dark)逻辑在 app.js,这里只是先写属性。 */
@@ -568,6 +568,8 @@
                   title="把同一模型、更早工况里填过的 p_v 按位号搬过来;只填空着的格子,不覆盖手填值">沿用上一工况 p_v</button>
           <button id="pumpZhonglian" class="btn" type="button"
                   title="在浏览器里打开中联水泵选型页(不带任何参数,流量/扬程由你自己填)">打开中联选型<svg class="ico"><use href="#i-external"/></svg></button>
+          <button id="pumpPromptCopy" class="btn" type="button"
+                  title="把一段针对本表的 AI 选泵提示词复制到剪贴板:配合本页「导出 Excel」用,上传文件 + 粘贴提示词即可让 AI 出选型表">复制选泵提示词</button>
           <span id="pumpInheritMsg" class="muted"></span>
         </span>
       </div>
@@ -637,6 +639,20 @@
 
   <div id="chartTip" class="chart-tip hidden"></div>
 
+  <!-- 复制选泵提示词后的操作指引:固定右下角,不占布局、不自动消失(里面是照着做的
+       步骤,读完自己关)。✕ / Esc / 点空白关闭,和 #updateNote 一个交互口径。 -->
+  <div id="pumpPromptTip" class="prompt-tip hidden" role="dialog" aria-modal="false"
+       aria-label="已复制 AI 选泵提示词" tabindex="-1">
+    <div class="prompt-tip-head">
+      <span class="prompt-tip-title">已复制 AI 选泵提示词！</span>
+      <button id="pumpPromptTipClose" class="update-pop-close" type="button" title="关闭">
+        <svg class="ico" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
+    </div>
+    <p>请打开任意 AI 对话框（Gemini / ChatGPT / Claude / DeepSeek），上传刚导出的 Excel 文件并粘贴提示词即可生成完整选型表。</p>
+    <p>若流程含剧毒（如 HCN）或高温/高黏介质，可在提示词末尾补充说明以获得更精准的密封与材质选型。</p>
+  </div>
+
   <!-- 「检查更新」结果浮层:贴在按钮上方,不占侧栏布局;点空白 / Esc / ✕ 关闭。
        focusable 是为了打开时能把焦点移进来(见 docs/ui-style.md §6) -->
   <div id="updateNote" class="update-pop hidden" role="dialog" aria-modal="false"
@@ -652,7 +668,7 @@
 
   <!-- pipe.js 必须排在 app.js 前面:app.js 末尾会立刻调 init() → bindEvents(),
        那时管道页的 initPipePanel / renderPipes 必须已经存在 -->
-  <script src="/static/pipe.js?v=20261117f"></script>
-  <script src="/static/app.js?v=20261117f"></script>
+  <script src="/static/pipe.js?v=20261118c"></script>
+  <script src="/static/app.js?v=20261118c"></script>
 </body>
 </html>

@@ -45,6 +45,7 @@ G = 9.80665
 # `PL` 是目录,分压在 `PL\MIXED\LIQUID\<组分>` 上,没有总压叶子。
 PV_CANDIDATES = (
     "STRM_UPP\\PBUB\\MIXED\\TOTAL",
+    "STRM_UPP\\PBUB\\MIXED\\LIQUID",  # V11:同一属性少了 TOTAL 一层(2026-11-18 实测)
     "STRM_UPP\\PL\\MIXED\\TOTAL",
     "PL",
     "PL\\MIXED",

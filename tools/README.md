@@ -19,7 +19,8 @@
 | `fill_composition.py` | 给已存工况**批量补**流股组成(网页只能一条条点) | ✅ 且必须是同一运行 | 写库 |
 | `balance_report.py` | 批量生成《物料与能量衡算报告》.docx:`python -m tools.balance_report --case 40 [--blocks …] [--families …]`;与网页「衡算报告」页同一套代码 | ❌ | 写 `data/preview/`(或 `--out`) |
 | `selftest.py` | 判定 / 单位 / 焓平衡 / 管路选型回归自测,拿真实工况当固定样本 | ❌ | 只读库 |
-| `check_render.mjs` | 前端渲染回归(177 条):Node + DOM 桩跑真实 `app.js` 的泵设计块 / 流股表 / 首页 / 家族页签 / 折叠面板 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底 / 详细参数折叠,挡住「模板读 state 缺字段 → 整块静默空白」;`node --check` 查不出这类问题 | ❌ | 只打印 |
+| `make_pipe_schedule.py` | 命令行生成《管道选型一览表》.docx(与网页导出同一套代码):`python -m tools.make_pipe_schedule --case 55 [--audit] [--out …]` | ❌ | 写 `data/preview/`(或 `--out`) |
+| `check_render.mjs` | 前端渲染回归(180 条):Node + DOM 桩跑真实 `app.js` 的泵设计块 / 流股表 / 首页 / 家族页签 / 折叠面板 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底 / 详细参数折叠,挡住「模板读 state 缺字段 → 整块静默空白」;`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
 | `ui_sweep.py` | 界面回归自检:无头浏览器过 7 个页签(浅色 + 深色),截图并收集 JS 异常 / `console.error` / 失败请求;需服务已启动 + 本机 Chrome/Edge | ❌ | 写 `data/preview/ui-check/`(不入库) |

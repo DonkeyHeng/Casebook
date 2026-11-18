@@ -18,7 +18,10 @@ const state = {
   family: null,            // 设备页当前家族(column/heat/…),null = 还没挑
   families: [],            // 家族表(/api/block-families)
   pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
-  pump: { margin: 1 },  // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
+  pump: {
+    margin: 1,             // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
+    promptText: null,      // 「复制选泵提示词」的正文缓存(/api/pump-prompt,首次点击才取)
+  },
   // 设计扬程辅助:按模型+位号存 ΔZ / Σhf / 管长 L / Σζ / 管件数量;
   // 内径、粘度、粗糙度是现取的自动值(刷新会重取),不持久化
   pumpDesign: {
@@ -97,6 +100,8 @@ const BLOCK_COLS = {
   npsh:    { key: "npsh", label: "NPSHₐ m", num: true, digits: 2, npsh: true, tip: "npsh" },
   // p_v:读取工况时自动取 Aspen 进口流股的泡点压力;空着才需手填(见 docs/aspen-field-map.md §13.2)
   pv:      { key: "pv_bar", label: "p_v bar", num: true, pvInput: true },
+  // 粘度:进口流股 MUMX(混合物粘度),泵设计里算 Re 与 Σhf 用;模型没挂 MUMX 时为空
+  visc:    { key: "mu_cp", label: "粘度 cP", num: true, visc: true },
 };
 
 /* 塔页保持原样(用户对塔页满意):只去掉"类型"和"功率"两个恒定/无关列 */
@@ -109,9 +114,9 @@ const FAMILY_COLS = {
   // 分离:出口温度 + 出口汽化率(Flash/Decanter 最该看的量)
   flash:  ["name", "type", "status", "duty", "outT", "vapOut", "dh", "ref", "balance", "message"],
   react:  ["name", "type", "status", "duty", "outT", "message"],
-  // 泵页:流量/扬程/效率/轴功率/建议电机/p_v/NPSHₐ;级数和热负荷在这里没有意义
+  // 泵页:流量/扬程/效率/轴功率/建议电机/粘度/p_v/NPSHₐ;级数和热负荷在这里没有意义
   // 注意 head 列显示的是"压升扬程"(Aspen HEAD_CAL),不含位压头与管路阻力
-  pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "pv", "npsh", "message"],
+  pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "visc", "pv", "npsh", "message"],
   // 涡轮机:只关心流量/扬程/回收功率;NPSHₐ、选型电机对透平没有意义
   turbine: ["name", "type", "status", "flow", "head", "power", "message"],
   move:   ["name", "type", "status", "power", "inT", "outT", "dh", "ref", "balance", "message"],
@@ -264,6 +269,14 @@ function fmt(value, digits = 2) {
   });
 }
 
+/* 粘度按量级给位数:稀溶液 0.1156 cP 与 123.4 cP 挤在同一列,
+   固定 4 位会写成 123.4350,固定 2 位又会把最有意义的尾部抹掉。 */
+function fmtVisc(value) {
+  if (value === null || value === undefined) return "—";
+  if (typeof value !== "number") return esc(value);
+  return fmt(value, Math.abs(value) >= 10 ? 2 : 4);
+}
+
 function fmtDelta(value, digits = 2) {
   if (value === null || value === undefined) return "—";
   if (typeof value !== "number") return esc(value);
@@ -276,7 +289,9 @@ const SEVERITY = {
   ok: { cls: "ok", text: "收敛" },
   warning: { cls: "warn", text: "有告警" },
   error: { cls: "err", text: "有错误" },
-  empty: { cls: "empty", text: "没有结果" },
+  // 不能叫 "empty":CSS 里 .empty 是空表占位(padding:40px / text-align:center),
+  // 判定条套上后整块被撑成巨型居中卡片(实测截图)。用专属 idle 类,样式见 .verdict.idle。
+  empty: { cls: "idle", text: "没有结果" },
 };
 
 function badge(severity) {
@@ -679,6 +694,13 @@ function renderBlocks() {
         const v = pumpNpsh(row);
         const why = v === null ? npshWhy(row) : (spec ? spec.npsh_rule : "");
         return `<td class="num" data-npsh="1"${why ? ` title="${esc(why)}"` : ""}>${fmt(v, c.digits)}</td>`;
+      }
+      if (c.visc) {
+        const v = row[c.key];
+        const why = v === null || v === undefined
+          ? "模型没给出进口流股粘度:物性组加 MUMX(cP)并重跑,再重读工况"
+          : "进口流股 MUMX(混合物粘度);泵设计里算 Re 与 Σhf 用它";
+        return `<td class="num" title="${esc(why)}">${fmtVisc(v)}</td>`;
       }
       if (c.pvInput) {
         const pv = row[c.key];
@@ -1186,6 +1208,33 @@ async function copyPlainText(text) {
   }
 }
 
+/* 选泵提示词的正文由后端下发,JS 里不留第二份:这段字含 $…$、|、× 与反引号,
+   内联进模板字符串要反复转义,且必然与导出的「选泵提示词」工作表漂移。
+   首次点击才请求,之后走 state 缓存。 */
+async function fetchPumpPromptText() {
+  if (state.pump.promptText) return state.pump.promptText;
+  const res = await fetch("/api/pump-prompt");
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const text = typeof data.text === "string" ? data.text : "";
+  if (!text) throw new Error("提示词为空");
+  state.pump.promptText = text;
+  return text;
+}
+
+/* 复制成功后的操作指引浮层。不自动消失 —— 里面的步骤要照着做 */
+function showPumpPromptTip() {
+  const tip = document.getElementById("pumpPromptTip");
+  if (!tip) return;
+  tip.classList.remove("hidden");
+  tip.focus();
+}
+
+function closePumpPromptTip() {
+  const tip = document.getElementById("pumpPromptTip");
+  if (tip) tip.classList.add("hidden");
+}
+
 /* 泵参数卡:把要抄进中联表单的那几个数摆出来。余量只影响显示,不改库 */
 /* 详细参数折叠头收起时的一行摘要。缺数据走 fmt 的「—」,不拿 0 顶替。 */
 function pumpParamsBrief(row) {
@@ -1239,6 +1288,10 @@ function openPump(block) {
     kv("出口压力 bar", fmt(row.p_out_bar, 3), "出口流股"),
     kv("压升 bar", fmt(row.dp_bar, 3), "Aspen", "IN_PRES"),
     kv("密度 kg/m³", fmt(row.rho_kgm3, 1), "计算", "进口流股 m/V;两相或缺流量时用 RHO_LIQ×MW_LIQ"),
+    kv("粘度 cP", fmtVisc(row.mu_cp), "进口流股",
+       row.mu_cp == null
+         ? "模型没给出粘度:物性组加 MUMX(cP)并重跑,再重读工况;下方「管路阻力」也可手填"
+         : "MUMX(混合物粘度);泵设计里算 Re 与 Σhf 用它"),
     kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
     kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), pvSourceText(row),
        row.pv_bar == null
@@ -3962,6 +4015,51 @@ function bindEvents() {
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") setPvHelp(false);
     });
+  }
+
+  // 泵页「复制选泵提示词」:正文从接口取,复制成功后弹操作指引浮层。
+  // 接口挂了(改了 Python 没重启)就把原因写在按钮上,不拿旧文案顶替。
+  const promptBtn = document.getElementById("pumpPromptCopy");
+  if (promptBtn) {
+    const btnLabel = promptBtn.textContent;
+    const btnTitle = promptBtn.title;
+    let resetTimer = 0;
+    const flash = (text, tip) => {
+      promptBtn.textContent = text;
+      if (tip) promptBtn.title = tip;
+      clearTimeout(resetTimer);
+      resetTimer = setTimeout(() => {
+        promptBtn.textContent = btnLabel;
+        promptBtn.title = btnTitle;
+      }, 2000);
+    };
+    promptBtn.addEventListener("click", async () => {
+      try {
+        const text = await fetchPumpPromptText();
+        if (await copyPlainText(text)) {
+          flash("已复制");
+          showPumpPromptTip();
+        } else {
+          flash("复制失败,请手动选中");
+        }
+      } catch (err) {
+        flash("需重启服务", `提示词接口不可用(${err.message});重启一次服务后重试`);
+      }
+    });
+
+    const promptTip = document.getElementById("pumpPromptTip");
+    if (promptTip) {
+      const closeBtn = document.getElementById("pumpPromptTipClose");
+      if (closeBtn) closeBtn.addEventListener("click", closePumpPromptTip);
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && !promptTip.classList.contains("hidden")) closePumpPromptTip();
+      });
+      document.addEventListener("click", (e) => {
+        if (promptTip.classList.contains("hidden")) return;
+        if (promptTip.contains(e.target) || promptBtn.contains(e.target)) return;
+        closePumpPromptTip();
+      });
+    }
   }
 
   bindReportPage();

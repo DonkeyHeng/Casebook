@@ -1091,6 +1091,19 @@ class Handler(BaseHTTPRequestHandler):
 
             self._json(pump.spec())
             return
+        if parts == ["api", "pump-prompt"]:
+            # 「复制选泵提示词」要复制的那段字。唯一来源是 app/design/pump_prompt.py,
+            # 分类导出的「选泵提示词」工作表与 AI 包的 pump_prompt.md 读的也是它。
+            # 不做前端内置副本:两份必然漂移,而这段字里全是会被转义的符号。
+            from app.design import pump_prompt
+
+            self._json(
+                {
+                    "version": pump_prompt.PROMPT_VERSION,
+                    "text": pump_prompt.PUMP_SELECTION_PROMPT,
+                }
+            )
+            return
         if parts[:2] != ["api", "cases"]:
             self._error("未知接口", 404)
             return
@@ -1263,9 +1276,11 @@ class Handler(BaseHTTPRequestHandler):
                         "pump_inlet", pipe_calc.DEFAULT_VELOCITY["pump_inlet"], 0.01, 100.0
                     ),
                 },
-                "pressure_factor": _f("factor", 1.1, 0.5, 10.0),
+                # §17.1/§17.2 口径:压力系数 1.15(原 1.1),DN 上限 1000(原 600)
+                "pressure_factor": _f("factor", 1.15, 0.5, 10.0),
+                "pressure_add_mpa": 0.15,
                 "pressure_floor_mpa": _f("floor", 1.0, 0.0, 100.0),
-                "max_dn": int(_f("max_dn", 600, 1, 10000)),
+                "max_dn": int(_f("max_dn", 1000, 1, 10000)),
                 "material": material,
             }
         except BadQuery as exc:
@@ -2164,6 +2179,7 @@ def build_workbook(conn, case_id: int) -> bytes:
                 "出口压力 bar",
                 "压升 bar",
                 "密度 kg/m³",
+                "粘度 cP",
                 "进口汽化率",
                 "p_v bar",
                 "NPSHₐ m",
@@ -2182,6 +2198,7 @@ def build_workbook(conn, case_id: int) -> bytes:
                     b["p_out_bar"],
                     b["dp_bar"],
                     b["rho_kgm3"],
+                    b["mu_cp"],
                     b["pump_vap_frac"],
                     b["pv_bar"],
                     pump_npsh(b),
@@ -2189,7 +2206,7 @@ def build_workbook(conn, case_id: int) -> bytes:
                 )
                 for b in pumps
             ],
-            [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 12, 10, 12, 50],
+            [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 50],
         )
 
     # --- 连接关系 ---
