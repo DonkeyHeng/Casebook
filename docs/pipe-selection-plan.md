@@ -396,7 +396,8 @@ Excel「管道计算书」有「最小壁厚 mm」「壁厚是否按下限」两
 
 ## 17. 2026-11-18 工程规范与校核修订(工况55 起)
 
-来源:对工况55 的逐流股复核意见。全部实现在 `app/design/pipe/calc.py` + `pipe_data.py`,
+来源:对工况55 的逐流股复核意见。全部实现在 `app/design/pipe/` 包(十步计算按
+`step_*.py` 分模块、标准数据在 `data.py`),
 **对所有工况生效**(不是工况55 专用补丁);命令行复现见 `tools/make_pipe_schedule.py`,
 Word 表下注由 `app/export/pipe_schedule.py::_notes()` 同源生成。
 
