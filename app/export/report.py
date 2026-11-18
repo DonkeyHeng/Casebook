@@ -5,18 +5,18 @@
 1. 从库里现取三张表 + `column_stages`,**不碰 Aspen、不重算焓平衡**:
    焓平衡的 ΔH / 对照值 / 状态 / 说明直接读 `blocks` 里已存的结论;
 2. 物料衡算判两层(工段界区 + 逐设备),能量衡算出设备表 + 汇总 + 塔负荷明细;
-3. 用 python-docx 写成三线表 .docx,返回 `(bytes, fname)` —— 与 `family_export`
+3. 用 python-docx 写成三线表 .docx,返回 `(bytes, fname)` —— 与 `family_xlsx`
    同样的接口,Web 路由可以直接 `send_header` + 写字节。
 
 依赖是**懒导入**的
 ------------------
 `python-docx` 不在标准库里,老用户升级后没装也不该让整个服务起不来。
 所以 `docx` 只在生成本身里 import,缺包时抛 `ImportError`,由调用方
-(路由 / CLI)翻成一句人话,与 `family_export` 缺 openpyxl 的处理一致。
+(路由 / CLI)翻成一句人话,与 `family_xlsx` 缺 openpyxl 的处理一致。
 
 报告里的数字
 ------------
-* 取整沿用 `family_export._r`:质量 / 摩尔 / 功率 / 压力 2 位,温度 1 位,
+* 取整沿用 `family_xlsx._r`:质量 / 摩尔 / 功率 / 压力 2 位,温度 1 位,
   相对误差 3 位(按 % 显示);
 * 空值**留空**,不写 0 —— 库里 `None` 就是「没读到」,写 0 会被当成真值;
 * 超差行整行浅红底,状态列写「超差」。
@@ -183,7 +183,7 @@ def build_data(conn, case_id: int, parts=None, picked=None) -> dict:
 
 
 def _r(value, digits: int):
-    """按位数取整;None / 非数字一律留空(与 family_export 同口径)。"""
+    """按位数取整;None / 非数字一律留空(与 family_xlsx 同口径)。"""
     if value is None:
         return None
     try:

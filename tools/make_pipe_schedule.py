@@ -7,7 +7,7 @@
 
 为什么独立成一个脚本
 --------------------
-网页「管道」页导出走的是同一套 `pipe_docx.build_pipe_docx`,本脚本只是从命令行
+网页「管道」页导出走的是同一套 `pipe_schedule.build_pipe_docx`,本脚本只是从命令行
 复现那条路径:读库 → 选型 → 套版渲染。口径只有一份(`app/design/pipe.py`),
 改规则两边一起变,不存在"脚本算出一套、界面算出另一套"。
 
@@ -152,7 +152,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
         if args.audit:
-            from app.api import pipe_docx  # noqa: F401 —— 保证渲染依赖可用
+            from app.export import pipe_schedule  # noqa: F401 —— 保证渲染依赖可用
 
             streams = [dict(s) for s in db.read_streams(conn, args.case)]
             blocks = [dict(b) for b in db.read_blocks(conn, args.case)]
@@ -166,8 +166,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(line)
 
 
-        from app.api.pipe_docx import build_pipe_docx
-        from app.api import report_export as rx
+        from app.export.pipe_schedule import build_pipe_docx
+        from app.export import report as rx
 
         rx.activate("pipe")
         payload, filename = build_pipe_docx(conn, args.case)

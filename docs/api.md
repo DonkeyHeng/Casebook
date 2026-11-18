@@ -161,4 +161,4 @@ X-Casebook-Client: 1
 | `app/api/update_check.py` | 手动检查更新的版本比对与网络降级 |
 | `app/api/read_job.py` | 读取后台任务(进度 / 状态机) |
 | `app/api/composition.py` | 组成按需读与缓存 |
-| `app/api/aipack.py` | AI 分析包生成 |
+| `app/export/aipack.py` | AI 分析包生成 |

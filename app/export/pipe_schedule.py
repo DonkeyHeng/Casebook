@@ -1,7 +1,7 @@
 """管道选型一览表 .docx —— 「管道」页的 Word 导出。
 
 版式与衡算报告**共用一套骨架**:封面、页眉页脚、章节标题、三线表全部来自
-`report_export`,这里只负责"这张表有几列、每列多宽、装什么数"。
+`report`,这里只负责"这张表有几列、每列多宽、装什么数"。
 
 为什么要复用而不是各写一份
 --------------------------
@@ -22,7 +22,7 @@ from __future__ import annotations
 import io
 import time
 
-from app.api import report_export as rx
+from app.export import report as rx
 from app.design import pipe as pipe_calc
 from app.store import db
 

@@ -4,7 +4,7 @@
 > 状态:**已实现并随 v1.2.0 发布**(2026-11-15 更新状态行;方案内容保持不动)。
 > 使用说明见 [balance-report.md](balance-report.md),实现落点见 §9 的五步。
 > 代码依据:`app/aspen/balance.py`(焓平衡纯函数)、`app/store/db.py`(四张表字段)、
-> `app/api/family_export.py`(导出风格)、`tools/selftest.py`(回归自测)。
+> `app/export/family_xlsx.py`(导出风格)、`tools/selftest.py`(回归自测)。
 > 实测依据:本地库 `data/cases.db` 的 9 个工况、653 台设备、121 流股/工况;
 > 数值口径以库内快照为准,未回 Aspen 复读。
 
@@ -285,7 +285,7 @@
 app/design/sections.py        新增  界区草稿 draft() / 配置 load() / 合并 merge() / 设备归堆 resolve()
 app/design/mass_balance.py    新增  质量守恒纯函数 boundary_build()(界区) + build()(逐设备)
 app/design/energy_report.py   新增  能量表 + 汇总纯函数 build() / tower_duties()
-app/api/report_export.py      新增  docx 组装(函数级 import docx),返回 (bytes, fname)
+app/export/report.py      新增  docx 组装(函数级 import docx),返回 (bytes, fname)
 app/api/server.py             改    +1 条路由 _export_balance_report()
 app/web/index.html            改    +侧栏项 + <section id="pageReport">
 app/web/static/app.js         改    +勾选树 / 预览 / 下载
@@ -315,7 +315,7 @@ README.md                     改    功能表 +1 行
 | 1 | 本方案 | — | 已确认 |
 | 2 | `sections.py`(界区草稿/配置/合并) + `mass_balance.py`(界区 + 逐设备) + 夹具 | `python -m tools.selftest` | 287 → **352 条全过**(已跑,见 §10) |
 | 3 | `energy_report.py` + 塔负荷回退 + 夹具 | `python -m tools.selftest --db data/cases.db` | 352 → **386 条全过**;库内一致性不破(未动 `balance.py`) |
-| 4 | `report_export.py` + `tools/balance_report.py` | `python -m tools.balance_report --case 40` | 386 → **398 条全过**;生成 `Casebook_case40_balance_*.docx` |
+| 4 | `app/export/report.py` + `tools/balance_report.py` | `python -m tools.balance_report --case 40` | 386 → **398 条全过**;生成 `Casebook_case40_balance_*.docx` |
 | 4b | 按设计文档形态重做表格(宽表 / 两张能量表) | `python -m tools.selftest --db data/cases.db` | 398 → **479 条全过**;26 页 → 19 页(全选设备) |
 | 5 | 路由 + Web 页 | `python -m tools.ui_sweep --base http://127.0.0.1:8011` | 7 个页签 0 控制台报错;保存边界 → 回读生效;docx 路由 200 / `PK` 头 |
 

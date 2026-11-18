@@ -6,7 +6,7 @@
     python -m tools.balance_report --case 40 --blocks E0101,T0202
     python -m tools.balance_report --case 40 --out D:/reports
 
-和 Web 端「衡算报告」页用的是同一套代码(`app/api/report_export.py`),
+和 Web 端「衡算报告」页用的是同一套代码(`app/export/report.py`),
 所以报告里的数字与界面完全一致;本工具只负责挑设备、挑工况、落盘。
 
 工段边界
@@ -28,7 +28,7 @@ import json
 import os
 import sys
 
-from app.api import report_export
+from app.export import report
 from app.design import block_family
 from app.design import sections as section_rules
 from app.store import db
@@ -132,8 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         print("工段边界:未找到人工确认的边界,按设备名段号自动推导")
 
     try:
-        data = report_export.build_data(conn, args.case, parts, picked)
-        blob = report_export.render(data, args.kind)
+        data = report.build_data(conn, args.case, parts, picked)
+        blob = report.render(data, args.kind)
     except ImportError as exc:
         print(
             f"无法生成: {exc}\n先装依赖:{sys.executable} -m pip install "
@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"无法生成:{exc}")
         return 2
 
-    fname = report_export.filename(args.case, args.kind)
+    fname = report.filename(args.case, args.kind)
     out_dir = args.out
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, fname)

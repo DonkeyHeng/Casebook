@@ -846,7 +846,7 @@ class Handler(BaseHTTPRequestHandler):
         只在当次请求里搬 —— 搬完写进 data/config/sections.json 的当前工况键下,
         之后照常可编辑、可保存。源工况没有保存过边界就报 404,不去猜。
         """
-        from app.api import report_config
+        from app.store import sections_config
 
         try:
             case_id = int(raw_id)
@@ -864,21 +864,21 @@ class Handler(BaseHTTPRequestHandler):
         if prev is None:
             self._error("同一模型没有更早的工况可以沿用", 404)
             return
-        parts, overrides, _deleted, err = report_config.load(prev)
+        parts, overrides, _deleted, err = sections_config.load(prev)
         if err:
             self._error(err, 500)
             return
         if not parts and not overrides:
             self._error(f"工况 #{prev} 没有保存过工段边界,无从沿用", 404)
             return
-        ok, save_errors = report_config.save(case_id, parts, overrides)
+        ok, save_errors = sections_config.save(case_id, parts, overrides)
         self._json(
             {
                 "ok": ok,
                 "from_case": prev,
                 "errors": save_errors,
                 "zones": sorted(parts.keys()),
-                "config": report_config.status(),
+                "config": sections_config.status(),
             },
             200 if ok else 500,
         )
@@ -1407,7 +1407,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _export_ai(self, conn, case_id: int) -> None:
         """把工况导成给 AI 读的一组文件(Markdown + CSV + JSON,打成 zip)。"""
-        from app.api import aipack
+        from app.export import aipack
 
         try:
             data, fname = aipack.build_zip(conn, case_id)
@@ -1455,10 +1455,10 @@ class Handler(BaseHTTPRequestHandler):
         不并进 Excel 工作簿:那 9 列是版面表(列宽/字体/跨页表头),Word 才装得下;
         工作簿继续管它的流股 / 设备 / 计算书。
         """
-        from app.api import pipe_docx
+        from app.export import pipe_schedule
 
         try:
-            data, fname = pipe_docx.build_pipe_docx(conn, case_id)
+            data, fname = pipe_schedule.build_pipe_docx(conn, case_id)
         except ImportError:
             self._error("服务器没有安装 python-docx,无法导出 Word。请先 pip install python-docx", 500)
             return
@@ -1485,7 +1485,7 @@ class Handler(BaseHTTPRequestHandler):
 
         设备页右上角「导出 Excel」用它:只导当前分类,泵分类就是选型要抄的那几列。
         """
-        from app.api import family_export
+        from app.export import family_xlsx
 
         raw = query.get("family")
         if isinstance(raw, (list, tuple)):
@@ -1495,7 +1495,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error("需要 family 参数,例如 ?family=pump", 400)
             return
         try:
-            data, _label, fname = family_export.build_family_workbook(conn, case_id, family)
+            data, _label, fname = family_xlsx.build_family_workbook(conn, case_id, family)
         except ValueError:
             self._error(f"未知分类:{family}", 400)
             return
@@ -1521,13 +1521,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _sections(self, conn, case_id: int) -> None:
         """GET /api/cases/{id}/sections —— 工段(界区)边界:草稿 + 已确认 + 合并。"""
-        from app.api import report_config
+        from app.store import sections_config
         from app.design import sections as section_rules
 
         blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
         connections = [dict(r) for r in db.read_connections(conn, case_id)]
         draft = section_rules.draft(blocks, connections)
-        confirmed, overrides, deleted, error = report_config.load(case_id)
+        confirmed, overrides, deleted, error = sections_config.load(case_id)
         self._json(
             {
                 "case_id": case_id,
@@ -1537,26 +1537,26 @@ class Handler(BaseHTTPRequestHandler):
                 "merged": section_rules.merge(draft, confirmed, deleted),
                 "auto": not confirmed,
                 "device_sections": overrides,
-                "config": report_config.status(),
+                "config": sections_config.status(),
                 "error": error,
             }
         )
 
     def _save_sections(self, raw_id: str) -> None:
         """POST /api/cases/{id}/sections —— 保存边界(只写 data/config/,不碰工况库)。"""
-        from app.api import report_config
+        from app.store import sections_config
 
         try:
             case_id = int(raw_id)
         except ValueError:
             self._error("工况 id 必须是整数")
             return
-        parts, overrides, deleted, errors = report_config.validate(self._read_json_body())
+        parts, overrides, deleted, errors = sections_config.validate(self._read_json_body())
         if errors:
             self._json({"ok": False, "errors": errors}, 400)
             return
-        ok, save_errors = report_config.save(case_id, parts, overrides, deleted)
-        payload = {"ok": ok, "errors": save_errors, "config": report_config.status()}
+        ok, save_errors = sections_config.save(case_id, parts, overrides, deleted)
+        payload = {"ok": ok, "errors": save_errors, "config": sections_config.status()}
         self._json(payload, 200 if ok else 500)
 
     def _export_report(self, conn, case_id: int, query: dict) -> None:
@@ -1565,9 +1565,10 @@ class Handler(BaseHTTPRequestHandler):
         `blocks` / `families` 取并集;都不给就是全部设备。工段边界自动读
         `data/config/sections.json`,没有确认过就用自动草稿(报告里会注明)。
         """
-        from app.api import report_config, report_export
         from app.design import block_family
         from app.design import sections as section_rules
+        from app.export import report
+        from app.store import sections_config
 
         def _q(key: str) -> str:
             val = query.get(key)
@@ -1590,7 +1591,7 @@ class Handler(BaseHTTPRequestHandler):
         keys = {b["name"] for b in blocks}
         picked_list = sorted(picked & keys) or None
 
-        confirmed, _overrides, deleted, _error = report_config.load(case_id)
+        confirmed, _overrides, deleted, _error = sections_config.load(case_id)
         parts = None
         if confirmed or deleted:
             parts = section_rules.merge(
@@ -1598,11 +1599,11 @@ class Handler(BaseHTTPRequestHandler):
             )
 
         kind = _q("kind") or "all"
-        if kind not in report_export.KINDS:
-            self._error(f"未知册别:{kind}(可用 {'/'.join(report_export.KIND_KEYS)})", 400)
+        if kind not in report.KINDS:
+            self._error(f"未知册别:{kind}(可用 {'/'.join(report.KIND_KEYS)})", 400)
             return
         try:
-            data, fname = report_export.build_report(conn, case_id, parts, picked_list, kind)
+            data, fname = report.build_report(conn, case_id, parts, picked_list, kind)
         except ImportError:
             self._error(
                 "服务器没有安装 python-docx,无法生成 Word 报告。"
@@ -2341,7 +2342,7 @@ def build_workbook(conn, case_id: int) -> bytes:
             hit_by_stream.setdefault(f["stream"], []).append(f["code"])
 
         # 管道选型一览表不放进工作簿:那 9 列是版面表(列宽 / 宋体五号 / 跨页表头),
-        # 单独出 Word 才贴得进报告(见 app/api/pipe_docx.py 与「管道」页的「导出 Word」)。
+        # 单独出 Word 才贴得进报告(见 app/export/pipe_schedule.py 与「管道」页的「导出 Word」)。
         # 工作簿这边只留审计用的「管道计算书」和未选型清单。
         # 未选型的流股单独一张表:混在选型表里会破坏那 9 列的可粘贴性
         if pres["missing"]:

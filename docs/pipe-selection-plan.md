@@ -398,7 +398,7 @@ Excel「管道计算书」有「最小壁厚 mm」「壁厚是否按下限」两
 
 来源:对工况55 的逐流股复核意见。全部实现在 `app/design/pipe.py` + `pipe_data.py`,
 **对所有工况生效**(不是工况55 专用补丁);命令行复现见 `tools/make_pipe_schedule.py`,
-Word 表下注由 `app/api/pipe_docx.py::_notes()` 同源生成。
+Word 表下注由 `app/export/pipe_schedule.py::_notes()` 同源生成。
 
 ### 17.1 压力基准与真空等级(对应需求 1a)
 
@@ -547,7 +547,7 @@ PG-0244(真空 DN200)外压筛查 t_min=2.0 mm、实选 4.5 mm。
 ## 19. 第三轮精细化规则(2026-11-18)
 
 严格工程微调,全部落在核心引擎 + 快照读取入口,所有工况同步生效;
-命令行审计见 `tools/make_pipe_schedule.py --audit`,表注由 `app/api/pipe_docx.py::_notes()` 同源生成。
+命令行审计见 `tools/make_pipe_schedule.py --audit`,表注由 `app/export/pipe_schedule.py::_notes()` 同源生成。
 
 ### 19.1 非物流剔除 + 真空阈值 95.0 kPa
 

@@ -16,15 +16,7 @@ app/
     db.py         SQLite 工况库:cases / streams / stream_components / blocks / column_stages / connections
     flowsheet.py  连接关系 → 流程图数据(纯函数)
     impact.py     报错设备 → 受影响流股(纯函数,分「不可用 / 仅告警」)
-  api/     HTTP 服务(标准库,零第三方 Web 框架)
-    server.py     路由 + 静态文件 + 导出
-    update_check.py 「检查更新」的版本比对(HEAD 302 → tag);唯一的出站请求,不下载不安装
-    read_job.py   「读取当前工况」后台任务(状态机 + 进度 + 卡住提示)
-    composition.py 组成按需读(先校验模型与运行 ID,避免旧快照混入)
-    aipack.py     分析数据包(Markdown + CSV + JSON → zip)
-    report_export.py 衡算报告 .docx(物料 + 能量,三线表;python-docx 懒导入)
-    report_config.py 工段(界区)边界配置读写 data/config/sections.json
-    window.py     窗口几何记忆(ctypes)
+    sections_config.py 工段(界区)边界配置读写 data/config/sections.json + 结构校验
   design/  纯计算:不碰 Aspen、不读写库
     sections.py    工段(界区)判定:设备名段号推草稿、配置归一化、草稿与确认结果合并
     stream_table.py 物料平衡宽表:流股做列、属性与组分做行(工段级 + 全流程 + 年量)
@@ -36,8 +28,23 @@ app/
                   圆整(含负偏差)→ 等级号;外加校验 V1–V14
     pipe_standards_prompt.py 「复制填写提示词」的正文:文件名/必需列取自 STD_FILES,
                   示例行取自 samples/pipe-standards-template/(唯一来源)
+  export/  数据 → 文件字节(.docx / .xlsx / zip);不认 HTTP,网页与命令行共用同一套
+    report.py         衡算报告 .docx(物料 + 能量,三线表;python-docx 懒导入)
+    pipe_schedule.py  管道选型一览表 .docx(复用 report 的封面 / 页眉 / 三线表骨架)
+    family_xlsx.py    按设备分类导出 .xlsx(设备页「导出 Excel」)
+    aipack.py         分析数据包(Markdown + CSV + JSON → zip)
+  api/     HTTP 服务(标准库,零第三方 Web 框架)
+    server.py     路由 + 静态文件 + 导出入口
+    update_check.py 「检查更新」的版本比对(HEAD 302 → tag);唯一的出站请求,不下载不安装
+    read_job.py   「读取当前工况」后台任务(状态机 + 进度 + 卡住提示)
+    composition.py 组成按需读(先校验模型与运行 ID,避免旧快照混入)
+    window.py     窗口几何记忆(ctypes)
   web/     零构建前端:index.html + static/{app.js,pipe.js,style.css}
 ```
+
+`export/` 单独一层,是因为导出逻辑既被网页路由调用,也被命令行工具调用
+(`tools/balance_report.py`、`tools/make_pipe_schedule.py`):放在 `api/` 里会让
+命令行为了生成一份 Word 把整个 HTTP 服务拖进来。
 
 `design/` 不依赖 `aspen/` 与 `store/`:它只接收「流股数值 + 配置」并算出一张表。
 衡算相关的纯函数连 `from app.aspen import balance` 都不写 —— `app/aspen/__init__.py`

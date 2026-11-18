@@ -2,8 +2,8 @@
 
 三个出口都读这里,不要各抄一份:
   1. 页面上「复制选泵提示词」按钮 → `GET /api/pump-prompt` → 剪贴板
-  2. 分类导出 Excel 的「选泵提示词」工作表(`app/api/family_export.py`)
-  3. AI 分析包里的 `pump_prompt.md`(`app/api/aipack.py`)
+  2. 分类导出 Excel 的「选泵提示词」工作表(`app/export/family_xlsx.py`)
+  3. AI 分析包里的 `pump_prompt.md`(`app/export/aipack.py`)
 
 字段清单与导出表头必须同步:Excel 加了列而这里没提,AI 就会忽略那列
 (`tools/selftest.py` 有一条断言按 `PUMP_HEADERS` 逐项核对,加列漏改会直接报错)。

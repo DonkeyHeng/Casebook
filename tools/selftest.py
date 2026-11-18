@@ -923,7 +923,7 @@ def test_energy_report() -> None:
 
 def test_report_export() -> None:
     """report_export:数据组装 + .docx 渲染(缺 python-docx 时不算失败)。"""
-    from app.api import report_export
+    from app.export import report as report_export
 
     scratch = Path("data/preview/_selftest-report.db")
     scratch.parent.mkdir(parents=True, exist_ok=True)
@@ -1102,7 +1102,7 @@ def test_report_picked() -> None:
     """
     import io as _io
 
-    from app.api import report_export
+    from app.export import report as report_export
 
     scratch = Path("data/preview/_selftest-report-picked.db")
     scratch.parent.mkdir(parents=True, exist_ok=True)
@@ -2205,7 +2205,7 @@ def test_family_export() -> None:
 
     import openpyxl
 
-    from app.api import family_export
+    from app.export import family_xlsx as family_export
     from app.store import db
 
     scratch = Path("data/preview/_selftest-family-export.db")
@@ -2369,7 +2369,7 @@ def test_pump_prompt() -> None:
     import re as _re
     from pathlib import Path as _P
 
-    from app.api import family_export
+    from app.export import family_xlsx as family_export
     from app.design import pump_prompt
 
     text = pump_prompt.PUMP_SELECTION_PROMPT
@@ -2644,7 +2644,7 @@ def test_fixtures() -> None:
     """
     from pathlib import Path
 
-    from app.api import aipack
+    from app.export import aipack
     from app.design import block_family as fam
     from app.design import pump as pump_rules
     from app.store import db
@@ -2740,7 +2740,8 @@ def test_export_consistency() -> None:
     import zipfile
     from pathlib import Path as _Path
 
-    from app.api import aipack, server
+    from app.api import server
+    from app.export import aipack
     from app.store import db
 
     if not _Path("data/cases.db").is_file():
@@ -3074,7 +3075,8 @@ def test_component_dict() -> None:
       * AI 包组分列用 CAS,没有 CAS 才退回原名;
       * Word / Excel 两个出口保持 Aspen 原名,不受这里影响。
     """
-    from app.api import aipack, composition
+    from app.api import composition
+    from app.export import aipack
     from app.design import component_names as names
 
     # --- CAS 归一:只认 数字-数字-数字,别的东西一律当"没有"
