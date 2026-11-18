@@ -43,7 +43,7 @@
 | 字段 | 内容 |
 | --- | --- |
 | `cas` | CAS 号;Aspen 里读不到(自定义组分)时为 `null` |
-| `cn` | 中文名,按 CAS 查 `app/design/component_names.py`;查不到为 `null` |
+| `cn` | 中文名,按 CAS 查 `app/component_names.py`;查不到为 `null` |
 | `cas_source` | `aspen`(从 Aspen / 模型文件读到) 或 `manual`(手填);都没有时为 `null` |
 | `cas_found` / `cas_total` | 本条流股"认出几个 CAS"(含手填) / 组分总数,页面底部直接显示 |
 

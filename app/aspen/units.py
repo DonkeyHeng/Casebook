@@ -165,7 +165,7 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "ft": (0.3048, 0.0),
     },
     # 摩尔密度 → kmol/m³。⚠️ 泵的 RHO_LIQ 实测给的是 kmol/cum,不是 kg/m³;
-    # 要质量密度还得乘 MW(kg/kmol),见 app/design/pump.py。
+    # 要质量密度还得乘 MW(kg/kmol),见 app/values.py 的 mass_density_kgm3()。
     "molar_density": {
         "kmol/m3": (1.0, 0.0),
         "kmol/cum": (1.0, 0.0),

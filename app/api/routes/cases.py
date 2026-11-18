@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 
+from app import component_names
 from app.api.serialize import row_to_dict
-from app.design import component_names
 from app.store import db, flowsheet, impact
 
 

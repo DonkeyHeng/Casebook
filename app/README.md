@@ -7,6 +7,8 @@ app/
   version.py 版本号与 GitHub 仓库常量的唯一来源(运行期 / 发布包共用;exe 内没有 .git)
   paths.py 运行期基准目录:只读资源(app/web、assets)与可写数据(data/)分开;
            打包成 exe 后前者在临时解包目录,后者在 exe 旁边
+  values.py  与层无关的数值口径:p_v 有效性、摩尔密度→质量密度、电机档位查表
+  component_names.py 组分中文名:CAS 号 → 中文名(纯查表,aspen / design / 导出共用)
   aspen/   与 Aspen COM 打交道的唯一地方
     connect.py    附着已打开的 Aspen 实例,把 COM 异常翻成可读的提示
     reader.py     读流股 / 组成 / 设备 / 收敛 / 塔剖面;judge() 是唯一的判定入口
@@ -23,7 +25,6 @@ app/
     mass_balance.py 物料衡算:界区 Σ进界=Σ出界 + 逐设备 Σ进口=Σ出口(纯函数)
     energy_report.py 能量衡算表与全流程汇总(ΔH 由调用方注入 compute() 的结果)
     block_family.py 设备家族:把 Aspen 几十种块类型收敛成 8 个页签
-    component_names.py 组分中文名:CAS 号 → 中文名(纯查表)
     model_identity.py 模型身份:内容哈希优先,文件名兜底(选型台账按模型去重靠它)
     hydraulics.py  管路阻力:流速 / Re / λ / Σhf(供选泵的设计扬程用)
     pump.py        泵的派生量:密度、自算扬程、NPSHₐ、建议电机功率
@@ -72,6 +73,11 @@ app/
 衡算相关的纯函数连 `from app.aspen import balance` 都不写 —— `app/aspen/__init__.py`
 会把 `connect.py` 的 `import pythoncom` 拖进来,那样 `design/` 就不再能离线跑了;
 所以 `compute()` 的结果由调用方(api 层 / 工具)当参数传进来。
+
+反过来 `aspen/` 也不依赖 `design/`:读取层要用的那几条数值口径(p_v 有效性、
+摩尔密度→质量密度、电机档位)放在与层无关的 `app/values.py`,两边都只依赖它。
+依赖方向是单向的:`aspen → values`、`design → values`、`store → design`、
+`export → design/store`、`api → 全部`。
 数据没录全时它会直接报 `TablesNotReady`,而不是拿 0 算出一张看起来正常的假表。
 
 ## 跑起来

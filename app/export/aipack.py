@@ -31,7 +31,7 @@ import json
 import time
 import zipfile
 
-from app.design import component_names as names
+from app import component_names as names
 from app.store import db
 
 SEVERITY_TEXT = {"ok": "收敛", "warning": "有告警", "error": "有错误", "empty": "没有结果"}

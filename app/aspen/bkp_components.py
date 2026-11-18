@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from ..design import component_names as names
+from .. import component_names as names
 
 # 一条组分记录:CID = X [ANAME = Y] OUTNAME = Z [TYPE = …] [DBNAME1 = "…"] [ANAME1 = "…"]
 # 注意字段之间可能有换行,所以统一把 \r\n 折成空格再匹配。

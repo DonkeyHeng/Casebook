@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import threading
 
-from app.design import component_names as names
+from app import component_names as names
 from app.store import db
 
 # 一条一条来:跨进程 COM 调用叠加没有好处,而且会同时占两个许可证请求

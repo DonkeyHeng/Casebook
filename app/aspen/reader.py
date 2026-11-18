@@ -26,7 +26,8 @@ import re
 import time
 from collections.abc import Callable
 
-from ..design import component_names as names
+from .. import component_names as names
+from ..values import mass_density_kgm3, pick_motor, sanitize_pv_bar
 from . import balance as balance_rules
 from . import units
 
@@ -943,7 +944,7 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
 # ⚠️ 不要读 `Output\PL`:它是**目录节点**(值恒为 1,还带单位,极像读数);
 #   真正的分压在 `PL\MIXED\LIQUID\<组分>`,没有混合物总压叶子 —— 下钻到组分名
 #   时认不出,自动返回 None,不会把标志位当读数。
-#   最后仍用 pump.sanitize_pv_bar 挡住 0/负值。
+#   最后仍用 app/values.py 的 sanitize_pv_bar 挡住 0/负值。
 PV_STREAM_PATHS = (
     r"STRM_UPP\PBUB\MIXED\TOTAL",
     r"PBUB\MIXED\TOTAL",
@@ -957,8 +958,6 @@ PV_STREAM_PATHS = (
 
 def read_stream_vapor_pressure(session, stream_name: str):
     """进口流股的 p_v(bar)。读不到返回 None —— 绝不拿 0 或进口压力顶替。"""
-    from app.design import pump as pump_rules
-
     base = rf"\Data\Streams\{stream_name}\Output"
     for rel in PV_STREAM_PATHS:
         # 有子节点的是目录(PBUB / PL 的值恒为 1),按相下钻到真值叶子;
@@ -966,7 +965,7 @@ def read_stream_vapor_pressure(session, stream_name: str):
         value, unit = _lower_leaf(session, rf"{base}\{rel}")
         if value is None:
             continue
-        pv = pump_rules.sanitize_pv_bar(units.convert("pressure", value, unit))
+        pv = sanitize_pv_bar(units.convert("pressure", value, unit))
         if pv is not None:
             return pv
     return None
@@ -1121,8 +1120,6 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
     读不到的一律留 None,不拿计算值顶替 —— 页面显示「—」比编一个数好。
     只对 Pump 块多花这几次 COM 调用,不扩大全表读取成本。
     """
-    from app.design import pump as pump_rules
-
     inflow: dict[str, list[str]] = {}
     outflow: dict[str, list[str]] = {}
     for row in connections or []:
@@ -1186,11 +1183,9 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
             if mass and vol:
                 rho_from_flow = float(mass) / float(vol)
         block["rho_kgm3"] = (
-            rho_from_flow
-            if rho_from_flow is not None
-            else pump_rules.mass_density_kgm3(rho_molar, mw)
+            rho_from_flow if rho_from_flow is not None else mass_density_kgm3(rho_molar, mw)
         )
-        block["motor_kw"], _note = pump_rules.pick_motor(block.get("power_kw"))
+        block["motor_kw"], _note = pick_motor(block.get("power_kw"))
 
 
 # ---------------------------------------------------------------- 总入口

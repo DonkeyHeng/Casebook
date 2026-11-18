@@ -18,44 +18,35 @@
 
 from __future__ import annotations
 
-import math
-
-G = 9.80665  # m/s²
-MOTOR_EFF = 0.95  # 电机效率(默认值,可被调用方覆盖)
-DEFAULT_MARGIN = 1.10  # 电机裕量
-
-# 常用低压/高压电机功率档(kW)。来源是工程常用序列,不是某个标准的原文。
-MOTOR_KW: tuple[float, ...] = (
-    0.55,
-    0.75,
-    1.1,
-    1.5,
-    2.2,
-    3.0,
-    4.0,
-    5.5,
-    7.5,
-    11.0,
-    15.0,
-    18.5,
-    22.0,
-    30.0,
-    37.0,
-    45.0,
-    55.0,
-    75.0,
-    90.0,
-    110.0,
-    132.0,
-    160.0,
-    200.0,
-    250.0,
-    315.0,
-    355.0,
-    400.0,
+# 这三个是从 app/values.py 转出来的**对外接口**:调用方一直写 `pump.pick_motor(...)`。
+# 实现放在 app/values.py 是为了让读取层也能用(读取层不能反过来依赖派生层),
+# 这里保留原名,调用方不用改。
+from app.values import (
+    DEFAULT_MARGIN,
+    MOTOR_EFF,
+    MOTOR_KW,
+    MOTOR_RULE,
+    mass_density_kgm3,
+    pick_motor,
+    sanitize_pv_bar,
 )
 
-MOTOR_RULE = "建议电机 = 轴功率 ÷ 电机效率(0.95) × 裕量(1.10),向上取标准档位"
+__all__ = [
+    "DEFAULT_MARGIN",
+    "G",
+    "MOTOR_EFF",
+    "MOTOR_KW",
+    "MOTOR_RULE",
+    "NPSH_RULE",
+    "head_from_dp",
+    "mass_density_kgm3",
+    "npsh_available_m",
+    "pick_motor",
+    "sanitize_pv_bar",
+    "spec",
+]
+
+G = 9.80665  # m/s²
 NPSH_RULE = "NPSHₐ = (p_进口 − p_v) × 10⁵ ÷ (ρ·g),忽略速度头"
 
 
@@ -69,16 +60,6 @@ def spec() -> dict:
         "motor_rule": MOTOR_RULE,
         "npsh_rule": NPSH_RULE,
     }
-
-
-def mass_density_kgm3(rho_molar_kmol_m3, mw_kg_kmol):
-    """摩尔密度 × 分子量 = 质量密度。任一缺失返回 None(不猜)。"""
-    if rho_molar_kmol_m3 is None or mw_kg_kmol is None:
-        return None
-    try:
-        return float(rho_molar_kmol_m3) * float(mw_kg_kmol)
-    except (TypeError, ValueError):
-        return None
 
 
 def head_from_dp(p_in_bar, p_out_bar, rho_kgm3) -> float | None:
@@ -95,26 +76,6 @@ def head_from_dp(p_in_bar, p_out_bar, rho_kgm3) -> float | None:
         return None
 
 
-def sanitize_pv_bar(p_v_bar) -> float | None:
-    """p_v 只认「有限、> 0」的读数,其余一律 None。
-
-    为什么要有这一层(2026-11-14 实测):
-      Aspen 结果树里 `Output\\PL` 是**目录节点**,读出来是标志位 `1`(还带 bar 单位);
-      分压在各组分叶子上,混合物总压只在 `STRM_UPP\\PBUB\\MIXED\\TOTAL`。
-      不设这道闸,PL 的 1 bar 会被当成真实蒸气压,把 NPSHₐ 算成负数。
-    """
-    if p_v_bar is None:
-        return None
-    try:
-        v = float(p_v_bar)
-    except (TypeError, ValueError):
-        return None
-    # NaN / ±Inf / ≤0 都不是有效蒸气压:以前只挡了 NaN,正无穷会漏过去
-    if not math.isfinite(v) or v <= 0:
-        return None
-    return v
-
-
 def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3) -> float | None:
     """有效汽蚀余量(m)。
 
@@ -129,28 +90,3 @@ def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3) -> float | None:
     # 泡点进料(p_v ≈ p_in)时差值只有浮点噪声;按显示精度(2 位小数)归零,
     # 免得表里出现「-0.00」这种看着像算错的值
     return 0.0 if abs(value) < 0.005 else value
-
-
-def pick_motor(
-    shaft_kw, margin: float = DEFAULT_MARGIN, motor_eff: float = MOTOR_EFF
-) -> tuple[float | None, str]:
-    """轴功率 → 建议电机功率 + 一句可展示的推导。
-
-    返回 (档位 kW 或 None, 说明)。功率 ≤ 0 视为反向工况,不选电机。
-    """
-    if shaft_kw is None:
-        return None, "缺轴功率"
-    try:
-        power = float(shaft_kw)
-    except (TypeError, ValueError):
-        return None, "轴功率不是数字"
-    if power <= 0:
-        return None, f"反向工况(轴功率 {power:.2f} kW ≤ 0),不选电机"
-    try:
-        need = power / float(motor_eff) * float(margin)
-    except (TypeError, ValueError, ZeroDivisionError):
-        return None, "电机效率或裕量不合法"
-    for kw in MOTOR_KW:
-        if need <= kw:
-            return kw, (f"{power:.2f} ÷ {motor_eff} × {margin} = {need:.2f} kW → 取 {kw} kW 档")
-    return None, f"需 {need:.1f} kW,超出档位表上限({MOTOR_KW[-1]} kW)"

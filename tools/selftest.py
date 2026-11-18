@@ -3110,8 +3110,8 @@ def test_component_dict() -> None:
       * AI 包组分列用 CAS,没有 CAS 才退回原名;
       * Word / Excel 两个出口保持 Aspen 原名,不受这里影响。
     """
+    from app import component_names as names
     from app.api import composition
-    from app.design import component_names as names
     from app.export import aipack
 
     # --- CAS 归一:只认 数字-数字-数字,别的东西一律当"没有"
