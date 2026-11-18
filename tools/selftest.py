@@ -40,8 +40,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     from tests._harness import FAILED, PASSED
-    from tests._suite import CASES
+    from tests._suite import CASES, verify_coverage
     from tests.test_store import check_db
+
+    # 清单与 tests/ 对不上就先停:否则会少跑一条用例还一声不响
+    problems = verify_coverage()
+    if problems:
+        print("用例清单与 tests/ 对不上:")
+        for item in problems:
+            print(f"  - {item}")
+        return 1
 
     print("Casebook 自测")
     for name, fn in CASES:

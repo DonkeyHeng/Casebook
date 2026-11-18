@@ -65,3 +65,57 @@ CASES: list[tuple[str, object]] = [
     ("模型身份与选型台账", test_store.test_model_identity_and_selection),
     ("λ 口径持久化与校验", test_store.test_lambda_method),
 ]
+
+
+def verify_coverage() -> list[str]:
+    """核对清单没漏用例、也没写错名字。
+
+    为什么要这个
+    ------------
+    `CASES` 是手工清单,而 pytest 是直接扫 `tests/test_*.py` 收用例的 —— 两边各有一份
+    "有哪些用例"的事实。新增用例时忘了登记进 `CASES`,`python -m tools.selftest`
+    就会**少跑一条**而且一声不响(退出码还是 0)。这里把两份事实对齐,漏了当场报。
+
+    返回问题描述列表(空 = 一致)。
+    """
+    import inspect
+
+    problems: list[str] = []
+    listed = {fn for _name, fn in CASES}
+    for module in (
+        test_api,
+        test_aspen,
+        test_balance,
+        test_judge,
+        test_pipe,
+        test_pump,
+        test_report,
+        test_store,
+        test_tools,
+    ):
+        for name, fn in vars(module).items():
+            if not name.startswith("test_") or not inspect.isfunction(fn):
+                continue
+            if fn not in listed:
+                problems.append(f"{module.__name__}.{name} 没登记进 CASES")
+    for name, fn in CASES:
+        if not callable(fn):
+            problems.append(f"CASES 里的 {name} 不可调用")
+            continue
+        owner = getattr(fn, "__module__", "")
+        if owner not in {
+            m.__name__
+            for m in (
+                test_api,
+                test_aspen,
+                test_balance,
+                test_judge,
+                test_pipe,
+                test_pump,
+                test_report,
+                test_store,
+                test_tools,
+            )
+        }:
+            problems.append(f"CASES 里的 {name} 指向别的模块({owner})")
+    return problems
