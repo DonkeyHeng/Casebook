@@ -210,7 +210,8 @@ Casebook/
 ├── start.cmd            # Windows 一键启动脚本（环境检查、拉起服务并打开应用窗口）
 ├── requirements.txt     # Python 依赖清单 (pywin32, openpyxl, python-docx, websocket-client)
 ├── app/                 # 核心源码：aspen(COM只读)、store(SQLite/波及)、design(计算引擎)、api(HTTP)、web(前端)、cli
-├── tools/               # 维护与质保工具：回归自测、历史回算、界面巡检、脱敏扫描、字段探针、批量导出与打包
+├── tests/               # 回归用例集（pytest）：判定、焓平衡、管路选型、泵、HTTP 与库一致性
+├── tools/               # 维护与质保工具：回归自测入口、历史回算、界面巡检、脱敏扫描、字段探针、批量导出与打包
 ├── docs/                # 完整技术文档（安装、API、Aspen字段映射、选型规范、衡算规范与 UI 规范）
 ├── samples/             # 离线演示用脱敏异常工况样本库
 ├── assets/              # 应用图标与静态资源
@@ -224,7 +225,8 @@ Casebook/
 | 命令 | 用途说明 |
 | :--- | :--- |
 | `python -m app.cli --list` / `--read` / `--cases` / `--show N` | 无网页命令行接口：列出打开的模型、读取当前工况、查看已存工况列表与明细（支持 `--composition`） |
-| `python -m tools.selftest [--db data/cases.db]` | 运行 **825 条**独立离线回归自测（含 `--db` 库一致性校验共 **860 条**），无需 Aspen 与网络 |
+| `python -m tools.selftest [--db data/cases.db]` | 运行 **828 条**独立离线回归自测（含 `--db` 库一致性校验共 **835 条**），无需 Aspen 与网络 |
+| `python -m pytest tests/ -q` | 同一批用例的 pytest 入口（用例正文在 `tests/`，可按域单独跑、可 `-k` 筛选） |
 | `python -m tools.repair_cases [--apply]` | 判定或计算口径升级后，离线回算历史工况（默认 dry-run 预览，加 `--apply` 写入） |
 | `python -m tools.balance_report --case N` | 命令行批量导出指定工况的 Word《物料衡算报告》与《能量衡算报告》 |
 | `python -m tools.make_pipe_schedule --case N [--audit]` | 命令行导出《管道选型一览表》Word（加 `--audit` 逐项打印工程校核明细） |
@@ -273,7 +275,7 @@ Casebook/
 欢迎提交 Issue 反馈 Bug 或提出功能建议，也欢迎直接发起 Pull Request：
 
 1. 开发前请先阅读 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)、[`app/README.md`](app/README.md) 与 [`docs/conventions.md`](docs/conventions.md)。
-2. 改动判定、单位或计算口径后，请务必运行 `python -m tools.selftest` 通过全部离线回归测试，并在提交前运行 `python -m tools.check_public_safe` 完成脱敏自检。
+2. 改动判定、单位或计算口径后，请务必让三道闸门全绿：`ruff check .`、`python -m pytest tests/ -q`（等价入口 `python -m tools.selftest`）、`node tools/check_render.mjs`；提交前再运行 `python -m tools.check_public_safe` 完成脱敏自检。
 3. 请勿提交任何 `.apw` / `.bkp` 模型文件、国标 PDF/CSV 原文或本地 `data/` 目录文件。
 4. 如发现安全漏洞，请通过 [`.github/SECURITY.md`](.github/SECURITY.md) 私密反馈。
 

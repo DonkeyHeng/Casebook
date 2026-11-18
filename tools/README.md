@@ -21,7 +21,7 @@
 | `column_diag.py` | 塔逐板剖面 + 异常标记(只标记,不给修复建议) | ✅ | 只打印 |
 | `fill_composition.py` | 给已存工况**批量补**流股组成(网页只能一条条点) | ✅ 且必须是同一运行 | 写库 |
 | `balance_report.py` | 批量生成《物料与能量衡算报告》.docx:`python -m tools.balance_report --case 40 [--blocks …] [--families …]`;与网页「衡算报告」页同一套代码 | ❌ | 写 `data/preview/`(或 `--out`) |
-| `selftest.py` | 判定 / 单位 / 焓平衡 / 管路选型回归自测,拿真实工况当固定样本;含 `test_reader_fixture()` 用 `fixtures/` 回放整棵 COM 节点树 | ❌ | 只读库 |
+| `selftest.py` | 回归自测的**薄入口**,用例正文在 `tests/`(pytest);判定 / 单位 / 焓平衡 / 管路选型 / 泵 / HTTP,拿真实工况当固定样本;含 `test_reader_fixture()` 用 `fixtures/` 回放整棵 COM 节点树 | ❌ | 只读库 |
 | `make_pipe_schedule.py` | 命令行生成《管道选型一览表》.docx(与网页导出同一套代码):`python -m tools.make_pipe_schedule --case 55 [--audit] [--out …]` | ❌ | 写 `data/preview/`(或 `--out`) |
 | `check_render.mjs` | 前端渲染回归(180 条):Node + DOM 桩跑真实 `app.js` 的泵设计块 / 流股表 / 首页 / 家族页签 / 折叠面板 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底 / 详细参数折叠,挡住「模板读 state 缺字段 → 整块静默空白」;`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
@@ -38,7 +38,7 @@
 - 怀疑字段名 / 连接关系读错 → `probe_topology.bat`(双击)
 - 要确认「扬程 / 汽蚀余量 / 蒸气压 能不能直接从 Aspen 读」→ `probe_pump.py --attach --save`
 - 示例库要跟着新字段更新(读的字段变了、示例还是旧的)→ `build_sample.py`,只读重读一份并脱敏
-- 改了判定 / 单位 / 焓平衡口径 → 先跑 `selftest.py`;过了再 `repair_cases.py --apply`
+- 改了判定 / 单位 / 焓平衡口径 → 先跑 `selftest.py`(或 `python -m pytest tests/ -q`);过了再 `repair_cases.py --apply`
 - 改了 `reader.py` 里读的节点路径、或换了 Aspen 版本 → 用 `dump_fixture.py` 重采一份
   `fixtures/`,再跑 `selftest.py`:夹具会拦住"新路径拼错 / 版本少了一层"这类静默变空
 - 改了 `app/web/static/app.js` 的渲染逻辑 → `node --check` 查语法,再 `node tools/check_render.mjs` 查静默空白

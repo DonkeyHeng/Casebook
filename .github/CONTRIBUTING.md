@@ -32,12 +32,17 @@ python -m app.api          # 打开 http://127.0.0.1:8000
 ## 提交前必须跑的自测
 
 ```bash
-python -m tools.selftest --db data/cases.db
+ruff check . && ruff format --check .
+python -m pytest tests/ -q          # 或等价入口 python -m tools.selftest
+node tools/check_render.mjs
 ```
 
-不需要 Aspen。**改了判定规则 / 单位换算 / 焓平衡口径,必须让这条全绿**,
+不需要 Aspen。**改了判定规则 / 单位换算 / 焓平衡口径,必须让这几条全绿**,
 否则 PR 会被打回 —— 这三处历史上被改错过三次,判定规则写在
 `app/aspen/reader.py` 顶部,改之前先读。
+
+用例正文在 `tests/`(按域分文件),`python -m tools.selftest` 是同一批用例的
+薄入口,输出更接近流水日志,适合贴进交接记录。
 
 ## 代码约定
 
@@ -68,6 +73,7 @@ type(scope): 中文摘要
 
 ## PR 检查清单
 
+- [ ] `ruff check .`、`python -m pytest tests/ -q`、`node tools/check_render.mjs` 全绿
 - [ ] `python -m tools.selftest --db data/cases.db` 全绿
 - [ ] `python -m tools.check_public_safe --all` 无高危项(密钥 / 隐私 / 本机路径 / 内网)
 - [ ] 没有新增未忽略的模型 / PDF / 数据库 / 日志

@@ -210,7 +210,8 @@ Casebook/
 ├── start.cmd            # Windows launcher (checks environment, starts server, opens app window)
 ├── requirements.txt     # Python dependencies (pywin32, openpyxl, python-docx, websocket-client)
 ├── app/                 # Core source: aspen (COM), store (SQLite/impact), design (engines), api (HTTP), web (UI), cli
-├── tools/               # Maintenance & QA: selftest, repair_cases, ui_sweep, check_public_safe, COM probes, packagers
+├── tests/               # Regression suite (pytest): judgment, enthalpy balance, pipe sizing, pump, HTTP, DB consistency
+├── tools/               # Maintenance & QA: selftest entry, repair_cases, ui_sweep, check_public_safe, COM probes, packagers
 ├── docs/                # Technical docs (installation, HTTP API, Aspen field maps, sizing/balance specs, UI style)
 ├── samples/             # Sanitized offline abnormal simulation snapshot for demo & testing
 ├── assets/              # Application icons and static resources
@@ -224,7 +225,8 @@ Casebook/
 | Command | Description |
 | :--- | :--- |
 | `python -m app.cli --list` / `--read` / `--cases` / `--show N` | Headless CLI to list open Aspen models, capture the active case, or inspect saved cases (supports `--composition`) |
-| `python -m tools.selftest [--db data/cases.db]` | Runs **825** standalone offline regression tests (**860** with `--db` database consistency checks), no Aspen or internet required |
+| `python -m tools.selftest [--db data/cases.db]` | Runs **828** standalone offline regression tests (**835** with `--db` database consistency checks), no Aspen or internet required |
+| `python -m pytest tests/ -q` | The same suite under pytest (cases live in `tests/`: run one domain at a time, filter with `-k`) |
 | `python -m tools.repair_cases [--apply]` | Recomputes verdicts, enthalpy checks, and derived parameters offline after rule updates (dry-run by default) |
 | `python -m tools.balance_report --case N` | Batch-generates Material & Energy Balance Word reports for case `N` from the command line |
 | `python -m tools.make_pipe_schedule --case N [--audit]` | Exports the 10-column Pipe Selection Schedule `.docx` (`--audit` prints itemized engineering checks) |
@@ -273,7 +275,7 @@ Casebook/
 Issues and Pull Requests are welcome:
 
 1. Read [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md), [`app/README.md`](app/README.md), and [`docs/conventions.md`](docs/conventions.md) before contributing.
-2. Run `python -m tools.selftest` after modifying judgment rules, unit conversions, or engineering calculations, and run `python -m tools.check_public_safe` before committing.
+2. After modifying judgment rules, unit conversions, or engineering calculations, keep all three gates green: `ruff check .`, `python -m pytest tests/ -q` (equivalent entry point: `python -m tools.selftest`), and `node tools/check_render.mjs`; run `python -m tools.check_public_safe` before committing.
 3. Never commit `.apw` / `.bkp` simulation files, copyrighted GB/T standard PDFs/CSVs, or local `data/` files.
 4. Report security vulnerabilities privately via [`.github/SECURITY.md`](.github/SECURITY.md).
 

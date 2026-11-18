@@ -41,7 +41,9 @@ jobs:
           ruff format --check .
 
       - name: 自测(不接 Aspen)
-        run: python -m tools.selftest --db samples/case-23-error.db
+        run: |
+          python -m tools.selftest --db samples/case-23-error.db
+          python -m pytest tests/ -q
 
       - uses: actions/setup-node@v4
         with:
