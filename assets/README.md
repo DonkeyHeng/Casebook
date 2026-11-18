@@ -19,3 +19,10 @@ python tools/make_icon.py assets/icon-source.jpg assets/app-icon.ico
 而 Windows 资源管理器只认 BMP 条目,桌面图标会显示成白块。
 
 脚本还会把成品复制一份到 `%LOCALAPPDATA%\Casebook\`(供桌面快捷方式引用);只跑源码不看快捷方式的话可以忽略。
+
+## 能不能删
+
+`icon-source.jpg` 是唯一的源图,删了脚本无从生成,**保留**;
+两个成品可随时按上面的命令重生成。
+
+网页 favicon 与桌面快捷方式引用的是成品图标,删掉会让图标显示为白块,重新生成即可恢复。

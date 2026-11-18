@@ -292,7 +292,7 @@ node.AttributeValue(6)  # -> 'Heater'
 \Data\Blocks\<设备>\Output\BLKMSG    -> 错误原文(英文)
 ```
 
-实测样本(model-full,121 流股 / 77 模块):
+实测样本(model/full,121 流股 / 77 模块):
 
 | 模块 | 类型 | BLKSTAT | BLKMSG |
 | --- | --- | --- | --- |
@@ -308,7 +308,7 @@ Aspen 的 `.sum` 文件里有 `DSET RUN-STATUS ERRTXT ...`,但在数据树里
 
 那段文字等价信息只能从两处拼出来:
 
-1. `model-full/_<runid>.sum` 文件(明文,包含
+1. `model/full/_<runid>.sum` 文件(明文,包含
    "The following Unit Operation blocks were completed with errors: T0202 T0205、
    The following Convergence blocks were completed with errors: $OLVER02");
 2. 各模块的 `BLKMSG`(逐条错误原因,更适合做界面)。
@@ -337,10 +337,10 @@ ERR2\1     = 0.0
 CVSTAT\1   = '#'
 ```
 
-model-full 有 6 条撕裂流,误差分别为 `1.1e-14 / 0.0 / 1.6e-08 / 2.8e-06 / 0.0 / 3.0e-13`。
+model/full 有 6 条撕裂流,误差分别为 `1.1e-14 / 0.0 / 1.6e-08 / 2.8e-06 / 0.0 / 3.0e-13`。
 
 > ⚠️ **关键认知:撕裂流误差小 ≠ 流程可用。**
-> model-full 的撕裂流全部在 1e-14~1e-6 量级(数值上已经收敛),
+> model/full 的撕裂流全部在 1e-14~1e-6 量级(数值上已经收敛),
 > 但 T0202/T0205 依然报了实质性错误(塔干涸、组分平衡方程不收敛)。
 > 判定必须"撕裂流 + 模块状态"两条腿走路。
 
@@ -446,7 +446,7 @@ unit = u() if callable(u) else u
 
 ## 9. 性能与规模(实测)
 
-在 model-full(121 流股 / 77 设备)上用 `python -m tools.bench` 实测:
+在 model/full(121 流股 / 77 设备)上用 `python -m tools.bench` 实测:
 
 | 阶段 | 耗时 | COM 调用数 |
 | --- | --- | --- |

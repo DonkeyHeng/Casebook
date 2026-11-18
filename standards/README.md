@@ -19,3 +19,8 @@
 - 这些 PDF 的**表格数字常有乱码**(嵌入字体缺 ToUnicode),不能直接复制数字;
   要么渲染成页图人工核对,要么按 `docs/pipe-standards-extract-prompt.md` 的提示词重新录入。
 - 文件名保持 `GBT-<号>-<年>.pdf` / `SH-T-<号>-<年>.pdf` 的形式,方便对照上表。
+
+## 能不能删
+
+能,程序启动与运行都不读这里。删掉只是查表时要重新准备一份原文;
+已经导入的标准表 CSV 存在 `data/preview/std/docx/`,与这些 PDF 无关(见 [`data/README.md`](../data/README.md))。

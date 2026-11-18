@@ -1,8 +1,10 @@
 # ---- Aspen 模型与运行文件(不入库,只留说明) ----
 model/*
 !model/README.md
-model-full/*
-!model-full/README.md
+# 全流程大模型放在 model/full/,同样只放行它的 README
+!model/full/
+model/full/*
+!model/full/README.md
 
 # Aspen 运行中间文件(在任何目录都可能出现,统一忽略)
 _*.*

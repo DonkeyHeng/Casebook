@@ -7,12 +7,13 @@
 | 文件 / 目录 | 是什么 | 能删吗 |
 | --- | --- | --- |
 | `cases.db` | SQLite 工况库。表:`cases` / `streams` / `stream_components` / `blocks` / `column_stages` / `connections` | ❌ 删了历史工况全没 |
-| `config/` | 本机配置,如管路选型的管道等级表 `piping-classes.json` | ⚠️ 删了要重新配置 |
+| `config/` | 本机配置:`sections.json`(工段边界,含真实位号)与 `piping-classes.json`(管道等级表,导入后才有) | ⚠️ 删了要重新配置 |
 | `preview/std/docx/*.csv` | 管路选型用的三张标准表(**丢了要重新录入**,见 `docs/pipe-standards-index.md`) | ❌ 建议备份 |
 | `preview/` 其它内容 | 界面验证截图、标准 PDF 页图与解析文本、附录解析结果、PyInstaller 打包产物 | ✅ 可再生 |
 | `probe_topology.txt` | 拓扑 / 焓值探测报告(`tools/probe_topology.bat` 生成) | ✅ 可再生 |
 | `window.json` | 窗口大小 / 位置记忆 | ✅ 下次自动重建 |
 | `server.log` / `stop.log` | 运行日志 | ✅ 随时删 |
+| `server.pid` | 服务启动时写的进程号(`tools/stop.py` 用它停服务) | ✅ 停服务后即删 |
 
 ## 备份 / 重置
 

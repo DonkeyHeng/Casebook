@@ -21,5 +21,4 @@
 .github/        export-ignore
 AGENTS.md       export-ignore
 model/          export-ignore
-model-full/     export-ignore
 standards/      export-ignore

@@ -58,7 +58,7 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
    - 解压后是一个 `Casebook` 文件夹,根目录能看到 `start.cmd`、`requirements.txt`、
      `安装说明.txt`、`app`
-   - 只给开发者的 `AGENTS.md`、`.github/`(贡献指南、安全策略)与 `model/`、`model-full/`、
+   - 只给开发者的 `AGENTS.md`、`.github/`(贡献指南、安全策略)与 `model/`、
      `standards/` 等占位目录**不在包里**(见 `.gitattributes` 的 `export-ignore`)
 
 > 压缩包里**没有** Aspen 模型、**没有**标准 PDF 原文、**没有**你自己的本地工况库(`data/cases.db`);

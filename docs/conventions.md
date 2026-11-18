@@ -27,7 +27,7 @@
 | 公开样本 | `samples/` | 唯一允许入库的 `.db`,必须脱敏,见 [`samples/README.md`](../samples/README.md) |
 | 本地数据 | `data/` | 不入库,见 [`data/README.md`](../data/README.md) |
 | 标准原件 | `standards/` | 不入库,见 [`standards/README.md`](../standards/README.md) |
-| Aspen 模型 | `model/`、`model-full/` | 不入库,各自有 README |
+| Aspen 模型 | `model/`(全流程大模型放 `model/full/`) | 不入库,层级 README 见 `model/README.md` |
 | 图标 | `assets/` | 见 [`assets/README.md`](../assets/README.md) |
 
 ## 2. README 规范
