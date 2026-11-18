@@ -157,7 +157,13 @@ X-Casebook-Client: 1
 | 文件 | 职责 |
 | --- | --- |
 | `app/version.py` | 版本号与 GitHub 仓库常量的唯一来源(运行期 / 发布包共用) |
-| `app/api/server.py` | 路由、静态文件、导出 |
+| `app/api/server.py` | HTTP 外壳:安全闸、响应、静态文件、查表分发、启停 |
+| `app/api/routes/__init__.py` | **接口清单的唯一来源**:路由表 `ROUTES` / `CASE_ROUTES` |
+| `app/api/routes/cases.py` | 工况:列表、明细、流股 / 设备 / 拓扑、工段、组成、删除 |
+| `app/api/routes/pumps.py` | 泵:设计扬程、水力、p_v、选型台账 |
+| `app/api/routes/pipes.py` | 管路:一览表、标准表导入、管道等级表、模板下载 |
+| `app/api/routes/exports.py` | Excel / AI 包 / 管道 Word / 衡算报告 |
+| `app/api/routes/meta.py` | 健康检查、版本、读取任务、工况对比、示例库 |
 | `app/api/update_check.py` | 手动检查更新的版本比对与网络降级 |
 | `app/api/read_job.py` | 读取后台任务(进度 / 状态机) |
 | `app/api/composition.py` | 组成按需读与缓存 |

@@ -40,15 +40,29 @@ app/
     report.py         衡算报告 .docx(物料 + 能量,三线表;python-docx 懒导入)
     pipe_schedule.py  管道选型一览表 .docx(复用 report 的封面 / 页眉 / 三线表骨架)
     family_xlsx.py    按设备分类导出 .xlsx(设备页「导出 Excel」)
+    workbook.py       整本 Excel(概览 / 流股 / 设备 / 泵 / 连接 / 塔剖面 / 管道计算书)
     aipack.py         分析数据包(Markdown + CSV + JSON → zip)
   api/     HTTP 服务(标准库,零第三方 Web 框架)
-    server.py     路由 + 静态文件 + 导出入口
+    server.py      HTTP 外壳:安全闸、响应、静态文件、查表分发、启停
+    router.py      路由表原语(Route / match)
+    routes/        按域拆开的处理逻辑,一个域一个文件
+      __init__.py  两张路由表:ROUTES / CASE_ROUTES —— 接口清单的唯一来源
+      cases.py     工况:列表、明细、流股 / 设备 / 拓扑、工段、组成、删除
+      pumps.py     泵:设计扬程、水力、p_v、选型台账
+      pipes.py     管路:一览表、标准表导入、管道等级表、模板下载
+      exports.py   Excel / AI 包 / 管道 Word / 衡算报告
+      meta.py      健康检查、版本、读取任务、工况对比、示例库
+    serialize.py   行转换与标准表状态(server 与 routes 共用)
+    errors.py      请求级异常(BadBody / BadQuery)
     update_check.py 「检查更新」的版本比对(HEAD 302 → tag);唯一的出站请求,不下载不安装
     read_job.py   「读取当前工况」后台任务(状态机 + 进度 + 卡住提示)
     composition.py 组成按需读(先校验模型与运行 ID,避免旧快照混入)
     window.py     窗口几何记忆(ctypes)
   web/     零构建前端:index.html + static/{app.js,pipe.js,style.css}
 ```
+
+`api/routes/` 按 URL 前缀分域,加接口是"表里加一行 + 对应域加一个方法",不用在
+三个 `do_*` 里找分支;表里写了不存在的方法名,自测的 `test_routes()` 会直接报错。
 
 `export/` 单独一层,是因为导出逻辑既被网页路由调用,也被命令行工具调用
 (`tools/balance_report.py`、`tools/make_pipe_schedule.py`):放在 `api/` 里会让

@@ -4,23 +4,16 @@
     python -m app.api                 # 默认 http://127.0.0.1:8000
     python -m app.api --port 8800 --db data/cases.db
 
-接口:
-    GET  /api/health                 健康检查
-    POST /api/read                   从已打开的 Aspen 读一次(后台线程,立刻返回)
-    GET  /api/read/status            读取进度/结果(前端每 0.5 s 问一次)
-    GET  /api/cases                  工况列表
-    GET  /api/cases/{id}             单个工况详情(含收敛状态与原因)
-    GET  /api/cases/{id}/streams     流股表
-    GET  /api/cases/{id}/streams/{流股}/composition   单条流股的组成(按需从 Aspen 读)
-    GET  /api/cases/{id}/blocks      设备表
-    GET  /api/cases/{id}/connections 设备 ↔ 流股连接关系(拓扑:进出流股 / 换热器分侧 / 塔进料板)
-    GET  /api/cases/{id}/flowsheet   流程图数据(节点 = 设备、边 = 设备间流股、边界流股)
-    GET  /api/cases/{id}/impact      报错设备的波及范围(哪些流股的数据不能用)
-    GET  /api/cases/{id}/export.xlsx      导出 Excel(给人看)
-    GET  /api/cases/{id}/export.ai.zip    导出 AI 分析包(Markdown + CSV,给 AI 读)
-    GET  /api/cases/{id}/sections         工段边界:自动草稿 + 已确认 + 合并结果
-    POST /api/cases/{id}/sections         保存工段边界(写 data/config/sections.json)
-    GET  /api/cases/{id}/balance-report.docx   物料与能量衡算报告(Word)
+接口清单在 `app/api/routes/__init__.py` 的两张表里(`ROUTES` / `CASE_ROUTES`)——
+那是唯一来源,增删接口改表,不要在这里再抄一份。本文件只留:
+
+  * 安全闸(`_guard`):所有写操作要带 `X-Casebook-Client` 头,挡掉任意网页借着
+    本地服务改配置 / 发外网请求;
+  * 响应(`_json` / `_error`)与静态文件(`_static`)、图标;
+  * 查表分发(`_api` / `_api_cases` 与三个 do_*);
+  * 启停、窗口、PID、示例库替换。
+
+各域的处理逻辑在 `app/api/routes/` 的 mixin 里。
 
 设计:
   * 只用标准库,不引第三方依赖(打包 exe 时省事)
@@ -33,9 +26,7 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
-import math
 import mimetypes
 import os
 import sqlite3
@@ -54,6 +45,18 @@ from app.design import component_names
 from app.store import db, flowsheet, impact
 from app.api import read_job, update_check
 from app.api import window as win
+from app.api.errors import BadBody, BadQuery
+from app.api.router import match
+from app.api.routes import (
+    CASE_ROUTES,
+    ROUTES,
+    CaseRoutes,
+    ExportRoutes,
+    MetaRoutes,
+    PipeRoutes,
+    PumpRoutes,
+)
+from app.export.workbook import build_workbook as build_workbook  # 自测从这里取
 
 # 只读资源(网页、图标)与可写数据(data/)分开:打包成 exe 后前者在临时解包目录,
 # 后者必须在 exe 旁边,否则一关程序数据就没了(见 app/paths.py)
@@ -83,29 +86,13 @@ BROWSERS = [
 DETACHED = 0x00000008
 CREATE_NEW_GROUP = 0x00000200
 
-# POST body 上限:普通 JSON 接口 256 KB;标准表导入要传一份 CSV 全文,单独放宽。
-# 没有上限时,一个写错的 Content-Length 就能让进程先把内存吃光再报错。
-JSON_BODY_LIMIT = 256 * 1024
-STANDARDS_BODY_LIMIT = 16 * 1024 * 1024
 
 # 换示例库是"备份 + 校验 + 原子替换",两个请求同时来会把彼此的临时文件换掉
 _SAMPLE_SWAP_LOCK = threading.Lock()
 
 
-class BadBody(Exception):
-    """请求体不合法(Content-Length 不对 / 超大 / 不是 JSON 对象 / 读到一半断了)。
-
-    单独一类异常,是为了让 do_POST 回 400。以前这里一律退回 `{}`,
-    而空对象在某些保存接口里表示"清空配置" —— 于是坏请求能静默改配置。
-    """
-
-    def __init__(self, message: str, status: int = 400) -> None:
-        super().__init__(message)
-        self.status = status
 
 
-class BadQuery(Exception):
-    """查询参数不合法(不是数字、不是有限值、超范围)—— 回 400,不要静默换默认值。"""
 
 
 def open_ui(url: str, prefer_app_window: bool = True, state: dict | None = None) -> str:
@@ -162,34 +149,29 @@ def _alert(msg: str) -> None:
         pass
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict:
-    return {k: row[k] for k in row.keys()}
 
 
-def _pipe_table_status() -> dict:
-    """管路选型依赖的三张标准表录到什么程度(不连 Aspen、不查库)。"""
-    from app.design.pipe import data as pipe_data
-
-    stress_grades = sorted(pipe_data.ALLOWABLE_STRESS)
-    return {
-        "dn_to_od": {
-            "loaded": bool(pipe_data.DN_TO_OD),
-            "count": len(pipe_data.DN_TO_OD),
-            "verified": sorted(pipe_data.DN_OD_VERIFIED),
-        },
-        "od_to_walls": {"loaded": bool(pipe_data.OD_TO_WALLS), "count": len(pipe_data.OD_TO_WALLS)},
-        "stress": {
-            "loaded": bool(pipe_data.ALLOWABLE_STRESS),
-            "grades": stress_grades,
-            "count": sum(len(v) for v in pipe_data.ALLOWABLE_STRESS.values()),
-        },
-        # 管道等级表:不填也能跑 —— 全部流股按页面上的默认材质
-        "piping_class": pipe_data.piping_class_status(),
-        "ready": bool(pipe_data.DN_TO_OD and pipe_data.ALLOWABLE_STRESS and pipe_data.OD_TO_WALLS),
-    }
 
 
-class Handler(BaseHTTPRequestHandler):
+class Handler(
+    CaseRoutes,
+    PumpRoutes,
+    PipeRoutes,
+    ExportRoutes,
+    MetaRoutes,
+    BaseHTTPRequestHandler,
+):
+    """本地服务的 HTTP 外壳:安全闸、响应、静态文件、查表分发。
+
+    各域的处理逻辑在 `app/api/routes/` 的 mixin 里(按 URL 前缀分);这里只留
+    与"怎么收发"有关的东西。路由表见 `app/api/routes/__init__.py`。
+    """
+
+    # POST body 上限:普通 JSON 接口 256 KB;标准表导入要传一份 CSV 全文,单独放宽。
+    # 没有上限时,一个写错的 Content-Length 就能让进程先把内存吃光再报错。
+    JSON_BODY_LIMIT = 256 * 1024
+    STANDARDS_BODY_LIMIT = 16 * 1024 * 1024
+
     db_path = DEFAULT_DB
 
     # ------------------------------------------------------------ 工具
@@ -258,16 +240,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._static(path)
         except BrokenPipeError:
             pass
+        except BadQuery as exc:  # 查询参数不合法:回 400,不要静默换默认值
+            self._error(str(exc))
         except Exception as exc:  # 兜底,别让服务挂掉
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
-    def _read_json_body(self, max_bytes: int = JSON_BODY_LIMIT) -> dict:
+
+    def _read_json_body(self, max_bytes: int | None = None) -> dict:
         """读 POST 的 JSON body。
 
         没有 body(长度 0)仍按空对象处理 —— 有几个接口根本不需要 body。
         但"body 坏了"必须抛 BadBody 走 400,不能悄悄退回 `{}`:空对象在某些
         保存接口里表示"清空",一个损坏的请求就能把用户配置改掉。
         """
+        max_bytes = self.JSON_BODY_LIMIT if max_bytes is None else max_bytes
         raw_length = self.headers.get("Content-Length")
         try:
             length = int(raw_length or 0)
@@ -293,1480 +279,110 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if not self._guard(change=True):
                 return
-            if path == "/api/shutdown":
-                self._json({"ok": True, "message": "服务已停止"})
-                # 必须换个线程关,否则会在请求处理线程里自己等自己
-                threading.Timer(0.2, self.server.shutdown).start()
+            found, m = match(ROUTES, "POST", path)
+            if found is None:
+                self._error("未知接口", 404)
                 return
-            if path == "/api/update/check":
-                # 手动检查更新:唯一的出站请求,固定访问 GitHub,只带 User-Agent。
-                # 走 POST 是为了过 X-Casebook-Client 校验 —— 任意网页不能借本地
-                # 服务替用户发起外网请求。实现见 app/api/update_check.py。
-                self._json(update_check.check())
-                return
-            if path == "/api/read":
-                self._start_read()
-                return
-            if path == "/api/piping-classes":
-                # 保存管道等级表:校验 → 写 data/config/piping-classes.json → 重新加载
-                from app.design.pipe import data as pipe_data
-
-                ok, errors = pipe_data.save_piping_classes(self._read_json_body())
-                payload = {"ok": ok, "errors": errors, "status": pipe_data.piping_class_status()}
-                self._json(payload, 200 if ok else 400)
-                return
-            if path == "/api/pipe-standards":
-                # 导入标准表:校验 → 写 data/preview/std/docx/ → 立即重新加载(不用重启)
-                from app.design.pipe import data as pipe_data
-
-                ok, errors, files = pipe_data.import_standards(
-                    self._read_json_body(STANDARDS_BODY_LIMIT)
-                )
-                payload = {
-                    "ok": ok,
-                    "errors": errors,
-                    "dir": files["dir"],
-                    "files": files["files"],
-                    "status": _pipe_table_status(),
-                }
-                if ok:
-                    payload["loaded"] = {
-                        "od_to_walls": len(pipe_data.OD_TO_WALLS),
-                        "od_to_walls_sst": len(pipe_data.OD_TO_WALLS_SST),
-                        "stress_grades": sorted(pipe_data.ALLOWABLE_STRESS),
-                    }
-                self._json(payload, 200 if ok else 400)
-                return
-            if path == "/api/sample/install":
-                # 首页「载入示例工况」按钮:把内置示例库装进当前库(先备份原库)
-                ok, message = _install_sample(self.db_path, alert=False)
-                payload = {"ok": ok, "message": message}
-                if ok:
-                    conn = db.open_db(self.db_path)
-                    try:
-                        cases = db.list_cases(conn)
-                    finally:
-                        conn.close()
-                    payload["case_id"] = cases[0]["id"] if cases else None
-                self._json(payload, 200 if ok else 500)
-                return
-            # /api/cases/{id}/pumps/{设备}/pv —— 逐台保存饱和蒸气压(精度优先,不做估算)
-            if path.startswith("/api/cases/"):
-                seg = [p for p in path.split("/") if p]
-                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "head-loss":
-                    self._pump_head_loss(seg[2], seg[4])
-                    return
-                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "design-head":
-                    self._set_pump_design(seg[2], seg[4])
-                    return
-                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "selection":
-                    self._set_pump_selection(seg[2], seg[4])
-                    return
-                if len(seg) == 6 and seg[3] == "pumps" and seg[5] == "pv":
-                    self._set_pump_pv(seg[2], seg[4])
-                    return
-                # /api/cases/{id}/pumps/inherit-pv —— 从同模型的更早工况沿用 p_v
-                if len(seg) == 5 and seg[3] == "pumps" and seg[4] == "inherit-pv":
-                    self._inherit_pump_pv(seg[2])
-                    return
-                # /api/cases/{id}/sections —— 保存工段(界区)边界
-                if len(seg) == 4 and seg[3] == "sections":
-                    self._save_sections(seg[2])
-                    return
-                # /api/cases/{id}/sections/inherit —— 沿用同模型更早工况的工段边界
-                if len(seg) == 5 and seg[3] == "sections" and seg[4] == "inherit":
-                    self._inherit_sections(seg[2])
-                    return
-                # /api/cases/{id}/components/cas —— 手填某个组分的 CAS(按模型存)
-                if len(seg) == 5 and seg[3] == "components" and seg[4] == "cas":
-                    self._set_component_cas(seg[2])
-                    return
-            self._error("未知接口", 404)
+            getattr(self, found.handler)(m, {})
         except BrokenPipeError:
             pass
         except BadBody as exc:
             self._error(str(exc), exc.status)
+        except BadQuery as exc:
+            self._error(str(exc))
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
-    def _set_pump_pv(self, raw_id: str, block: str) -> None:
-        """保存一台泵的饱和蒸气压(bar);body 里 pv_bar 为 null 表示清空。
 
-        读取工况时会自动填 Aspen 进口流股的泡点压力,这里只用于**覆盖 / 补空**:
-        例如 Aspen 没给读数,或用户要改用厂家实测值。程序本身不估算 p_v。
-        """
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        body = self._read_json_body()
-        raw = body.get("pv_bar")
-        pv = None
-        if raw not in (None, ""):
-            try:
-                pv = float(raw)
-            except (TypeError, ValueError):
-                self._error("pv_bar 必须是数字")
-                return
-            if not 0.0 <= pv <= 500.0:
-                self._error("pv_bar 超出合理范围(0~500 bar)")
-                return
-        conn = db.open_db(self.db_path)
-        try:
-            if not db.set_pump_pv(conn, case_id, block, pv, source="manual"):
-                self._error(f"没有设备 {block}(工况 {case_id})", 404)
-                return
-        finally:
-            conn.close()
-        self._json(
-            {
-                "ok": True,
-                "case_id": case_id,
-                "block": block,
-                "pv_bar": pv,
-                "pv_source": "manual" if pv is not None else None,
-            }
-        )
 
-    def _pump_design(self, raw_id: str, block: str) -> None:
-        """GET …/pumps/{位号}/design-head —— 手填的设计扬程修正项与管路输入。
 
-        zeta_json 在库里是文本,这里解析成对象;坏 JSON 只让这一项为空,
-        不让 ΔZ / Σhf / 管长跟着一起读不出来。
-        """
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            row = conn.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
-            if row is None:
-                self._error(f"没有 id={case_id} 的工况", 404)
-                return
-            data = dict(
-                db.read_pump_design(conn, db.model_key(conn, case_id), block)
-                or {"dz_m": None, "hf_m": None, "l_m": None, "zeta_json": None}
-            )
-        finally:
-            conn.close()
-        raw = data.get("zeta_json")
-        try:
-            data["zeta_json"] = json.loads(raw) if raw else None
-        except (TypeError, ValueError):
-            data["zeta_json"] = None
-        self._json({"ok": True, "block": block, **data})
 
-    def _pump_hydraulics(self, raw_id: str, block_name: str) -> None:
-        """GET …/pumps/{位号}/hydraulics —— 手算 Σhf 需要的输入(含管道选型内径)。
 
-        内径优先取「管道」页同一套选型结果(od − 2×wall);标准表没录全时给空,
-        让用户手填 —— 不做假设性默认值。
-        """
-        from app.design import hydraulics
-        from app.design import pipe as pipe_calc
 
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            block = next(
-                (dict(b) for b in db.read_blocks(conn, case_id) if b["name"] == block_name), None
-            )
-            if block is None:
-                self._error(f"没有设备 {block_name}(工况 {case_id})", 404)
-                return
-            conns = [dict(c) for c in db.read_connections(conn, case_id)]
-            inlet = next(
-                (
-                    c["stream"]
-                    for c in conns
-                    if c["block"] == block_name and str(c.get("direction")) == "in"
-                ),
-                None,
-            )
-            dn = od = wall = id_mm = None
-            id_note = ""
-            if inlet:
-                try:
-                    result = pipe_calc.build(
-                        [dict(r) for r in db.read_streams(conn, case_id)],
-                        [dict(b) for b in db.read_blocks(conn, case_id)],
-                        conns,
-                    )
-                    row = next(
-                        (r for r in result.get("rows", []) if r.get("stream") == inlet), None
-                    )
-                    if row:
-                        dn, od, wall = row.get("dn"), row.get("od_mm"), row.get("wall_mm")
-                        if od and wall:
-                            id_mm = round(od - 2 * wall, 2)
-                        else:
-                            # 标准档位里没有合适规格(内径超 DN600 等),管道页也是这么记的
-                            id_note = str(row.get("reason") or "")
-                    else:
-                        miss = result.get("missing") or []
-                        hit = next(
-                            (
-                                m
-                                for m in miss
-                                if isinstance(m, dict) and m.get("stream") == inlet
-                            ),
-                            None,
-                        )
-                        if hit:
-                            id_note = str(hit.get("reason") or "")
-                except Exception:
-                    pass  # 标准表没录全 / 缺数据:不给默认内径,前端手填
-        finally:
-            conn.close()
-        self._json(
-            {
-                "ok": True,
-                "block": block_name,
-                "inlet_stream": inlet,
-                "flow_m3h": block.get("flow_m3h"),
-                "rho_kgm3": block.get("rho_kgm3"),
-                "mu_cp": block.get("mu_cp"),
-                "dn": dn,
-                "od_mm": od,
-                "wall_mm": wall,
-                "id_mm": id_mm,
-                "id_note": id_note,
-                "eps_default_mm": hydraulics.EPS_DEFAULT_MM,
-            }
-        )
 
-    def _pump_head_loss(self, raw_id: str, block_name: str) -> None:
-        """POST …/pumps/{位号}/head-loss —— 按管路参数算 Σhf(只算,不存)。
 
-        需要 body 至少给 `l_m` 与 `zeta_sum`;内径/粘度/粗糙度可覆盖。返回 u / Re / λ / Σhf。
-        缺什么就在 `missing` 里列出来,不返回半真半假的结果。
-        """
-        from app.design import hydraulics
 
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        body = self._read_json_body()
 
-        def pick(key: str, lo: float, hi: float):
-            raw = body.get(key)
-            if raw in (None, ""):
-                return None
-            try:
-                val = float(raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"{key} 必须是数字") from exc
-            if not lo <= val <= hi:
-                raise ValueError(f"{key} 超出合理范围({lo}~{hi})")
-            return val
-
-        try:
-            l_m = pick("l_m", 0.0, 100000.0)
-            zeta = pick("zeta_sum", 0.0, 10000.0)
-            d_mm = pick("d_mm", 1.0, 5000.0)
-            eps = pick("eps_mm", 0.0, 50.0)
-            mu = pick("mu_cp", 0.0001, 1e6)
-            lam_manual = pick("lam", 0.0001, 1.0)
-        except ValueError as exc:
-            self._error(str(exc))
-            return
-        method = str(body.get("method") or hydraulics.METHOD_COLEBROOK).strip().lower()
-        if method not in (
-            hydraulics.METHOD_COLEBROOK,
-            hydraulics.METHOD_GU,
-            hydraulics.METHOD_MANUAL,
-        ):
-            self._error("method 只能是 colebrook / gu / manual")
-            return
-
-        conn = db.open_db(self.db_path)
-        try:
-            block = next(
-                (dict(b) for b in db.read_blocks(conn, case_id) if b["name"] == block_name), None
-            )
-        finally:
-            conn.close()
-        if block is None:
-            self._error(f"没有设备 {block_name}(工况 {case_id})", 404)
-            return
-
-        result = hydraulics.solve(
-            vol_m3h=block.get("flow_m3h"),
-            rho_kgm3=block.get("rho_kgm3"),
-            mu_cp=mu if mu is not None else block.get("mu_cp"),
-            id_mm=d_mm,
-            l_m=l_m,
-            zeta_sum=zeta,
-            eps_mm=eps,
-            method=method,
-            lam_manual=lam_manual,
-        )
-        # 缺项由 hydraulics.solve 统一报(它同时知道流量/密度/粘度/内径缺不缺),
-        # 这里不再重复 append,否则同一个缺失项会出现两次
-        self._json({"ok": True, "block": block_name, **result})
-
-    def _set_pump_design(self, raw_id: str, block: str) -> None:
-        """POST …/pumps/{位号}/design-head —— 存 ΔZ、Σhf 与算 Σhf 的人填输入。
-
-        工具只负责 `H = 压升扬程 + ΔZ + Σhf` 的加法和 1.1 取整,**不估算这几项**
-        (ΔZ 是标高几何,Σhf 要管长/管件/λ,都属于人工程序)。
-        管长 L 与管件数量只做校验和持久化,不替用户补默认数量;全部为空 = 清除。
-        λ 口径只存用户的白名单选择,不替用户挑公式。
-        """
-        from app.design import hydraulics   # 与其它接口一致,局部导入
-
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        body = self._read_json_body()
-
-        def pick(key: str):
-            raw = body.get(key)
-            if raw in (None, ""):
-                return None
-            try:
-                val = float(raw)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"{key} 必须是数字") from exc
-            if not -1000.0 <= val <= 5000.0:
-                raise ValueError(f"{key} 超出合理范围(-1000~5000 m)")
-            return val
-
-        # 与前端 PUMP_FITTINGS 的 key 对齐;前端加管件时这里要同步
-        fitting_keys = ("el90", "gate", "globe", "check", "reducer")
-        # 手填覆盖的自动取值:原本刷新即丢,现在随设计扬程一起存;缺项不补默认值
-        override_keys = ("id_mm", "mu_cp", "eps_mm")
-
-        def pick_zeta() -> str | None:
-            """管件数量 + 手填 Σζ + 覆盖值 → JSON 文本;全空返回 None(不落空记录)。"""
-            raw = body.get("zeta_json")
-            if raw in (None, ""):
-                return None
-            if not isinstance(raw, dict):
-                raise ValueError("zeta_json 必须是对象")
-            zsum = raw.get("zeta_sum")
-            if zsum is not None:
-                if isinstance(zsum, bool) or not isinstance(zsum, (int, float)):
-                    raise ValueError("zeta_sum 必须是数字")
-                if not 0 <= float(zsum) <= 100000:
-                    raise ValueError("zeta_sum 超出合理范围(0~100000)")
-            fits = raw.get("fittings") or {}
-            if not isinstance(fits, dict):
-                raise ValueError("fittings 必须是对象")
-            clean: dict[str, int] = {}
-            for key, val in fits.items():
-                if key not in fitting_keys:
-                    raise ValueError(f"不认识的管件:{key}")
-                if isinstance(val, bool) or not isinstance(val, int) or not 0 <= val <= 10000:
-                    raise ValueError(f"{key} 的数量必须是 0~10000 的整数")
-                clean[key] = val
-            ov = raw.get("overrides") or {}
-            if not isinstance(ov, dict):
-                raise ValueError("overrides 必须是对象")
-            clean_ov: dict[str, float] = {}
-            for key, val in ov.items():
-                if key not in override_keys:
-                    raise ValueError(f"不认识的覆盖项:{key}")
-                if val in (None, ""):
-                    continue
-                if isinstance(val, bool) or not isinstance(val, (int, float)):
-                    raise ValueError(f"{key} 必须是数字")
-                if not 0 < float(val) <= 100000:
-                    raise ValueError(f"{key} 超出合理范围(0~100000]")
-                clean_ov[key] = float(val)
-            lam = raw.get("lambda") or {}
-            if not isinstance(lam, dict):
-                raise ValueError("lambda 必须是对象")
-            method = str(lam.get("method") or hydraulics.METHOD_COLEBROOK).strip().lower()
-            if method not in (
-                hydraulics.METHOD_COLEBROOK,
-                hydraulics.METHOD_GU,
-                hydraulics.METHOD_MANUAL,
-            ):
-                raise ValueError("lambda.method 只能是 colebrook / gu / manual")
-            lam_raw = lam.get("manual")
-            if lam_raw in (None, ""):
-                lam_manual = None
-            elif isinstance(lam_raw, bool) or not isinstance(lam_raw, (int, float)):
-                raise ValueError("lambda.manual 必须是数字")
-            elif not 0.0001 <= float(lam_raw) <= 1.0:
-                raise ValueError("lambda.manual 超出合理范围(0.0001~1.0)")
-            else:
-                lam_manual = float(lam_raw)
-            # 默认口径 + 没手填值时不落这个 key,免得给每台泵都留一条空挂账
-            clean_lam = (
-                {"method": method, "manual": lam_manual}
-                if method != hydraulics.METHOD_COLEBROOK or lam_manual is not None
-                else {}
-            )
-            if zsum is None and not any(clean.values()) and not clean_ov and not clean_lam:
-                return None
-            payload = {"zeta_sum": zsum, "fittings": clean, "overrides": clean_ov}
-            if clean_lam:
-                payload["lambda"] = clean_lam
-            return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-
-        try:
-            dz_m, hf_m = pick("dz_m"), pick("hf_m")
-            l_m = pick("l_m")
-            if l_m is not None and l_m < 0:
-                raise ValueError("l_m 不能为负")
-            zeta_json = pick_zeta()
-        except ValueError as exc:
-            self._error(str(exc))
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            row = conn.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
-            if row is None:
-                self._error(f"没有 id={case_id} 的工况", 404)
-                return
-            key = db.model_key(conn, case_id)
-            if not key:
-                self._error("这个工况没有可用的模型身份,无法挂手填值")
-                return
-            db.save_pump_design(conn, key, block, dz_m, hf_m, l_m, zeta_json)
-        finally:
-            conn.close()
-        self._json(
-            {
-                "ok": True,
-                "block": block,
-                "dz_m": dz_m,
-                "hf_m": hf_m,
-                "l_m": l_m,
-                "zeta_json": json.loads(zeta_json) if zeta_json else None,
-            }
-        )
-
-    def _pump_selection(self, raw_id: str, block: str) -> None:
-        """GET …/pumps/{位号}/selection —— 台账手填结果 + 实时设计点 + 三态。
-
-        数值一律按当前工况实时算(不落库、不从外部 Excel 导入);台账只回
-        人工决定的字段。三态里的「无法判定」必须写明缺什么。
-        """
-        from app.design import pump_selection as selection_rules
-
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            row = conn.execute(
-                "SELECT * FROM blocks WHERE case_id = ? AND name = ?", (case_id, block)
-            ).fetchone()
-            if row is None:
-                self._error(f"没有位号 {block} 的泵", 404)
-                return
-            key = db.model_key(conn, case_id)
-            design = db.read_pump_design(conn, key, block)
-            saved = db.read_pump_selection(conn, key, block)
-            view = selection_rules.compute_view(dict(row), design, saved)
-        finally:
-            conn.close()
-        self._json({"ok": True, "block": block, "saved": saved or {}, **view})
-
-    def _set_pump_selection(self, raw_id: str, block: str) -> None:
-        """POST …/pumps/{位号}/selection —— 整份提交人工决定的字段。
-
-        不收任何计算值(流量 / 扬程 / NPSHₐ / 三态),那些由 GET 实时算;
-        也就不存在「外部 Excel 数值进库」这条路径。
-        """
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        body = self._read_json_body()
-        text_fields = ("model_no", "pump_name", "material", "note")
-        num_fields = ("motor_kw", "npshr_m", "margin_m")
-        values: dict = {}
-        try:
-            for field in text_fields:
-                raw = body.get(field)
-                if raw in (None, ""):
-                    values[field] = None
-                elif not isinstance(raw, str):
-                    raise ValueError(f"{field} 必须是文字")
-                elif len(raw) > 200:
-                    raise ValueError(f"{field} 太长(最多 200 字)")
-                else:
-                    values[field] = raw.strip()
-            qty = body.get("qty")
-            if qty in (None, ""):
-                values["qty"] = None
-            elif isinstance(qty, bool) or not isinstance(qty, int) or not 1 <= qty <= 999:
-                raise ValueError("qty 必须是 1~999 的整数")
-            else:
-                values["qty"] = qty
-            for field in num_fields:
-                raw = body.get(field)
-                if raw in (None, ""):
-                    values[field] = None
-                    continue
-                if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-                    raise ValueError(f"{field} 必须是数字")
-                if not 0 <= float(raw) <= 100000:
-                    raise ValueError(f"{field} 超出合理范围(0~100000)")
-                values[field] = float(raw)
-        except ValueError as exc:
-            self._error(str(exc))
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            row = conn.execute("SELECT id FROM cases WHERE id = ?", (case_id,)).fetchone()
-            if row is None:
-                self._error(f"没有 id={case_id} 的工况", 404)
-                return
-            key = db.model_key(conn, case_id)
-            if not key:
-                self._error("这个工况没有可用的模型身份,无法挂台账")
-                return
-            db.save_pump_selection(conn, key, block, values)
-        finally:
-            conn.close()
-        self._json({"ok": True, "block": block, "saved": values})
-
-    def _inherit_sections(self, raw_id: str) -> None:
-        """把同模型更早工况保存过的工段边界搬过来,省掉重新拉一遍。
-
-        只在当次请求里搬 —— 搬完写进 data/config/sections.json 的当前工况键下,
-        之后照常可编辑、可保存。源工况没有保存过边界就报 404,不去猜。
-        """
-        from app.store import sections_config
-
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            if conn.execute("SELECT 1 FROM cases WHERE id = ?", (case_id,)).fetchone() is None:
-                self._error(f"没有 id={case_id} 的工况", 404)
-                return
-            prev = db.previous_case_same_model(conn, case_id)
-        finally:
-            conn.close()
-        if prev is None:
-            self._error("同一模型没有更早的工况可以沿用", 404)
-            return
-        parts, overrides, _deleted, err = sections_config.load(prev)
-        if err:
-            self._error(err, 500)
-            return
-        if not parts and not overrides:
-            self._error(f"工况 #{prev} 没有保存过工段边界,无从沿用", 404)
-            return
-        ok, save_errors = sections_config.save(case_id, parts, overrides)
-        self._json(
-            {
-                "ok": ok,
-                "from_case": prev,
-                "errors": save_errors,
-                "zones": sorted(parts.keys()),
-                "config": sections_config.status(),
-            },
-            200 if ok else 500,
-        )
-
-    def _set_component_cas(self, raw_id: str) -> None:
-        """手动填写某个组分的 CAS 号;body 里 cas 为空表示清除。
-
-        为什么按**模型**存、不写回 components 表:
-        组分是模型的属性,而且重读工况会整份重建 components(= 手填会被冲掉)。
-        手填只补空缺 —— 该组分从 Aspen / 模型文件读得到 CAS 时,以读数为准。
-        """
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        body = self._read_json_body()
-        component = str(body.get("component") or "").strip()
-        if not component:
-            self._error("component 不能为空")
-            return
-        raw = str(body.get("cas") or "").strip()
-        cas = None
-        if raw:
-            cas = component_names.clean_cas(raw)
-            if not cas:
-                self._error("CAS 号形状不对:应为 数字-数字-数字 的形式,例如 2134-29-4")
-                return
-        conn = db.open_db(self.db_path)
-        try:
-            row = conn.execute(
-                "SELECT id, model_name FROM cases WHERE id = ?", (case_id,)
-            ).fetchone()
-            if row is None:
-                self._error(f"没有 id={case_id} 的工况", 404)
-                return
-            key = db.model_key(conn, case_id)
-            if not key:
-                self._error("这个工况没有可用的模型身份,无法挂手填 CAS")
-                return
-            db.save_component_cas(conn, key, component, cas)
-        finally:
-            conn.close()
-        self._json(
-            {
-                "ok": True,
-                "case_id": case_id,
-                "model_name": row["model_name"],
-                "component": component,
-                "cas": cas,
-                "cn": component_names.cn_name(cas) if cas else None,
-            }
-        )
-
-    def _inherit_pump_pv(self, raw_id: str) -> None:
-        """把同一模型更早工况填过的 p_v 按位号沿用过来(只填空行,不覆盖手填值)。"""
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        conn = db.open_db(self.db_path)
-        try:
-            result = db.inherit_pump_pv(conn, case_id)
-        finally:
-            conn.close()
-        if result is None:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
-        if result["source_case_id"] is None:
-            self._error("没有可沿用的工况:需要同一模型、且更早的工况里填过 p_v", 404)
-            return
-        payload = {"ok": True, "case_id": case_id, **result}
-        self._json(payload)
 
     def do_DELETE(self) -> None:  # noqa: N802
-        """DELETE /api/cases/{id} —— 删掉一个工况及其明细(页面上的「删除工况」)。"""
         path = unquote(urlparse(self.path).path)
-        parts = [p for p in path.split("/") if p]
         try:
             if not self._guard(change=True):
                 return
-            if len(parts) == 3 and parts[:2] == ["api", "cases"]:
-                self._delete_case(parts[2])
+            found, m = match(ROUTES, "DELETE", path)
+            if found is None:
+                self._error("未知接口", 404)
                 return
-            if parts == ["api", "piping-classes"]:
-                # 清除等级表 = 回到"全部按默认材质"
-                from app.design.pipe import data as pipe_data
-
-                ok, errors = pipe_data.save_piping_classes({"rules": [], "default": None})
-                self._json(
-                    {"ok": ok, "errors": errors, "status": pipe_data.piping_class_status()},
-                    200 if ok else 400,
-                )
-                return
-            self._error("未知接口", 404)
+            getattr(self, found.handler)(m, {})
         except BrokenPipeError:
             pass
+        except BadQuery as exc:
+            self._error(str(exc))
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
-    def _delete_case(self, raw_id: str) -> None:
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
 
-        conn = db.open_db(self.db_path)
-        try:
-            case = db.get_case(conn, case_id)
-            if case is None:
-                self._error(f"没有 id={case_id} 的工况", 404)
-                return
-            removed = db.delete_case(conn, case_id)
-            self._json(
-                {
-                    "ok": True,
-                    "deleted": case_id,
-                    "model_name": case["model_name"],
-                    "read_at": case["read_at"],
-                    "removed": removed,
-                }
-            )
-        finally:
-            conn.close()
 
-    def _start_read(self) -> None:
-        """POST /api/read —— 起一个后台读取任务,立刻返回当前状态。
-
-        不让请求线程同步等 9–25 s:Aspen 的 COM 调用卡住时页面会一直转圈,
-        用户看不出是"在算"还是"死了"。轮询能显示进度,也能显示卡在哪一步。
-        """
-        snap, started = read_job.start(
-            self.db_path,
-            include_composition=bool(self._read_json_body().get("include_composition")),
-        )
-        if not started:
-            self._json(
-                {
-                    "ok": False,
-                    "error": "已经有一次读取在进行中,等它结束再点。",
-                    "job": snap,
-                },
-                409,
-            )
-            return
-        self._json({"ok": True, "job": snap})
 
     def _api(self, path: str, query: dict | None = None) -> None:
-        parts = [p for p in path.split("/") if p]  # ['api', 'cases', '1', 'streams']
+        """GET 分发:先查不依赖工况的路由表,再进「按工况」的子路由。"""
         query = query or {}
-        if parts == ["api", "health"]:
-            self._json({"ok": True, "db": self.db_path})
+        found, m = match(ROUTES, "GET", path)
+        if found is not None:
+            getattr(self, found.handler)(m, query)
             return
-        if parts == ["api", "version"]:
-            # 只回本地常量,不联网;exe 里没有 .git,版本号一律来自 app/version.py
-            self._json(
-                {
-                    "version": version.__version__,
-                    "releases_url": version.RELEASES_URL,
-                    "frozen": paths.is_frozen(),
-                }
-            )
+        if path == "/api/cases" or path.startswith("/api/cases/"):
+            self._api_cases(path, query)
             return
-        if parts == ["api", "read", "status"]:
-            self._json(read_job.snapshot())
-            return
-        if parts == ["api", "compare"]:
-            self._compare(query)
-            return
-        if parts == ["api", "pipe-tables"]:
-            # 管路选型要用的标准表录到什么程度(前端空状态用)
-            self._json(_pipe_table_status())
-            return
-        if parts == ["api", "pipe-standards"]:
-            # 标准表导入弹窗:三个 CSV 各自有没有、多少行、什么时候放进来的
-            from app.design.pipe import data as pipe_data
+        self._error("未知接口", 404)
 
-            files = pipe_data.standards_status()
-            self._json(
-                {"dir": files["dir"], "files": files["files"], "status": _pipe_table_status()}
-            )
-            return
-        if parts == ["api", "pipe-standards-prompt"]:
-            # 「复制填写提示词」要复制的那段字。唯一来源是
-            # app/design/pipe/prompt.py:文件名/必需列取自 STD_FILES,
-            # 示例行取自 samples/pipe-standards-template/,不在这里另抄一份。
-            from app.design.pipe import prompt as pipe_standards_prompt
+    def _api_cases(self, path: str, query: dict) -> None:
+        """按工况的 GET:解析 id → 查路由表 → 开库 → 确认工况存在 → 调用。
 
-            text = pipe_standards_prompt.build()
-            self._json(
-                {
-                    "version": pipe_standards_prompt.PROMPT_VERSION,
-                    "chars": len(text),
-                    "text": text,
-                }
-            )
+        这三件事以前在每个分支里重复一遍;现在只在这里做一次,handler 拿到的
+        `case` 就是已查出来的那一行。注意先查表再开库:路径不认识时不必碰数据库。
+        """
+        parts = [p for p in path.split("/") if p]
+        try:
+            case_id = int(parts[2])
+        except (IndexError, ValueError):
+            self._error("工况 id 必须是整数")
             return
-        if parts == ["api", "pipe-standards-template.zip"]:
-            # 「下载模板 CSV」:把模板目录打成一个 zip,文件名原样保留
-            self._std_template_zip()
-            return
-        if parts == ["api", "piping-classes"]:
-            # 管道等级表的当前内容(页面上的「等级表」弹窗读它)
-            from app.design.pipe import data as pipe_data
-
-            grades = pipe_data.piping_class_grades()
-            self._json(
-                {
-                    "status": pipe_data.piping_class_status(),
-                    "rules": pipe_data.PIPING_CLASS_RULES,
-                    "default": pipe_data.PIPING_CLASS_DEFAULT,
-                    "grades": list(grades),
-                    # 牌号 → 材质类别代号 + 来源(explicit / prefix / unknown);
-                    # prefix 是"按牌号前缀推断",下拉里会标「·推断」提醒核对
-                    "material_codes": {
-                        g: dict(zip(("code", "source"), pipe_data.material_code_for(g)))
-                        for g in grades
-                    },
-                    "media": list(pipe_data.PIPING_CLASS_MEDIA),
-                    "file": "data/config/piping-classes.json",
-                }
-            )
-            return
-        if parts == ["api", "block-families"]:
-            # 设备页的类型页签:类型 → 家族。唯一来源是 app/design/block_family.py
-            from app.design import block_family
-
-            self._json(block_family.describe())
-            return
-        if parts == ["api", "pump-spec"]:
-            # 泵口径常量(重力加速度/电机效率/裕量/档位表/公式说明)。
-            # 前端拿它算 NPSHₐ 和悬浮说明,免得公式在 JS 里再抄一遍抄错。
-            from app.design import pump
-
-            self._json(pump.spec())
-            return
-        if parts == ["api", "pump-prompt"]:
-            # 「复制选泵提示词」要复制的那段字。唯一来源是 app/design/pump_prompt.py,
-            # 分类导出的「选泵提示词」工作表与 AI 包的 pump_prompt.md 读的也是它。
-            # 不做前端内置副本:两份必然漂移,而这段字里全是会被转义的符号。
-            from app.design import pump_prompt
-
-            self._json(
-                {
-                    "version": pump_prompt.PROMPT_VERSION,
-                    "text": pump_prompt.PUMP_SELECTION_PROMPT,
-                }
-            )
-            return
-        if parts[:2] != ["api", "cases"]:
+        found, m = match(CASE_ROUTES, "GET", path)
+        if found is None:
             self._error("未知接口", 404)
             return
-
         conn = db.open_db(self.db_path)
         try:
-            if len(parts) == 2:  # /api/cases
-                self._json([_row_to_dict(r) for r in db.list_cases(conn)])
-                return
-
-            try:
-                case_id = int(parts[2])
-            except ValueError:
-                self._error("工况 id 必须是整数")
-                return
-
             case = db.get_case(conn, case_id)
             if case is None:
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
-
-            if len(parts) == 3:  # /api/cases/{id}
-                payload = _row_to_dict(case)
-                # 首页仪表盘要用的两项:连接条数、焓平衡四态台数
-                payload["connection_count"] = len(db.read_connections(conn, case_id))
-                payload["balance_summary"] = db.balance_summary(conn, case_id)
-                for key in (
-                    "reasons_json",
-                    "status_json",
-                    "tear_json",
-                    "block_errors",
-                    "block_warnings",
-                ):
-                    if payload.get(key):
-                        try:
-                            payload[key.replace("_json", "")] = json.loads(payload[key])
-                        except (TypeError, ValueError):
-                            pass
-                self._json(payload)
-                return
-
-            if parts[3] == "streams":
-                # /api/cases/{id}/streams/{流股}/composition —— 单条流股的组成(按需)
-                if len(parts) >= 6 and parts[5] == "composition":
-                    self._stream_composition(conn, case_id, parts[4])
-                    return
-                self._json([_row_to_dict(r) for r in db.read_streams(conn, case_id)])
-                return
-            if parts[3] == "blocks":
-                from app.design import block_family
-
-                rows = []
-                for row in db.read_blocks(conn, case_id):
-                    item = _row_to_dict(row)
-                    # 家族在 API 层现算,不入库:老工况不用迁移也能分页签
-                    item["family"] = block_family.family_of_block(item)
-                    rows.append(item)
-                self._json(rows)
-                return
-            if parts[3] == "connections":
-                self._json([_row_to_dict(r) for r in db.read_connections(conn, case_id)])
-                return
-            if parts[3] == "flowsheet":
-                payload = flowsheet.build(
-                    [dict(r) for r in db.read_connections(conn, case_id)],
-                    [dict(r) for r in db.read_blocks(conn, case_id)],
-                )
-                self._json(payload)
-                return
-            if parts[3] == "impact":
-                # 报错设备的进出口流股 —— 直接从 connections 反查,不用再连 Aspen
-                self._json(
-                    impact.build(
-                        [dict(r) for r in db.read_connections(conn, case_id)],
-                        [dict(r) for r in db.read_blocks(conn, case_id)],
-                    )
-                )
-                return
-            if parts[3] == "pipes":
-                self._pipes(conn, case_id, query)
-                return
-            if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "hydraulics":
-                self._pump_hydraulics(parts[2], parts[4])
-                return
-            if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "design-head":
-                self._pump_design(parts[2], parts[4])
-                return
-            if parts[3] == "pumps" and len(parts) == 6 and parts[5] == "selection":
-                self._pump_selection(parts[2], parts[4])
-                return
-            if parts[3] == "columns":
-                if len(parts) == 4:
-                    self._json([_row_to_dict(r) for r in db.list_columns(conn, case_id)])
-                else:
-                    block = unquote(parts[4])
-                    self._json(
-                        [_row_to_dict(r) for r in db.read_column_stages(conn, case_id, block)]
-                    )
-                return
-            if parts[3] == "export.xlsx":
-                self._export(conn, case_id)
-                return
-            if parts[3] == "export-family.xlsx":
-                self._export_family(conn, case_id, query)
-                return
-            if parts[3] == "pipes.docx":
-                self._pipes_docx(conn, case_id)
-                return
-            if parts[3] == "export.ai.zip":
-                self._export_ai(conn, case_id)
-                return
-            if parts[3] == "balance-report.docx":
-                self._export_report(conn, case_id, query)
-                return
-            if parts[3] == "sections":
-                self._sections(conn, case_id)
-                return
-            self._error("未知接口", 404)
+            getattr(self, found.handler)(conn, case, m, query)
         finally:
             conn.close()
+
 
     # ------------------------------------------------------------ 标准表模板下载
 
-    def _std_template_zip(self) -> None:
-        """GET /api/pipe-standards-template.zip —— 三份格式模板 + 说明打成一个 zip。
-
-        文件从 `samples/pipe-standards-template/` 现读(唯一来源),不在代码里内嵌副本:
-        模板改列名或加表,下载包自动跟着变。
-        """
-        import zipfile
-
-        from app.design.pipe import data as pipe_data
-
-        base = pipe_data.TEMPLATE_DIR
-        if not base.is_dir():
-            self._error("这份安装里没带模板目录(samples/pipe-standards-template)", 404)
-            return
-        buf = io.BytesIO()
-        added = 0
-        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for spec in pipe_data.STD_FILES:
-                path = base / spec["name"]
-                if path.is_file():
-                    zf.writestr(spec["name"], path.read_bytes())
-                    added += 1
-            note = base / "README.md"
-            if note.is_file():
-                zf.writestr("README.md", note.read_bytes())
-        if not added:
-            self._error("模板目录里没有可下载的 CSV", 404)
-            return
-        data = buf.getvalue()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Disposition", 'attachment; filename="pipe-standards-template.zip"')
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
 
     # ------------------------------------------------------------ 流股组成按需读
 
-    def _pipes(self, conn, case_id: int, query: dict) -> None:
-        """GET /api/cases/{id}/pipes —— 管路选型(实时算,不写库)。
 
-        参数(都可省):`liquid` / `gas` / `two`(m/s)、`factor`(设计压力系数)、
-        `floor`(设计压力下限 MPa)、`max_dn`、`material`(默认牌号)。
-        标准表没录全时返回 409 并说明缺哪张,而不是吐一张空表。
-        """
-        from app.design import pipe as pipe_calc
-        from app.design.pipe import data as pipe_data
-
-        # query 的值是 list(parse_qs 的行为),取第一个;不取的话 float(list) 会失败,
-        # 参数就被静默换成默认值了(界面改了流速、结果却不变,就是这样来的)
-        def _q(key: str):
-            val = query.get(key)
-            if isinstance(val, (list, tuple)):
-                return val[0] if val else None
-            return val
-
-        def _f(key: str, default: float, lo: float, hi: float) -> float:
-            """取一个数字参数:没给 → 默认值;给了但不是有限数或超范围 → 400。
-
-            以前这里把任何解析失败都换成默认值:界面改了流速、结果却不变,
-            用户以为是"算不动",其实是参数被悄悄丢掉了。NaN/Inf 还会一路
-            传进选型计算。
-            """
-            raw = _q(key)
-            if raw is None or str(raw).strip() == "":
-                return default
-            try:
-                value = float(raw)
-            except (TypeError, ValueError):
-                raise BadQuery(f"参数 {key} 必须是数字,收到 {raw!r}") from None
-            if not math.isfinite(value) or not lo <= value <= hi:
-                raise BadQuery(f"参数 {key} 要在 {lo}~{hi} 之间,收到 {raw!r}")
-            return value
-
-        try:
-            # 管材跟着**已录入的表 B.1** 走:表里有什么牌号就能选什么(方案 A)。
-            # 以前这里把认不出的牌号静默换成 S30408,页面什么也不说;现在改成明确报错。
-            available = pipe_data.piping_class_grades()
-            default_material = (
-                "S30408" if "S30408" in available else (available[0] if available else "S30408")
-            )
-            material = _q("material") or default_material
-            if material not in available:
-                raise BadQuery(
-                    f"牌号 {material!r} 不在已录入的表 B.1 里;可选 {', '.join(available)}"
-                    if available
-                    else "还没有录入表 B.1,先导入标准表再选管材"
-                )
-            options = {
-                "velocity": {
-                    "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"], 0.01, 100.0),
-                    "gas": _f("gas", pipe_calc.DEFAULT_VELOCITY["gas"], 0.01, 100.0),
-                    "two": _f("two", pipe_calc.DEFAULT_VELOCITY["two"], 0.01, 100.0),
-                    "pump_inlet": _f(
-                        "pump_inlet", pipe_calc.DEFAULT_VELOCITY["pump_inlet"], 0.01, 100.0
-                    ),
-                },
-                # §17.1/§17.2 口径:压力系数 1.15(原 1.1),DN 上限 1000(原 600)
-                "pressure_factor": _f("factor", 1.15, 0.5, 10.0),
-                "pressure_add_mpa": 0.15,
-                "pressure_floor_mpa": _f("floor", 1.0, 0.0, 100.0),
-                "max_dn": int(_f("max_dn", 1000, 1, 10000)),
-                "material": material,
-            }
-        except BadQuery as exc:
-            self._error(str(exc), 400)
-            return
-
-        streams = [dict(r) for r in db.read_streams(conn, case_id)]
-        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
-        conns = [dict(r) for r in db.read_connections(conn, case_id)]
-
-        try:
-            result = pipe_calc.build(streams, blocks, conns, options=options)
-        except pipe_calc.TablesNotReady as exc:
-            # 表没录不是错误,是"还没装数据"——把要做什么一并给出来,别只丢一句报错
-            payload = {
-                "error": str(exc),
-                "tables": _pipe_table_status(),
-                "setup": pipe_data.setup_guide(),
-            }
-            self._json(payload, 409)
-            return
-
-        result["validation"] = pipe_calc.validate(result["rows"], options)
-        result["options"] = options
-        result["tables"] = _pipe_table_status()
-        self._json(result)
-
-    def _stream_composition(self, conn, case_id: int, stream: str) -> None:
-        """GET /api/cases/{id}/streams/{流股}/composition
-
-        先看工况库里存过没有;没存过就去当前打开的 Aspen 现读一条(约 0.3 s)并缓存。
-        组成不跟着主读取一起读 —— 全量读会让 121 条流股从 9 s 变 41 s。
-        """
-        from app.api import composition
-
-        case = db.get_case(conn, case_id)
-        if case is None:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
-        try:
-            payload = composition.get(conn, case, stream)
-        except composition.CompositionError as exc:
-            # 409:不是接口有问题,是"现在这个状态给不了",原因原样显示给用户
-            self._json({"error": str(exc), "stream": stream}, 409)
-            return
-        self._json(payload)
 
     # ------------------------------------------------------------ AI 分析包导出
 
-    def _export_ai(self, conn, case_id: int) -> None:
-        """把工况导成给 AI 读的一组文件(Markdown + CSV + JSON,打成 zip)。"""
-        from app.export import aipack
-
-        try:
-            data, fname = aipack.build_zip(conn, case_id)
-        except LookupError:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
 
     # ------------------------------------------------------------ Excel 导出
 
-    def _export(self, conn, case_id: int) -> None:
-        """把工况导成一个 Excel 工作簿;构建逻辑在模块函数 build_workbook()。"""
-        try:
-            data = build_workbook(conn, case_id)
-        except ImportError:
-            self._error("服务器没有安装 openpyxl,无法导出 Excel。请先 pip install openpyxl", 500)
-            return
-        except LookupError:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
 
-        stamp = time.strftime("%Y%m%d_%H%M")
-        fname = f"Casebook_case{case_id}_{stamp}.xlsx"
-        self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
 
-    def _pipes_docx(self, conn, case_id: int) -> None:
-        """GET /api/cases/{id}/pipes.docx —— 管道选型一览表(单张 Word)。
-
-        不并进 Excel 工作簿:那 9 列是版面表(列宽/字体/跨页表头),Word 才装得下;
-        工作簿继续管它的流股 / 设备 / 计算书。
-        """
-        from app.export import pipe_schedule
-
-        try:
-            data, fname = pipe_schedule.build_pipe_docx(conn, case_id)
-        except ImportError:
-            self._error("服务器没有安装 python-docx,无法导出 Word。请先 pip install python-docx", 500)
-            return
-        except LookupError:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
-        except Exception as exc:  # 标准表没录、流股缺数等:把原因原样说清,不造数
-            self._error(f"管道表生成失败:{exc}", 400)
-            return
-
-        self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _export_family(self, conn, case_id: int, query: dict) -> None:
-        """GET /api/cases/{id}/export-family.xlsx?family=pump —— 单分类设备表。
-
-        设备页右上角「导出 Excel」用它:只导当前分类,泵分类就是选型要抄的那几列。
-        """
-        from app.export import family_xlsx
-
-        raw = query.get("family")
-        if isinstance(raw, (list, tuple)):
-            raw = raw[0] if raw else None
-        family = str(raw or "").strip()
-        if not family:
-            self._error("需要 family 参数,例如 ?family=pump", 400)
-            return
-        try:
-            data, _label, fname = family_xlsx.build_family_workbook(conn, case_id, family)
-        except ValueError:
-            self._error(f"未知分类:{family}", 400)
-            return
-        except LookupError:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
-        except ImportError:
-            self._error("服务器没有安装 openpyxl,无法导出 Excel。请先 pip install openpyxl", 500)
-            return
-
-        self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
 
     # ------------------------------------------------------------ 衡算报告
 
-    def _sections(self, conn, case_id: int) -> None:
-        """GET /api/cases/{id}/sections —— 工段(界区)边界:草稿 + 已确认 + 合并。"""
-        from app.store import sections_config
-        from app.design import sections as section_rules
 
-        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
-        connections = [dict(r) for r in db.read_connections(conn, case_id)]
-        draft = section_rules.draft(blocks, connections)
-        confirmed, overrides, deleted, error = sections_config.load(case_id)
-        self._json(
-            {
-                "case_id": case_id,
-                "draft": draft,
-                "confirmed": confirmed,
-                "deleted": deleted,
-                "merged": section_rules.merge(draft, confirmed, deleted),
-                "auto": not confirmed,
-                "device_sections": overrides,
-                "config": sections_config.status(),
-                "error": error,
-            }
-        )
 
-    def _save_sections(self, raw_id: str) -> None:
-        """POST /api/cases/{id}/sections —— 保存边界(只写 data/config/,不碰工况库)。"""
-        from app.store import sections_config
 
-        try:
-            case_id = int(raw_id)
-        except ValueError:
-            self._error("工况 id 必须是整数")
-            return
-        parts, overrides, deleted, errors = sections_config.validate(self._read_json_body())
-        if errors:
-            self._json({"ok": False, "errors": errors}, 400)
-            return
-        ok, save_errors = sections_config.save(case_id, parts, overrides, deleted)
-        payload = {"ok": ok, "errors": save_errors, "config": sections_config.status()}
-        self._json(payload, 200 if ok else 500)
-
-    def _export_report(self, conn, case_id: int, query: dict) -> None:
-        """GET /api/cases/{id}/balance-report.docx?blocks=&families= —— 衡算报告。
-
-        `blocks` / `families` 取并集;都不给就是全部设备。工段边界自动读
-        `data/config/sections.json`,没有确认过就用自动草稿(报告里会注明)。
-        """
-        from app.design import block_family
-        from app.design import sections as section_rules
-        from app.export import report
-        from app.store import sections_config
-
-        def _q(key: str) -> str:
-            val = query.get(key)
-            if isinstance(val, (list, tuple)):
-                val = val[0] if val else ""
-            return str(val or "").strip()
-
-        blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
-        connections = [dict(r) for r in db.read_connections(conn, case_id)]
-
-        picked: set[str] = set()
-        picked.update(n for n in _q("blocks").replace(" ", "").split(",") if n)
-        for key in _q("families").replace(" ", "").split(","):
-            if key:
-                picked.update(
-                    b["name"]
-            for b in blocks
-            if block_family.family_of_block(b) == key
-                )
-        keys = {b["name"] for b in blocks}
-        picked_list = sorted(picked & keys) or None
-
-        confirmed, _overrides, deleted, _error = sections_config.load(case_id)
-        parts = None
-        if confirmed or deleted:
-            parts = section_rules.merge(
-                section_rules.draft(blocks, connections), confirmed, deleted
-            )
-
-        kind = _q("kind") or "all"
-        if kind not in report.KINDS:
-            self._error(f"未知册别:{kind}(可用 {'/'.join(report.KIND_KEYS)})", 400)
-            return
-        try:
-            data, fname = report.build_report(conn, case_id, parts, picked_list, kind)
-        except ImportError:
-            self._error(
-                "服务器没有安装 python-docx,无法生成 Word 报告。"
-                '请先 pip install "python-docx>=1.1"',
-                500,
-            )
-            return
-        except LookupError:
-            self._error(f"没有 id={case_id} 的工况", 404)
-            return
-
-        self.send_response(200)
-        self.send_header(
-            "Content-Type",
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
-
-    def _compare(self, query: dict) -> None:
-        """GET /api/compare?base=1&other=2 —— 逐流股 / 逐设备对比两个工况。"""
-        try:
-            base_id = int(query["base"][0])
-            other_id = int(query["other"][0])
-        except (KeyError, ValueError, IndexError):
-            self._error("需要 base 和 other 两个工况 id,例如 /api/compare?base=1&other=2")
-            return
-
-        fields = [
-            "temperature_c",
-            "pressure_bar",
-            "mass_flow_kgh",
-            "mole_flow_kmolh",
-            "vap_frac",
-            "vol_flow_m3h",
-        ]
-        # 设备要比的字段:负荷/功率/级数/顶底温 + ΔH(焓平衡自检) + 泵的流量/扬程
-        # ⚠️ 前端 app.js 的 BLOCK_COMPARE_FIELDS 必须同步,否则接口加了界面不显示
-        block_fields = [
-            "duty_kw",
-            "power_kw",
-            "nstage",
-            "top_temp_c",
-            "bottom_temp_c",
-            "dh_kw",
-            "ref_kw",
-            "head_m",
-            "flow_m3h",
-        ]
-
-        conn = db.open_db(self.db_path)
-        try:
-            base = db.get_case(conn, base_id)
-            other = db.get_case(conn, other_id)
-            if base is None or other is None:
-                self._error("工况不存在", 404)
-                return
-
-            left = {r["name"]: _row_to_dict(r) for r in db.read_streams(conn, base_id)}
-            right = {r["name"]: _row_to_dict(r) for r in db.read_streams(conn, other_id)}
-
-            rows, common, changed = [], 0, 0
-            for name in sorted(set(left) | set(right)):
-                a, b = left.get(name), right.get(name)
-                delta = {}
-                for f in fields:
-                    va = a.get(f) if a else None
-                    vb = b.get(f) if b else None
-                    delta[f] = (
-                        round(vb - va, 6)
-                        if isinstance(va, (int, float)) and isinstance(vb, (int, float))
-                        else None
-                    )
-                if a and b:
-                    common += 1
-                    if any(d not in (None, 0) for d in delta.values()):
-                        changed += 1
-                rows.append(
-                    {
-                        "name": name,
-                        "base": {f: a.get(f) for f in fields} if a else None,
-                        "other": {f: b.get(f) for f in fields} if b else None,
-                        "delta": delta,
-                    }
-                )
-
-            # ---- 设备 ----
-            b_left = {r["name"]: _row_to_dict(r) for r in db.read_blocks(conn, base_id)}
-            b_right = {r["name"]: _row_to_dict(r) for r in db.read_blocks(conn, other_id)}
-            block_rows, b_common, b_changed = [], 0, 0
-            for name in sorted(set(b_left) | set(b_right)):
-                a, b = b_left.get(name), b_right.get(name)
-                delta = {}
-                for f in block_fields:
-                    va = a.get(f) if a else None
-                    vb = b.get(f) if b else None
-                    delta[f] = (
-                        round(vb - va, 6)
-                        if isinstance(va, (int, float)) and isinstance(vb, (int, float))
-                        else None
-                    )
-                status_a = a.get("status") if a else None
-                status_b = b.get("status") if b else None
-                balance_a = a.get("balance_state") if a else None
-                balance_b = b.get("balance_state") if b else None
-                if a and b:
-                    b_common += 1
-                    if (
-                        any(d not in (None, 0) for d in delta.values())
-                        or status_a != status_b
-                        or balance_a != balance_b
-                    ):
-                        b_changed += 1
-                block_rows.append(
-                    {
-                        "name": name,
-                        "type": (a or b or {}).get("type"),
-                        "base": {f: a.get(f) for f in block_fields} if a else None,
-                        "other": {f: b.get(f) for f in block_fields} if b else None,
-                        "delta": delta,
-                        "status": {"base": status_a, "other": status_b},
-                        # 焓平衡判定不能相减,只能并排看:A 通过 → B 超差 才算"变了"
-                        "balance": {"base": balance_a, "other": balance_b},
-                    }
-                )
-
-            self._json(
-                {
-                    "base": {
-                        "id": base["id"],
-                        "model_name": base["model_name"],
-                        "read_at": base["read_at"],
-                        "severity": base["severity"],
-                    },
-                    "other": {
-                        "id": other["id"],
-                        "model_name": other["model_name"],
-                        "read_at": other["read_at"],
-                        "severity": other["severity"],
-                    },
-                    "fields": fields,
-                    "block_fields": block_fields,
-                    "streams": rows,
-                    "blocks": block_rows,
-                    "summary": {
-                        "total": len(rows),
-                        "common": common,
-                        "changed": changed,
-                        "only_base": sorted(set(left) - set(right)),
-                        "only_other": sorted(set(right) - set(left)),
-                        "block_total": len(block_rows),
-                        "block_common": b_common,
-                        "block_changed": b_changed,
-                        "block_only_base": sorted(set(b_left) - set(b_right)),
-                        "block_only_other": sorted(set(b_right) - set(b_left)),
-                    },
-                }
-            )
-        finally:
-            conn.close()
 
     def _icon(self) -> None:
         """网页 favicon:复用桌面快捷方式那张 .ico(没有就回 204,页面照常能用)。"""
@@ -2063,377 +679,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-def build_workbook(conn, case_id: int) -> bytes:
-    """按工况生成 Excel 工作簿字节(概览 / 流股 / 设备 / 泵 / 连接 / 塔剖面 / 管道计算书)。
-
-    拆成模块函数,自测就能在内存里生成并逐字段比对,不用起 HTTP 服务。
-
-    Raises:
-        LookupError: 没有这个工况。
-        ImportError: 环境里没有 openpyxl。
-    """
-    import openpyxl
-    from openpyxl.styles import Alignment, Font
-    from openpyxl.utils import get_column_letter
-
-    case = db.get_case(conn, case_id)
-    if case is None:
-        raise LookupError(case_id)
-
-    streams = db.read_streams(conn, case_id)
-    blocks = db.read_blocks(conn, case_id)
-    columns = db.list_columns(conn, case_id)
-    connections = db.read_connections(conn, case_id)
-
-    status_text = {0: "正常", 1: "错误", 2: "告警"}
-    balance_text = {"ok": "通过", "bad": "超差", "no_data": "无法校验", "skip": "不校验"}
-
-    wb = openpyxl.Workbook()
-
-    def fill_sheet(ws, headers, rows, widths=None):
-        ws.append(headers)
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal="center")
-        for row in rows:
-            ws.append(list(row))
-        ws.freeze_panes = "A2"
-        if widths:
-            for i, w in enumerate(widths, 1):
-                ws.column_dimensions[get_column_letter(i)].width = w
-
-    # --- 概要 ---
-    ws = wb.active
-    ws.title = "概要"
-    reasons = json.loads(case["reasons_json"] or "[]")
-    summary = [
-        ("模型", case["model_path"]),
-        ("读取时间", case["read_at"]),
-        ("运行 ID", case["run_id"]),
-        ("运行时间", case["run_date"]),
-        ("Aspen 版本", case["aspen_version"]),
-        (
-            "收敛判定",
-            {"ok": "收敛", "warning": "有告警", "error": "有错误"}.get(
-                case["severity"], case["severity"]
-            ),
-        ),
-        ("是否可用于统计对比", "是" if case["converged"] else "否"),
-        ("流股数", case["stream_count"]),
-        ("设备数", case["block_count"]),
-        ("连接关系数", len(connections)),
-        (
-            "焓平衡 通过/超差/无法校验/不校验",
-            "/".join(
-                str(sum(1 for b in blocks if b["balance_state"] == st))
-                for st in ("ok", "bad", "no_data", "skip")
-            ),
-        ),
-        ("结论", "\n".join(f"- {r}" for r in reasons) or "无异常"),
-    ]
-    for key, value in summary:
-        ws.append([key, value])
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=1):
-        row[0].font = Font(bold=True)
-    ws.column_dimensions["A"].width = 20
-    ws.column_dimensions["B"].width = 90
-    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=2, max_col=2):
-        row[0].alignment = Alignment(wrap_text=True, vertical="top")
-
-    # --- 流股 ---
-    ws = wb.create_sheet("流股")
-    fill_sheet(
-        ws,
-        [
-            "流股",
-            "温度 ℃",
-            "压力 bar",
-            "质量流量 kg/h",
-            "摩尔流量 kmol/h",
-            "汽化率",
-            "体积流量 m³/h",
-            "质量焓 kJ/kg",
-            "摩尔焓 kJ/kmol",
-            "能量流 kW",
-        ],
-        [
-            (
-                s["name"],
-                s["temperature_c"],
-                s["pressure_bar"],
-                s["mass_flow_kgh"],
-                s["mole_flow_kmolh"],
-                s["vap_frac"],
-                s["vol_flow_m3h"],
-                s["enthalpy_kjkg"],
-                s["enthalpy_kjkmol"],
-                s["enthalpy_flow_kw"],
-            )
-            for s in streams
-        ],
-        [18, 12, 12, 16, 18, 10, 16, 16, 18, 16],
-    )
-
-    # --- 设备 ---
-    ws = wb.create_sheet("设备")
-    fill_sheet(
-        ws,
-        [
-            "设备",
-            "类型",
-            "状态",
-            "热负荷 kW",
-            "功率 kW",
-            "换热面积 m²",
-            "理论级数",
-            "顶温 ℃",
-            "底温 ℃",
-            "ΔH kW",
-            "参照 kW",
-            "焓平衡",
-            "平衡说明",
-            "提示",
-            "进口 ℃",
-            "出口 ℃",
-            "出口汽化率",
-            "冷凝器 kW",
-            "再沸器 kW",
-        ],
-        [
-            (
-                b["name"],
-                b["type"],
-                status_text.get(b["status"], ""),
-                b["duty_kw"],
-                b["power_kw"],
-                b["area_m2"],
-                b["nstage"],
-                b["top_temp_c"],
-                b["bottom_temp_c"],
-                b["dh_kw"],
-                b["ref_kw"],
-                balance_text.get(b["balance_state"], ""),
-                b["balance_note"],
-                b["message"],
-                b["inlet_temp_c"],
-                b["outlet_temp_c"],
-                b["outlet_vap_frac"],
-                b["cond_duty_kw"],
-                b["reb_duty_kw"],
-            )
-            for b in blocks
-        ],
-        [14, 12, 8, 14, 12, 14, 10, 12, 12, 14, 14, 10, 46, 60, 10, 10, 12, 14, 14],
-    )
-
-    # --- 泵参数(只有 Pump 块有值;老工况这些列是空的,不是 0)---
-    from app.design import block_family as _bf
-
-    # 位号 K 开头的透平在 Aspen 里也是 Pump 类型,但不算泵(见 block_family 注释)
-    pumps = [b for b in blocks if _bf.family_of_block(b) == "pump"]
-    if pumps:
-        from app.design import pump as pump_rules
-
-        def pump_npsh(row):
-            # 口径与页面一致:p_v 只认用户填的值,程序不估算
-            return pump_rules.npsh_available_m(row["p_in_bar"], row["pv_bar"], row["rho_kgm3"])
-
-        ws = wb.create_sheet("泵")
-        fill_sheet(
-            ws,
-            [
-                "设备",
-                "状态",
-                "流量 m³/h",
-                "扬程 m",
-                "效率 %",
-                "轴功率 kW",
-                "建议电机 kW",
-                "进口压力 bar",
-                "出口压力 bar",
-                "压升 bar",
-                "密度 kg/m³",
-                "粘度 cP",
-                "进口汽化率",
-                "p_v bar",
-                "NPSHₐ m",
-                "提示",
-            ],
-            [
-                (
-                    b["name"],
-                    status_text.get(b["status"], ""),
-                    b["flow_m3h"],
-                    b["head_m"],
-                    None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1),
-                    b["power_kw"],
-                    b["motor_kw"],
-                    b["p_in_bar"],
-                    b["p_out_bar"],
-                    b["dp_bar"],
-                    b["rho_kgm3"],
-                    b["mu_cp"],
-                    b["pump_vap_frac"],
-                    b["pv_bar"],
-                    pump_npsh(b),
-                    b["message"],
-                )
-                for b in pumps
-            ],
-            [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 50],
-        )
-
-    # --- 连接关系 ---
-    ws = wb.create_sheet("连接")
-    fill_sheet(
-        ws,
-        ["设备", "方向", "流股", "分侧", "端口", "进料板", "来源"],
-        [
-            (
-                c["block"],
-                "进" if c["direction"] == "in" else "出",
-                c["stream"],
-                c["side"] or "",
-                c["port"] or "",
-                c["stage"],
-                c["source"] or "",
-            )
-            for c in connections
-        ],
-        [14, 8, 18, 10, 10, 10, 14],
-    )
-
-    # --- 塔剖面 ---
-    ws = wb.create_sheet("塔剖面")
-    stage_rows = []
-    for col in columns:
-        for st in db.read_column_stages(conn, case_id, col["block"]):
-            stage_rows.append(
-                (
-                    col["block"],
-                    st["stage"],
-                    st["temperature_c"],
-                    st["pressure_bar"],
-                    st["liq_flow"],
-                    st["vap_flow"],
-                    st["duty_kw"],
-                )
-            )
-    fill_sheet(
-        ws,
-        ["塔", "级", "温度 ℃", "压力 bar", "液流量 kmol/h", "气流量 kmol/h", "热负荷 kW"],
-        stage_rows,
-        [12, 8, 12, 12, 16, 16, 14],
-    )
-
-    # --- 管道(管路选型:实时算,不写库)---
-    # 标准表没录全时不硬造表,只写一张说明页
-    try:
-        from app.design import pipe as pipe_calc
-
-        pres = pipe_calc.build(
-            [dict(s) for s in streams], [dict(b) for b in blocks], [dict(c) for c in connections]
-        )
-        pchecks = pipe_calc.validate(pres["rows"])
-        hit_by_stream: dict[str, list[str]] = {}
-        for f in pchecks["findings"]:
-            hit_by_stream.setdefault(f["stream"], []).append(f["code"])
-
-        # 管道选型一览表不放进工作簿:那 9 列是版面表(列宽 / 宋体五号 / 跨页表头),
-        # 单独出 Word 才贴得进报告(见 app/export/pipe_schedule.py 与「管道」页的「导出 Word」)。
-        # 工作簿这边只留审计用的「管道计算书」和未选型清单。
-        # 未选型的流股单独一张表:混在选型表里会破坏那 9 列的可粘贴性
-        if pres["missing"]:
-            ws2 = wb.create_sheet("未选型流股")
-            fill_sheet(
-                ws2,
-                ["流股", "原因"],
-                [(m["stream"], m["reason"]) for m in pres["missing"]],
-                [16, 78],
-            )
-
-        ws = wb.create_sheet("管道计算书")
-        fill_sheet(
-            ws,
-            [
-                "流股",
-                "相态",
-                "介质代号",
-                "流速 m/s",
-                "计算内径 mm",
-                "外径 mm",
-                "设计压力 MPa",
-                "表压 MPa",
-                "设计温度 ℃",
-                "许用应力 MPa",
-                "计算壁厚 mm",
-                "腐蚀裕量 mm",
-                "所需壁厚 mm",
-                "最小壁厚 mm",
-                "选定壁厚 mm",
-                "负偏差 mm",
-                "壁厚是否按下限",
-                "等级号",
-                "校验",
-                "备注",
-            ],
-            [
-                (
-                    r["stream"],
-                    r["phase"],
-                    r["medium_code"],
-                    r["velocity_ms"],
-                    r["inner_d_mm"],
-                    r["od_mm"],
-                    r["design_pressure_mpa"],
-                    r["gauge_pressure_mpa"],
-                    r["design_temp_c"],
-                    r["stress_mpa"],
-                    r["t_calc_mm"],
-                    r["c2_mm"],
-                    r["t_required_mm"],
-                    r.get("min_wall_mm"),
-                    r["wall_mm"],
-                    (
-                        pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
-                        if r["wall_mm"]
-                        else None
-                    ),
-                    "是" if r.get("wall_floored") else "",
-                    r["grade_code"],
-                    " ".join(hit_by_stream.get(r["stream"], [])),
-                    "; ".join(r["warnings"]),
-                )
-                for r in pres["rows"]
-            ],
-            [16, 10, 12, 12, 14, 12, 14, 12, 14, 14, 14, 14, 14, 14, 14, 12, 14, 12, 10, 46],
-        )
-    except pipe_calc.TablesNotReady as exc:  # 标准表没录:写明原因与补录办法,不造数
-        ws = wb.create_sheet("管道")
-        ws.append(["管路选型暂时不可用"])
-        ws.append([str(exc)])
-        guide = pipe_calc.pipe_data.setup_guide()
-        ws.append([])
-        ws.append(["为什么不在安装包里:", guide["why"]])
-        ws.append(["放进哪个目录:", guide["dir"]])
-        ws.append([])
-        ws.append(["要准备的文件"])
-        for item in guide["files"]:
-            ws.append([item["name"], item["from"], item["columns"]])
-        ws.append([])
-        ws.append(["步骤"])
-        for i, step in enumerate(guide["steps"], 1):
-            ws.append([i, step])
-        ws.append([])
-        ws.append(["详细页码与分页结构:", guide["doc"]])
-    except Exception as exc:  # 选型出问题不该拖垮整份 Excel
-        ws = wb.create_sheet("管道")
-        ws.append(["管路选型出错"])
-        ws.append([f"{type(exc).__name__}: {exc}"])
-
-    bio = io.BytesIO()
-    wb.save(bio)
-    data = bio.getvalue()
-    return data

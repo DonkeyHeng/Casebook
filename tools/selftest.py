@@ -2398,10 +2398,15 @@ def test_pump_prompt() -> None:
         "fetchPumpPromptText" in js and "/api/pump-prompt" in js,
         "前端不许内置第二份",
     )
-    server_src = _P("app/api/server.py").read_text(encoding="utf-8")
+    from app.api import routes as route_table
+
     check(
         "提示词:接口已注册",
-        bool(_re.search(r'parts == \["api",\s*"pump-prompt"\]', server_src)),
+        any(
+            item.method == "GET" and item.pattern.pattern.endswith("/api/pump-prompt")
+            for item in route_table.ROUTES
+        ),
+        "路由表里没有 GET /api/pump-prompt",
     )
 
 
@@ -2823,7 +2828,7 @@ def test_export_consistency() -> None:
     )
 
     # 对比页字段:接口与前端必须同一组(接口加了而界面不显示 = 白算)
-    src = _Path("app/api/server.py").read_text(encoding="utf-8")
+    src = _Path("app/api/routes/meta.py").read_text(encoding="utf-8")
     hit = re.search(r"block_fields = \[(.*?)\]", src, re.S)
     server_fields = set(re.findall(r'"([a-z_0-9]+)"', hit.group(1))) if hit else set()
     js = _Path("app/web/static/app.js").read_text(encoding="utf-8")
@@ -4163,6 +4168,98 @@ def test_reader_fixture_real() -> None:
     check("真机夹具:白名单覆盖 reader 依赖的字段", not missing, "缺:" + "、".join(missing[:3]))
 
 
+def test_routes() -> None:
+    """路由表:每个处理函数都存在,且每条只读 GET 实跑不 500。
+
+    这两个断言是给"按域拆 Handler"上的保险:表里写错一个方法名,或某个域的
+    方法漏搬、少一个 import,都只会在用户点到那个页面时才炸。这里一次跑全。
+
+    不碰写接口:POST 里有"载入示例库"(会换掉当前库)、DELETE 会删工况,
+    这些只核对处理函数存在,不真发请求。
+    """
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from app.api import routes as route_table
+    from app.api import server as srv
+
+    handlers = set(route_table.ROUTES) | set(route_table.CASE_ROUTES)
+    missing = [item.handler for item in handlers if not hasattr(srv.Handler, item.handler)]
+    check("路由表:处理函数都在 Handler 上", not missing, f"缺 {missing}")
+
+    seen = set()
+    dup = []
+    for item in list(route_table.ROUTES) + list(route_table.CASE_ROUTES):
+        key = (item.method, item.pattern.pattern)
+        if key in seen:
+            dup.append(key)
+        seen.add(key)
+    check("路由表:没有重复登记", not dup, f"重复 {dup}")
+
+    # 只读 GET 全跑一遍:把 {case_id} 换成样本库里的工况,{块名}/{流股} 用真名字
+    root = Path(__file__).resolve().parents[1]
+    sample = root / "samples" / "case-23-error.db"
+    if not sample.is_file():
+        print("  找不到样本库,跳过实跑")
+        return
+    import sqlite3
+
+    conn = sqlite3.connect(sample)
+    try:
+        case_id = conn.execute("SELECT id FROM cases ORDER BY id LIMIT 1").fetchone()[0]
+        stream = conn.execute(
+            "SELECT name FROM streams WHERE case_id = ? LIMIT 1", (case_id,)
+        ).fetchone()
+        block = conn.execute(
+            "SELECT name FROM blocks WHERE case_id = ? LIMIT 1", (case_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    if stream is None or block is None:
+        print("  样本库没有流股/设备,跳过实跑")
+        return
+
+    handler_cls = type("RouteProbeHandler", (srv.Handler,), {"db_path": str(sample)})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    def get(path: str) -> int:
+        req = urllib.request.Request(base + path, headers={"X-Casebook-Client": "1"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp.read()
+                return resp.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        except Exception:
+            return 0
+
+    # 组成接口要连 Aspen,没有 Aspen 的机器上会回 4xx/5xx;它不在"只读不碰 Aspen"之列
+    skip = {"/api/cases/(?P<case_id>\\d+)/streams/(?P<stream>[^/]+)/composition"}
+    bad = []
+    try:
+        for item in route_table.CASE_ROUTES:
+            if item.method != "GET" or item.pattern.pattern in skip:
+                continue
+            path = (
+                item.pattern.pattern.replace("(?P<case_id>\\d+)", str(case_id))
+                .replace("(?P<stream>[^/]+)", stream[0])
+                .replace("(?P<block>[^/]+)", block[0])
+                .replace("\\", "")
+            )
+            status = get(path)
+            if status >= 500 or status == 0:
+                bad.append(f"{path} → {status}")
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+    check("路由表:每条只读 GET 都能跑通(不 500)", not bad, ";".join(bad[:4]))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="判定 / 焓平衡 / 波及范围的回归自测")
     parser.add_argument("--db", default="", help="额外检查这个工况库(如 data/cases.db)")
@@ -4211,6 +4308,7 @@ def main(argv: list[str] | None = None) -> int:
         ("牌号范围与材质类别", test_material_scope),
         ("塔剖面诊断 column_diag", test_column_diag),
         ("HTTP 入口 body / 静态路径", test_http_entry),
+        ("路由表与分发", test_routes),
         ("模型身份与选型台账", test_model_identity_and_selection),
         ("λ 口径持久化与校验", test_lambda_method),
     ):
