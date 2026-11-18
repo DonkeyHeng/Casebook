@@ -1,46 +1,12 @@
 /* Casebook 前端:零构建,原生 JS */
 
-const state = {
-  cases: [],
-  current: null,
-  streams: [],
-  blocks: [],
-  tab: "streams",          // 数据页里的子视图:streams / blocks / compare
-  page: "home",            // 当前页面:home / streams / blocks / compare
-  emptyText: "",           // 空态文案(读不到工况列表等错误也走这里)
-  emptyIsError: false,     // 空态是「出错」还是「本来就还没有工况」
-  flow: {                  // 流程页:数据 + 布局 + 视图 + 聚焦
-    caseId: null, data: null, layout: null, view: null, focus: null,
-    center: null,          // 被点中的设备(和 2 层邻居分开配色)
-    showLabels: false,
-  },
-  filter: "",
-  family: null,            // 设备页当前家族(column/heat/…),null = 还没挑
-  families: [],            // 家族表(/api/block-families)
-  pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
-  pump: {
-    margin: 1,             // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
-    promptText: null,      // 「复制选泵提示词」的正文缓存(/api/pump-prompt,首次点击才取)
-  },
-  // 设计扬程辅助:按模型+位号存 ΔZ / Σhf / 管长 L / Σζ / 管件数量;
-  // 内径、粘度、粗糙度是现取的自动值(刷新会重取),不持久化
-  pumpDesign: {
-    dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
-    idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
-    // 只记用户手改过的自动取值;没改过的不存,免得模型换了还显示旧值
-    manual: { idMm: null, muCp: null, epsMm: null },
-    // λ 口径:后端三法并存,前端原来写死默认 Colebrook,这里给用户选
-    lambdaMethod: "colebrook", lambdaManual: null,
-  },
-  pumpSelection: null,
-  // 泵参数卡三个折叠区的展开状态(同一会话内切设备回来保持);
-  // 详细参数是主读数,默认展开;两块人填区默认收起
-  pumpFold: { params: true, design: false, selection: false },
-  bannerCollapsed: false,
-  compare: { baseId: null, otherId: null, data: null, scope: "streams" },
-  impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
-  column: null,
-};
+/* 依赖由 import 明说,不再靠 <script> 的先后顺序:
+   - lib/core.js:请求封装与数字格式化(app.js 与 pipe.js 共用)
+   - pipe.js:管道页(它在进页时才拉数据,这里只取渲染入口) */
+import { api, apiDelete, apiPost, esc, fmt, fmtDelta, fmtVisc, writeInit } from "./lib/core.js";
+import { initPipePanel, renderPipes } from "./pipe.js";
+import { state } from "./lib/store.js";
+
 
 const COMPARE_FIELDS = [
   { key: "temperature_c", label: "温度 ℃", digits: 2 },
@@ -136,14 +102,6 @@ const FAMILY_FALLBACK = [
 
 /* ------------------------------------------------------------ 工具 */
 
-async function api(path) {
-  const res = await fetch(path);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `请求失败:${res.status}`);
-  }
-  return res.json();
-}
 
 /* ------------------------------------------------------------ 外观 */
 
@@ -227,63 +185,11 @@ async function withBusy(ids, fn) {
 
 /* 写请求统一带这个头:跨站页面加自定义头会触发预检,而服务端不回应预检 → 浏览器直接不发。
    服务端 do_POST / do_DELETE 会校验 X-Casebook-Client(见 server.py::_guard)。 */
-function writeInit(extra = {}) {
-  return { ...extra, headers: { "X-Casebook-Client": "1", ...(extra.headers || {}) } };
-}
 
-/* DELETE 单独一个:api() 只做 GET,别为了它把方法参数塞进去到处传 */
-async function apiDelete(path) {
-  const res = await fetch(path, writeInit({ method: "DELETE" }));
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `请求失败:${res.status}`);
-  }
-  return res.json();
-}
-
-async function apiPost(path, body) {
-  const res = await fetch(path, writeInit({
-    method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : {},
-    body: body ? JSON.stringify(body) : undefined,
-  }));
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || data.message || `请求失败:${res.status}`);
-  }
-  return res.json();
-}
-
-function esc(value) {
-  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  }[ch]));
-}
-
-function fmt(value, digits = 2) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value !== "number") return esc(value);
-  return value.toLocaleString("zh-CN", {
-    minimumFractionDigits: digits,
-    maximumFractionDigits: digits,
-  });
-}
 
 /* 粘度按量级给位数:稀溶液 0.1156 cP 与 123.4 cP 挤在同一列,
    固定 4 位会写成 123.4350,固定 2 位又会把最有意义的尾部抹掉。 */
-function fmtVisc(value) {
-  if (value === null || value === undefined) return "—";
-  if (typeof value !== "number") return esc(value);
-  return fmt(value, Math.abs(value) >= 10 ? 2 : 4);
-}
 
-function fmtDelta(value, digits = 2) {
-  if (value === null || value === undefined) return "—";
-  if (typeof value !== "number") return esc(value);
-  if (value === 0) return "0";
-  const sign = value > 0 ? "+" : "";
-  return sign + fmt(value, digits);
-}
 
 const SEVERITY = {
   ok: { cls: "ok", text: "收敛" },

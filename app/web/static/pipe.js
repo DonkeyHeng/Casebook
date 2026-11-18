@@ -3,7 +3,8 @@
  * 为什么单独一个文件:
  *   1. app.js 已经 2100 行,管道页自带参数状态机与请求防串号逻辑,混进去更难读;
  *   2. 页面依赖的字段与校验码都在这一个文件里,和 app/design/pipe.py 对照着看即可;
- *   3. 只跟 app.js 借 state / esc / fmt / api,不反向依赖,删掉这个文件整页就退回原状。
+ *   3. 只从 lib/core.js 取 esc / fmt / api、从 lib/store.js 取当前工况;
+ *      对外只导出 renderPipes() 一个入口,app.js 换掉工况时才叫它。
  *
  * 与后端的约定(接口 GET /api/cases/{id}/pipes):
  *   - 200 → {rows, missing, summary, validation:{findings:[{stream,code,level,message,field}],summary},
@@ -11,6 +12,9 @@
  *   - 409 → 标准表没录全,body 里有 error 与 tables(改参数不会让它变好)
  *   - 200 但 tables.ready === false → 只有壁厚序列(T2)缺,表能出、壁厚列是「—」
  */
+
+import { api, esc, fmt } from "./lib/core.js";
+import { state } from "./lib/store.js";
 
 /* ------------------------------------------------------------ 常量 */
 
@@ -198,7 +202,7 @@ function fillPipeSelects(tables) {
   }
 }
 
-function initPipePanel() {
+export function initPipePanel() {
   applyPipeParamsToDom();
   fillPipeSelects(null);
   bindPipeEvents();
@@ -1148,7 +1152,7 @@ async function loadPipeTableStatus() {
 }
 
 /* 页面入口:进页 / 换工况 / 算完都走这里 */
-function renderPipes() {
+export function renderPipes() {
   const empty = document.getElementById("pipeEmpty");
   const c = state.current;
   if (!empty) return;

@@ -6,8 +6,13 @@
    ------------------
    `node --check` 只查语法。原生 JS 前端的模板字符串如果在拼 innerHTML 时
    读到 state 里缺失的字段,异常会让整块区域静默空白 —— 语法完全没问题,
-   页面却是空的。这里把**真实的 app.js** 去掉末尾 init() 后装进 vm,
-   用 DOM 桩跑一遍纯渲染函数与保存逻辑,把这类空白挡在提交前。
+   页面却是空的。这里把**真实的模块源码**去掉 import/export 与末尾 init()
+   后拼成一段,装进 vm 用 DOM 桩跑一遍纯渲染函数与保存逻辑,把这类空白挡在提交前。
+
+   前端现在是 ES Module:`app.js` 从 `lib/core.js`(工具)、`lib/store.js`(共享状态)
+   与 `pipe.js`(管道页)取东西。vm 不支持 import,所以这里按模块顺序拼接并去掉
+   模块语法 —— 跑的还是同一份源码,只是换了装载方式。`pipe.js` 不进这轮覆盖
+   (它要真浏览器,归 tools/ui_sweep.py),两个入口给空实现。
 
    覆盖分组:
      ①~⑤ 原有:renderPumpDesign / savePumpDesign / pumpDesignNum
@@ -26,15 +31,37 @@ import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const SRC = path.join(ROOT, "app", "web", "static", "app.js");
+const STATIC = path.join(ROOT, "app", "web", "static");
 
-const raw = fs.readFileSync(SRC, "utf8");
+/* 按依赖顺序拼:工具 → 共享状态 → 主页面。 */
+const MODULES = [
+  path.join(STATIC, "lib", "core.js"),
+  path.join(STATIC, "lib", "store.js"),
+  path.join(STATIC, "app.js"),
+];
+
+function stripModuleSyntax(src) {
+  return src
+    .replace(/^\s*import\s[\s\S]*?from\s+"[^"]*";\s*$/gm, "")
+    .replace(/^export\s+/gm, "");
+}
+
+const appRaw = fs.readFileSync(MODULES[2], "utf8");
 // 末尾的 init() 会拉接口、绑定整页事件;这里只需要函数声明本身
-const headless = raw.replace(/^init\(\);\s*$/m, "");
-if (headless === raw) {
+const appHeadless = appRaw.replace(/^init\(\);\s*$/m, "");
+if (appHeadless === appRaw) {
   console.error("✗ 没找到文件末尾的 init(); —— app.js 结构变了,请同步更新本脚本");
   process.exit(1);
 }
+
+const headless = [
+  "/* pipe.js 的两个入口:本轮不覆盖管道页,给空实现 */",
+  "function initPipePanel() {}",
+  "function renderPipes() {}",
+  stripModuleSyntax(fs.readFileSync(MODULES[0], "utf8")).trim(),
+  stripModuleSyntax(fs.readFileSync(MODULES[1], "utf8")).trim(),
+  stripModuleSyntax(appHeadless).trim(),
+].join("\n\n");
 
 let passed = 0;
 const failures = [];

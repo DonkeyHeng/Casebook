@@ -1,0 +1,52 @@
+/* 两个页面共用的页面状态:当前工况、流股/设备表、各页子视图。
+
+为什么单独一个模块
+------------------
+`app.js`(主页面)与 `pipe.js`(管道页)都要读"当前选中哪个工况、这次读出来的
+流股表"。以前靠全局作用域共享:普通 <script> 里 `const state` 其实不在 window 上,
+pipe.js 能读到全靠脚本加载顺序与全局词法环境 —— 换个加载方式就断。
+
+这里只放**数据**,不放渲染:两个页面往里写自己那部分字段,读法不变(`state.xxx`)。
+*/
+
+export const state = {
+  cases: [],
+  current: null,
+  streams: [],
+  blocks: [],
+  tab: "streams",          // 数据页里的子视图:streams / blocks / compare
+  page: "home",            // 当前页面:home / streams / blocks / compare
+  emptyText: "",           // 空态文案(读不到工况列表等错误也走这里)
+  emptyIsError: false,     // 空态是「出错」还是「本来就还没有工况」
+  flow: {                  // 流程页:数据 + 布局 + 视图 + 聚焦
+    caseId: null, data: null, layout: null, view: null, focus: null,
+    center: null,          // 被点中的设备(和 2 层邻居分开配色)
+    showLabels: false,
+  },
+  filter: "",
+  family: null,            // 设备页当前家族(column/heat/…),null = 还没挑
+  families: [],            // 家族表(/api/block-families)
+  pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
+  pump: {
+    margin: 1,             // 泵页顶部参数条的余量:默认「原样」,和下拉框的初始值保持一致
+    promptText: null,      // 「复制选泵提示词」的正文缓存(/api/pump-prompt,首次点击才取)
+  },
+  // 设计扬程辅助:按模型+位号存 ΔZ / Σhf / 管长 L / Σζ / 管件数量;
+  // 内径、粘度、粗糙度是现取的自动值(刷新会重取),不持久化
+  pumpDesign: {
+    dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
+    idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
+    // 只记用户手改过的自动取值;没改过的不存,免得模型换了还显示旧值
+    manual: { idMm: null, muCp: null, epsMm: null },
+    // λ 口径:后端三法并存,前端原来写死默认 Colebrook,这里给用户选
+    lambdaMethod: "colebrook", lambdaManual: null,
+  },
+  pumpSelection: null,
+  // 泵参数卡三个折叠区的展开状态(同一会话内切设备回来保持);
+  // 详细参数是主读数,默认展开;两块人填区默认收起
+  pumpFold: { params: true, design: false, selection: false },
+  bannerCollapsed: false,
+  compare: { baseId: null, otherId: null, data: null, scope: "streams" },
+  impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用
+  column: null,
+};
