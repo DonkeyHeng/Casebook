@@ -1,8 +1,9 @@
-# Ruff / Ruff Format 配置
-# 口径与 2026-11-14 的代码审查一致(line-length 100、py313),改格式前先看这里,
-# 免得不同机器用不同配置格式化出互相打架的 diff。
+# ruff / ruff format 配置。
+# 口径与 2026-11-14 的代码审查一致:line-length 100、target py313。
+# 改这里之前先确认全仓格式化结果一致,免得不同机器格式化出互相打架的 diff。
 line-length = 100
 target-version = "py313"
+# data/ 是运行期产物,不参与检查
 extend-exclude = ["data", "reports", ".venv", "dist", "build"]
 
 [lint]
