@@ -26,8 +26,8 @@ EPS_DEFAULT_MM = 0.05
 
 # λ 的可选口径
 METHOD_COLEBROOK = "colebrook"  # 工程通用,隐式,需迭代
-METHOD_GU = "gu"                # 顾毓珍(光滑管湍流):λ = 0.01227 + 0.7543/Re^0.38
-METHOD_MANUAL = "manual"        # 人直接给 λ
+METHOD_GU = "gu"  # 顾毓珍(光滑管湍流):λ = 0.01227 + 0.7543/Re^0.38
+METHOD_MANUAL = "manual"  # 人直接给 λ
 
 LAMINAR_LIMIT = 2300.0
 
@@ -72,7 +72,7 @@ def gu_yuzhen(re):
         return None
     if not 3e3 <= re <= 3e6:
         return None
-    return 0.01227 + 0.7543 / (re ** 0.38)
+    return 0.01227 + 0.7543 / (re**0.38)
 
 
 def friction_factor(re, eps_mm, d_mm, method: str = METHOD_COLEBROOK):
@@ -95,7 +95,7 @@ def head_loss_m(l_m, id_mm, zeta_sum, lam, u_ms):
     if id_mm <= 0 or l_m < 0 or u_ms < 0:
         return None
     zeta = float(zeta_sum or 0.0)
-    return (lam * l_m / (id_mm / 1000.0) + zeta) * u_ms ** 2 / (2.0 * G)
+    return (lam * l_m / (id_mm / 1000.0) + zeta) * u_ms**2 / (2.0 * G)
 
 
 def eps_over_d(eps_mm, id_mm):

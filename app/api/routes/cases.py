@@ -158,8 +158,8 @@ class CaseRoutes:
 
     def _sections(self, conn, case_id: int) -> None:
         """GET /api/cases/{id}/sections —— 工段(界区)边界:草稿 + 已确认 + 合并。"""
-        from app.store import sections_config
         from app.design import sections as section_rules
+        from app.store import sections_config
 
         blocks = [dict(r) for r in db.read_blocks(conn, case_id)]
         connections = [dict(r) for r in db.read_connections(conn, case_id)]
@@ -273,10 +273,7 @@ class CaseRoutes:
     def get_case_column_stages(self, conn, case, m, query):
         """GET /api/cases/{id}/columns/{块名} —— 塔逐板剖面。"""
         self._json(
-            [
-                row_to_dict(r)
-                for r in db.read_column_stages(conn, int(m["case_id"]), m["block"])
-            ]
+            [row_to_dict(r) for r in db.read_column_stages(conn, int(m["case_id"]), m["block"])]
         )
 
     def delete_case(self, m, query):

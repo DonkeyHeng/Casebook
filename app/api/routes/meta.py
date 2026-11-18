@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-import json
-
 from app import paths, version
 from app.api import read_job
 from app.api.serialize import row_to_dict

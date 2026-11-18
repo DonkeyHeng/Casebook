@@ -156,7 +156,7 @@ def save_ico(images: list[Image.Image], dst: str) -> None:
     count = len(blobs)
     offset = 6 + 16 * count
     out = bytearray(struct.pack("<HHH", 0, 1, count))  # reserved / type=1(icon) / 条目数
-    for im, blob in zip(images, blobs):
+    for im, blob in zip(images, blobs, strict=False):
         w, h = im.size
         out += struct.pack(
             "<BBBBHHII",

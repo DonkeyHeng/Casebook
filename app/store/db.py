@@ -16,6 +16,7 @@ import os
 import sqlite3
 import time
 
+
 def _now() -> str:
     """本地时间戳(只用于"什么时候填的"这种展示,不参与任何计算)。"""
     return time.strftime("%Y-%m-%d %H:%M:%S")
@@ -312,9 +313,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
     for name, ddl in _BLOCK_ADDED_COLUMNS:
         if name not in have_block:
             conn.execute(f"ALTER TABLE blocks ADD COLUMN {name} {ddl}")
-    have_pump_design = {
-        row["name"] for row in conn.execute("PRAGMA table_info(pump_design)")
-    }
+    have_pump_design = {row["name"] for row in conn.execute("PRAGMA table_info(pump_design)")}
     for name, ddl in _PUMP_DESIGN_ADDED_COLUMNS:
         if name not in have_pump_design:
             conn.execute(f"ALTER TABLE pump_design ADD COLUMN {name} {ddl}")
@@ -371,9 +370,11 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
 
     conn.executemany(
         """
-        INSERT INTO streams (case_id, name, temperature_c, pressure_bar, mass_flow_kgh,
-                             mole_flow_kmolh, vap_frac, vol_flow_m3h,
-                             enthalpy_kjkg, enthalpy_kjkmol, enthalpy_flow_kw, stream_type, raw_json)
+        INSERT INTO streams (
+            case_id, name, temperature_c, pressure_bar, mass_flow_kgh,
+            mole_flow_kmolh, vap_frac, vol_flow_m3h,
+            enthalpy_kjkg, enthalpy_kjkmol, enthalpy_flow_kw, stream_type, raw_json
+        )
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
@@ -774,9 +775,7 @@ def read_components(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]
     ).fetchall()
 
 
-def save_components(
-    conn: sqlite3.Connection, case_id: int, rows: list[dict]
-) -> int:
+def save_components(conn: sqlite3.Connection, case_id: int, rows: list[dict]) -> int:
     """整份替换组分字典,返回写入条数。
 
     和组成一样整份替换:同一份模型重新读过之后,组分可能变少,
@@ -874,16 +873,13 @@ def previous_case_same_model(conn: sqlite3.Connection, case_id: int) -> int | No
     return int(row["id"]) if row else None
 
 
-def read_pump_design(
-    conn: sqlite3.Connection, model_name: str, block: str
-) -> dict | None:
+def read_pump_design(conn: sqlite3.Connection, model_name: str, block: str) -> dict | None:
     """某台泵手填的设计参数;没填过返回 None。
 
     zeta_json 原样透传(不解析):库里万一存了坏 JSON,也不能让 ΔZ / Σhf 一起读不出来。
     """
     row = conn.execute(
-        "SELECT dz_m, hf_m, l_m, zeta_json FROM pump_design "
-        "WHERE model_name = ? AND block = ?",
+        "SELECT dz_m, hf_m, l_m, zeta_json FROM pump_design WHERE model_name = ? AND block = ?",
         (str(model_name or "").strip(), str(block or "").strip()),
     ).fetchone()
     if row is None:
@@ -939,7 +935,14 @@ def save_pump_design(
 # ---------------------------------------------------------------- 选型台账
 
 SELECTION_FIELDS = (
-    "model_no", "pump_name", "qty", "material", "motor_kw", "npshr_m", "margin_m", "note",
+    "model_no",
+    "pump_name",
+    "qty",
+    "material",
+    "motor_kw",
+    "npshr_m",
+    "margin_m",
+    "note",
 )
 
 
@@ -973,9 +976,7 @@ def read_pump_selection(conn: sqlite3.Connection, key: str, block: str) -> dict 
     return dict(row) if row is not None else None
 
 
-def save_pump_selection(
-    conn: sqlite3.Connection, key: str, block: str, values: dict
-) -> bool:
+def save_pump_selection(conn: sqlite3.Connection, key: str, block: str, values: dict) -> bool:
     """写一台泵的选型结果;所有字段都空表示清除。返回是否写到东西。
 
     values 已由 API 层校验,这里只做持久化:不补默认值、不算任何数值。

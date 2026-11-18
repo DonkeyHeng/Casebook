@@ -93,7 +93,7 @@ def main() -> int:
         dump(session, args.stream, args.leaves)
         return 0
     streams = reader.child_names(session.find(r"\Data\Streams"))
-    for stream in (streams if args.all else streams[:3]):
+    for stream in streams if args.all else streams[:3]:
         dump(session, stream, args.leaves)
     return 0
 

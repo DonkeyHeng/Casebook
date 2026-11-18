@@ -69,6 +69,7 @@ def _run_rc(cmd: list[str]) -> tuple[str, int | None]:
             capture_output=True,
             creationflags=CREATE_NO_WINDOW,
             timeout=10,
+            check=False,
         )
     except Exception as exc:
         _log(f"{cmd[0]} 调用失败: {type(exc).__name__}: {exc}")

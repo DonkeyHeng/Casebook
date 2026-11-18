@@ -12,8 +12,12 @@ from app.design.pipe import data as pipe_data
 
 
 def row_to_dict(row: sqlite3.Row) -> dict:
-    """`sqlite3.Row` → dict(按列名)。"""
-    return {k: row[k] for k in row.keys()}
+    """`sqlite3.Row` → dict(按列名)。
+
+    注意:`sqlite3.Row` 直接迭代得到的是**值**,不是列名,所以这里必须走
+    `row.keys()`(ruff SIM118 会建议写成 `for k in row`,那样就取错东西了)。
+    """
+    return {k: row[k] for k in row.keys()}  # noqa: SIM118
 
 
 def pipe_table_status() -> dict:

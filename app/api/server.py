@@ -40,10 +40,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-from app import paths, version
-from app.design import component_names
-from app.store import db, flowsheet, impact
-from app.api import read_job, update_check
+from app import paths
 from app.api import window as win
 from app.api.errors import BadBody, BadQuery
 from app.api.router import match
@@ -56,7 +53,8 @@ from app.api.routes import (
     PipeRoutes,
     PumpRoutes,
 )
-from app.export.workbook import build_workbook as build_workbook  # 自测从这里取
+from app.export.workbook import build_workbook  # noqa: F401 —— 自测从这里取
+from app.store import db
 
 # 只读资源(网页、图标)与可写数据(data/)分开:打包成 exe 后前者在临时解包目录,
 # 后者必须在 exe 旁边,否则一关程序数据就没了(见 app/paths.py)
@@ -91,10 +89,6 @@ CREATE_NEW_GROUP = 0x00000200
 _SAMPLE_SWAP_LOCK = threading.Lock()
 
 
-
-
-
-
 def open_ui(url: str, prefer_app_window: bool = True, state: dict | None = None) -> str:
     """打开界面。返回实际用的方式(app / tab)。"""
     if prefer_app_window:
@@ -121,7 +115,8 @@ def _ensure_logging(log_path: str) -> None:
         return
     directory = os.path.dirname(os.path.abspath(log_path))
     os.makedirs(directory, exist_ok=True)
-    fh = open(log_path, "a", encoding="utf-8", buffering=1)
+    # 这个句柄要一直开着(接管 stdout/stderr),不能关进 with
+    fh = open(log_path, "a", encoding="utf-8", buffering=1)  # noqa: SIM115
     fh.write(f"\n===== {time.strftime('%Y-%m-%d %H:%M:%S')} 启动 =====\n")
     if sys.stdout is None:
         sys.stdout = fh
@@ -147,10 +142,6 @@ def _alert(msg: str) -> None:
         ctypes.windll.user32.MessageBoxW(0, msg, "Casebook", 0x10)
     except Exception:
         pass
-
-
-
-
 
 
 class Handler(
@@ -245,7 +236,6 @@ class Handler(
         except Exception as exc:  # 兜底,别让服务挂掉
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
-
     def _read_json_body(self, max_bytes: int | None = None) -> dict:
         """读 POST 的 JSON body。
 
@@ -293,17 +283,6 @@ class Handler(
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
-
-
-
-
-
-
-
-
-
-
-
     def do_DELETE(self) -> None:  # noqa: N802
         path = unquote(urlparse(self.path).path)
         try:
@@ -320,9 +299,6 @@ class Handler(
             self._error(str(exc))
         except Exception as exc:
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
-
-
-
 
     def _api(self, path: str, query: dict | None = None) -> None:
         """GET 分发:先查不依赖工况的路由表,再进「按工况」的子路由。"""
@@ -362,27 +338,15 @@ class Handler(
         finally:
             conn.close()
 
-
     # ------------------------------------------------------------ 标准表模板下载
-
 
     # ------------------------------------------------------------ 流股组成按需读
 
-
-
     # ------------------------------------------------------------ AI 分析包导出
-
 
     # ------------------------------------------------------------ Excel 导出
 
-
-
-
     # ------------------------------------------------------------ 衡算报告
-
-
-
-
 
     def _icon(self) -> None:
         """网页 favicon:复用桌面快捷方式那张 .ico(没有就回 204,页面照常能用)。"""

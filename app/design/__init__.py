@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """app/design —— 纯计算层:不碰 Aspen、不读写库。
 
 与 `app/aspen/` 的分工:`app/aspen/` 只负责从 Aspen 读数;本包只接收

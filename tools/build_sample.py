@@ -81,7 +81,7 @@ def build_from_db(src_path: str, src_case: int, out: Path, new_id: int) -> dict:
         if case is None:
             raise SystemExit(f"{src_path} 里没有工况 #{src_case}")
 
-        cols = [c for c in case.keys() if c != "id"]
+        cols = [c for c in case if c != "id"]
         row = dict(case)
         model = os.path.basename(str(row.get("model_path") or "").replace("/", "\\"))
         row["model_path"] = model
@@ -97,7 +97,7 @@ def build_from_db(src_path: str, src_case: int, out: Path, new_id: int) -> dict:
             rows = src.execute(f"SELECT * FROM {table} WHERE case_id=?", (src_case,)).fetchall()
             if not rows:
                 continue
-            fields = [c for c in rows[0].keys() if c != "case_id"]
+            fields = [c for c in rows[0] if c != "case_id"]
             dst.executemany(
                 f"INSERT INTO {table} (case_id, {', '.join(fields)}) "
                 f"VALUES (?, {', '.join('?' * len(fields))})",

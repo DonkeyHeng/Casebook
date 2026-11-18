@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import io
 import math
-import os
 import zipfile
 
 from app.api.errors import BadQuery
@@ -27,7 +26,6 @@ class PipeRoutes:
         文件从 `samples/pipe-standards-template/` 现读(唯一来源),不在代码里内嵌副本:
         模板改列名或加表,下载包自动跟着变。
         """
-        import zipfile
 
         from app.design.pipe import data as pipe_data
 
@@ -52,7 +50,9 @@ class PipeRoutes:
         data = buf.getvalue()
         self.send_response(200)
         self.send_header("Content-Type", "application/zip")
-        self.send_header("Content-Disposition", 'attachment; filename="pipe-standards-template.zip"')
+        self.send_header(
+            "Content-Disposition", 'attachment; filename="pipe-standards-template.zip"'
+        )
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
@@ -65,7 +65,6 @@ class PipeRoutes:
         `floor`(设计压力下限 MPa)、`max_dn`、`material`(默认牌号)。
         标准表没录全时返回 409 并说明缺哪张,而不是吐一张空表。
         """
-        from app.design import pipe as pipe_calc
         from app.design.pipe import data as pipe_data
 
         # query 的值是 list(parse_qs 的行为),取第一个;不取的话 float(list) 会失败,
@@ -209,7 +208,7 @@ class PipeRoutes:
                 # 牌号 → 材质类别代号 + 来源(explicit / prefix / unknown);
                 # prefix 是"按牌号前缀推断",下拉里会标「·推断」提醒核对
                 "material_codes": {
-                    g: dict(zip(("code", "source"), pipe_data.material_code_for(g)))
+                    g: dict(zip(("code", "source"), pipe_data.material_code_for(g), strict=False))
                     for g in grades
                 },
                 "media": list(pipe_data.PIPING_CLASS_MEDIA),

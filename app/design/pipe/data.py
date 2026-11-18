@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """app/design/pipe_data.py —— 管路选型用标准数据表(纯数据 + 纯函数)。
 
 数据来源与核对状态(2026-11-07):
@@ -975,7 +974,7 @@ def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
         return [f"CSV 解析失败:{exc}"], {}
     if not rows:
         return ["只有表头、没有数据行"], {}
-    names = [str(k or "").strip() for k in rows[0].keys()]
+    names = [str(k or "").strip() for k in rows[0]]
     missing = [c for c in spec["columns"] if c not in names]
     if missing:
         return [f"缺列 {', '.join(missing)};现在的表头是:{', '.join(names[:8])}"], {}
@@ -1132,7 +1131,7 @@ def _import_into_dir(
 
 
 #: 本期 DN 上限(超过就标黄提示"超出 DN600,需专项确认")
-MAX_DN = 1000   # 无缝到 DN600,再往上按焊接管(见 DN_TO_OD 末尾四档)
+MAX_DN = 1000  # 无缝到 DN600,再往上按焊接管(见 DN_TO_OD 末尾四档)
 
 
 # --------------------------------------------------------------------------

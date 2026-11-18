@@ -53,7 +53,7 @@ def family_of(btype, name=None) -> str:
     if not btype:
         return "other"
     key = _LOOKUP.get(str(btype).strip().lower(), "other")
-    if key == "pump" and name is not None:
+    if key == "pump" and name is not None:  # noqa: SIM102 —— 两层判断比一行长条件清楚
         if str(name).strip().upper().startswith(_TURBINE_PREFIX):
             return "turbine"
     return key

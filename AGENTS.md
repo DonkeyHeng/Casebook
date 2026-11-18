@@ -7,6 +7,15 @@
 
 - 静态文件(HTML / JS / CSS)改完刷新即生效;**Python 改了必须重启服务**
   (`pythonw -m app.api --port 8000`,或双击 `start.cmd`)。
+- **提交前必须三道闸门全绿**(CI 跑的就是这三道,`.github/workflows/ci.yml`):
+
+  ```bash
+  ruff check . && ruff format --check .      # 静态检查与格式
+  python -m tools.selftest --db samples/case-23-error.db   # 自测(不需要 Aspen)
+  node tools/check_render.mjs                # 前端渲染回归
+  ```
+
+  装了开发依赖的话:`py -m pip install -r requirements-dev.txt`。
 - 动了**判定 / 单位 / 焓平衡**口径,必须先跑回归自测,再回算历史工况:
 
   ```bash
@@ -16,6 +25,9 @@
 
   判定规则写在 `app/aspen/reader.py` 顶部与 `tools/selftest.py` 开头,改之前先读。
   自测网不需要 Aspen,任何人本地都能跑。
+- 加 HTTP 接口:**在 `app/api/routes/__init__.py` 的路由表里加一行 + 对应域加一个
+  方法**,不要在 `do_GET` / `do_POST` 里加分支。`selftest` 的 `test_routes()` 会逐条
+  核对表里的处理函数存在、并把每条只读 GET 实跑一遍。
 - 改了 `reader.py` 里读的**节点路径**(含目录下钻顺序、叶子层数)→ 用
   `python tools/dump_fixture.py --case <名字>` 重采 `tools/fixtures/` 的节点树夹具,
   再跑 `python -m tools.selftest` 必须全绿。夹具能拦住"路径拼错 / 版本少一层"这类

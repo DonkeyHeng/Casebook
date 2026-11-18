@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """tools/make_release.py —— 打两个发布包(都在 `data/preview/dist/` 下)。
 
 1. **源码包** `Casebook-<版本>.zip`
@@ -23,7 +22,6 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
 

@@ -300,13 +300,16 @@ def _zero(block, dh: float, d_in, d_out, h, auto: bool = False) -> dict:
     tol = max(scale * ZERO_TOL_REL, TOL_ABS)
     ok = abs(dh) <= tol
     prefix = "无热负荷字段,按绝热校验" if auto else "绝热设备"
-    note = f"{prefix}:ΔH = {dh:+.3f} kW(容差 {tol:.2f} = 最大焓流 {scale:,.0f} kW 的 {ZERO_TOL_REL:.1%})"
+    note = (
+        f"{prefix}:ΔH = {dh:+.3f} kW"
+        f"(容差 {tol:.2f} = 最大焓流 {scale:,.0f} kW 的 {ZERO_TOL_REL:.1%})"
+    )
     return _result(OK if ok else BAD, dh=round(dh, 3), ref=0.0, ref_kind="zero", note=note)
 
 
 def summarize(results: dict[str, dict]) -> dict:
     """统计各状态台数,给 UI / AI 包做摘要。"""
-    counts = {state: 0 for state in STATE_TEXT}
+    counts = dict.fromkeys(STATE_TEXT, 0)
     for item in results.values():
         counts[item["balance_state"]] = counts.get(item["balance_state"], 0) + 1
     return counts

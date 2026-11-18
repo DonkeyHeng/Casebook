@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import json
-import math
 
 from app.design import hydraulics
 from app.design import pipe as pipe_calc
@@ -94,8 +93,6 @@ class PumpRoutes:
         内径优先取「管道」页同一套选型结果(od − 2×wall);标准表没录全时给空,
         让用户手填 —— 不做假设性默认值。
         """
-        from app.design import hydraulics
-        from app.design import pipe as pipe_calc
 
         try:
             case_id = int(raw_id)
@@ -141,11 +138,7 @@ class PumpRoutes:
                     else:
                         miss = result.get("missing") or []
                         hit = next(
-                            (
-                                m
-                                for m in miss
-                                if isinstance(m, dict) and m.get("stream") == inlet
-                            ),
+                            (m for m in miss if isinstance(m, dict) and m.get("stream") == inlet),
                             None,
                         )
                         if hit:
@@ -177,7 +170,6 @@ class PumpRoutes:
         需要 body 至少给 `l_m` 与 `zeta_sum`;内径/粘度/粗糙度可覆盖。返回 u / Re / λ / Σhf。
         缺什么就在 `missing` 里列出来,不返回半真半假的结果。
         """
-        from app.design import hydraulics
 
         try:
             case_id = int(raw_id)
@@ -251,7 +243,6 @@ class PumpRoutes:
         管长 L 与管件数量只做校验和持久化,不替用户补默认数量;全部为空 = 清除。
         λ 口径只存用户的白名单选择,不替用户挑公式。
         """
-        from app.design import hydraulics   # 与其它接口一致,局部导入
 
         try:
             case_id = int(raw_id)
@@ -385,7 +376,6 @@ class PumpRoutes:
         数值一律按当前工况实时算(不落库、不从外部 Excel 导入);台账只回
         人工决定的字段。三态里的「无法判定」必须写明缺什么。
         """
-        from app.design import pump_selection as selection_rules
 
         try:
             case_id = int(raw_id)

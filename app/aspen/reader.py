@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from ..design import component_names as names
 from . import balance as balance_rules
@@ -1136,7 +1136,7 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
         base = rf"\Data\Blocks\{block['name']}\Output"
         raw = block.setdefault("raw", {})
 
-        def grab(field: str, quantity: str):
+        def grab(field: str, quantity: str, base=base, raw=raw):
             """返回 (换算值, 原始值, 单位);原始值单独留一份进 raw,便于追溯。"""
             value, unit = fetch(session, f"{base}\\{field}")
             if value is None:

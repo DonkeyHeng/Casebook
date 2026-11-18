@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-
 # 一册一主题色:物料册冷蓝、能量册暖砖红。黑白打印时靠封面「册别」与章节标题
 # 的文字区分,颜色只是辅助 —— 评委多半会打印出来看。
 KINDS: dict[str, dict] = {
@@ -389,9 +388,7 @@ def _body_block(table, rows, head_rows, status_col, meta, fill, center_cols=()):
             # 其余数值右对齐 —— 否则"液相"贴着右边,看着像数据错位
             if index == 0:
                 align = WD_ALIGN_PARAGRAPH.LEFT
-            elif index in center_cols:
-                align = WD_ALIGN_PARAGRAPH.CENTER
-            elif text and not any(ch.isdigit() for ch in text):
+            elif index in center_cols or text and not any(ch.isdigit() for ch in text):
                 align = WD_ALIGN_PARAGRAPH.CENTER
             else:
                 align = WD_ALIGN_PARAGRAPH.RIGHT
@@ -428,8 +425,6 @@ def _body_block(table, rows, head_rows, status_col, meta, fill, center_cols=()):
 
 def _span_widths(table, widths, span_rows, head_rows):
     """分组行横向合并 + 逐列宽度(合并行不能按 row.cells 设宽度)。"""
-    from docx.oxml import OxmlElement
-    from docx.oxml.ns import qn
     from docx.shared import Cm
 
     for index in span_rows or ():
@@ -668,14 +663,14 @@ def _band(doc, rows, width_cm: float = 16.0) -> None:
     几行叠在同一张表里,而不是并排几张一行表 —— 相邻的 `w:tbl` 会被 Word
     并成一张,行高按后一张算,双色带就退化成一条实线。
     """
-    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
     from docx.shared import Cm, Pt
 
     table = doc.add_table(rows=len(rows), cols=1)
     table.autofit = False
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     _set_table_width(table, width_cm)
-    for row, (color, height_cm) in zip(table.rows, rows):
+    for row, (color, height_cm) in zip(table.rows, rows, strict=False):
         cell = row.cells[0]
         cell.width = Cm(width_cm)
         _shade(cell, color)
@@ -727,7 +722,7 @@ def _cover_meta(doc, rows, meta) -> None:
     table.columns[0].width = Cm(label_w)
     table.columns[1].width = Cm(value_w)
 
-    for row, (label, value) in zip(table.rows, rows):
+    for row, (label, value) in zip(table.rows, rows, strict=False):
         lab_cell, val_cell = row.cells
         lab_cell.width = Cm(label_w)
         val_cell.width = Cm(value_w)
@@ -756,7 +751,7 @@ def _cover(
     `title` / `book` / `extra_rows` 让别的导出(如管道表)复用同一张封面 ——
     版式只有一处可改,不会两册长得不一样。
     """
-    from docx.enum.table import WD_TABLE_ALIGNMENT, WD_ROW_HEIGHT_RULE
+    from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_TABLE_ALIGNMENT
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.shared import Cm, Pt
 
@@ -775,9 +770,9 @@ def _cover(
     _tracked(head, 30)  # 1.5 pt 疏排:够拉开,又不至于读成"C A S E B O O K"
 
     _gap(doc, 8)
-    _para(
-        doc, title, Pt(27), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=0, name="黑体"
-    ).runs[0].font.color.rgb = _rgb(meta["accent"])
+    _para(doc, title, Pt(27), True, WD_ALIGN_PARAGRAPH.CENTER, space_after=0, name="黑体").runs[
+        0
+    ].font.color.rgb = _rgb(meta["accent"])
 
     # 主标题下的短横线:宽度固定 4.2cm,不随内容伸缩,位置由表格居中决定
     _gap(doc, 30)

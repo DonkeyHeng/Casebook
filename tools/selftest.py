@@ -32,9 +32,9 @@ from pathlib import Path
 from app.aspen import balance as balance_rules
 from app.aspen import reader
 from app.design import energy_report as energy_rules
-from app.design import stream_table as stream_rules
 from app.design import mass_balance as mass_rules
 from app.design import sections as section_rules
+from app.design import stream_table as stream_rules
 from app.store import db
 from app.store import impact as impact_rules
 from tools import fake_session
@@ -149,7 +149,7 @@ def _blocks(*rows) -> list[dict]:
 
 
 def _conns(*rows) -> list[dict]:
-    return [dict(block=b, direction=d, stream=s, side=side) for b, d, s, side in rows]
+    return [{"block": b, "direction": d, "stream": s, "side": side} for b, d, s, side in rows]
 
 
 def test_balance() -> None:
@@ -951,8 +951,9 @@ def test_report_export() -> None:
         if blob is not None:
             check("report: 生成的是 docx(zip 头)", blob[:2] == b"PK")
             check("report: docx 不是空文件", len(blob) > 10_000, f"实际 {len(blob)} 字节")
-            from docx import Document
             import io as _io
+
+            from docx import Document
 
             doc = Document(_io.BytesIO(blob))
             check("report: 表格数量合理", len(doc.tables) >= 4, f"实际 {len(doc.tables)} 张")
@@ -1132,15 +1133,15 @@ def test_report_picked() -> None:
                 for row in table.rows:
                     texts.append(" | ".join(cell.text for cell in row.cells))
             joined = "\n".join(texts)
-            check("report-picked: 有「选中设备的进出口明细」这一节",
-                  "选中设备的进出口明细" in joined)
+            check(
+                "report-picked: 有「选中设备的进出口明细」这一节", "选中设备的进出口明细" in joined
+            )
             check("report-picked: 明细里有进口焓流表", "进口焓流 kW" in joined)
             check("report-picked: 明细里有能量平衡表", "ΣHin kW" in joined)
         finally:
             conn.close()
     finally:
         scratch.unlink(missing_ok=True)
-
 
 
 def test_impact() -> None:
@@ -1348,20 +1349,20 @@ def test_pipe() -> None:
     check("pipe: 绝压 0.05 bar → 真空", pv2["vacuum"] is True)
 
     # ⑤ 设计温度(§17.4):操作 +20 ℃;≥50 ℃ 自动保温;显式关裕量兼容旧调用
-    check_close(
-        "pipe: 60 ℃ → 设计 80 ℃", pipe_calc.design_temperature(60.0)["design_c"], 80.0
-    )
+    check_close("pipe: 60 ℃ → 设计 80 ℃", pipe_calc.design_temperature(60.0)["design_c"], 80.0)
     t70 = pipe_calc.design_temperature(70.0, options={"design_temp_margin": False})
     check_close("pipe: 关裕量 70 ℃ → 70 ℃", t70["design_c"], 70.0)
     check_close(
         "pipe: 操作 48 ℃ → 设计 68 ℃ ≥50 保温",
-        pipe_calc.design_temperature(48.0)["design_c"], 68.0,
+        pipe_calc.design_temperature(48.0)["design_c"],
+        68.0,
     )
     check("pipe: 操作 48 ℃ 设计温度触发保温", pipe_calc.design_temperature(48.0)["insulated"])
-    check("pipe: 操作 40 ℃ 不触发保温(§17.8 阈值 65)",
-          pipe_calc.design_temperature(40.0)["insulated"] is False)
+    check(
+        "pipe: 操作 40 ℃ 不触发保温(§17.8 阈值 65)",
+        pipe_calc.design_temperature(40.0)["insulated"] is False,
+    )
     check_close("pipe: 90 ℃ → 设计 110 ℃", pipe_calc.design_temperature(90.0)["design_c"], 110.0)
-
 
     # ⑥ 许用应力:缺温度内插;T<40 取 40 ℃ 值;超范围返回 None(不猜)
     stress = SYNTH_TABLES["stress"]
@@ -1466,11 +1467,12 @@ def test_pipe() -> None:
     )
     check_eq("pipe: 设计温度 30 ℃ → 不加后缀", pipe_calc.grade_code(1.6, "E", 30.0)["code"], "M1E")
     # §17.8:-H 阈值改按设计温度 65 ℃(操作 ≥ 45 ℃),40 ℃ 常温线不再误判保温
-    check_eq("pipe: 设计温度 60 ℃ → 不加 -H(§17.8)", pipe_calc.grade_code(1.6, "E", 60.0)["code"], "M1E")
+    check_eq(
+        "pipe: 设计温度 60 ℃ → 不加 -H(§17.8)", pipe_calc.grade_code(1.6, "E", 60.0)["code"], "M1E"
+    )
     check_eq(
         "pipe: 设计温度 65 ℃ → 加 -H(边界)", pipe_calc.grade_code(1.6, "E", 65.0)["code"], "M1E-H"
     )
-
 
     # ⑩ 端到端 build():泵入口流速、DN 超限提示、缺流量流股、表未录入的明确报错
     streams = [
@@ -1585,8 +1587,11 @@ def test_pipe_checks() -> None:
     check_eq("checks: 有保温代号就不再报 V9", codes({"design_temp_c": 90.0}), [])
     # §17 新增 V10–V14
     check_eq("checks: 非标编号 → V10", codes({"nonstandard_no": True}), ["V10"])
-    check_eq("checks: 真空 DN200 → V11",
-             codes({"vacuum": True, "dn": 200, "external_wall_mm": 2.0}), ["V6", "V11"])
+    check_eq(
+        "checks: 真空 DN200 → V11",
+        codes({"vacuum": True, "dn": 200, "external_wall_mm": 2.0}),
+        ["V6", "V11"],
+    )
     check_eq("checks: 大口径两相分层流 → V12", codes({"stratified_risk": True}), ["V12"])
     check_eq("checks: 高压升 R1E → V13", codes({"hp_ss_upgraded": True}), ["V13"])
     check_eq("checks: 真空代号 V1E 不误报 V4", codes({"grade_code": "V1E", "vacuum": True}), ["V6"])
@@ -1738,7 +1743,11 @@ def test_std_import() -> None:
     check_eq("std: 表里出现新牌号也能导入", (ok, errs), (True, []))
     check_eq(
         "std: 新牌号进了许用应力表",
-        sorted(pipe_data._stress_from_rows([{"标准": "GB/T 9999", "牌号": "XYZ", "许用应力_20": "100"}])),
+        sorted(
+            pipe_data._stress_from_rows(
+                [{"标准": "GB/T 9999", "牌号": "XYZ", "许用应力_20": "100"}]
+            )
+        ),
         ["XYZ"],
     )
     check_eq(
@@ -1772,7 +1781,11 @@ def test_std_template() -> None:
     from app.design.pipe import prompt as pipe_standards_prompt
 
     preview = pipe_data.template_preview()
-    check_eq("模板: 三份文件齐全", [f["name"] for f in preview["files"]], [s["name"] for s in pipe_data.STD_FILES])
+    check_eq(
+        "模板: 三份文件齐全",
+        [f["name"] for f in preview["files"]],
+        [s["name"] for s in pipe_data.STD_FILES],
+    )
     check("模板: 目录在仓库里", preview.get("exists") is True)
     for item in preview["files"]:
         check_eq(f"模板: {item['name']} 正好 2 行示例", len(item["rows"]), 2)
@@ -1797,7 +1810,9 @@ def test_std_template() -> None:
         "模板: 带 BOM 与 CRLF 也识别",
         pipe_data.is_template_text("\ufeff" + raw.replace("\n", "\r\n")),
     )
-    check("模板: 改过数值就不再算模板", not pipe_data.is_template_text(raw.replace("111.1", "114.3")))
+    check(
+        "模板: 改过数值就不再算模板", not pipe_data.is_template_text(raw.replace("111.1", "114.3"))
+    )
 
     tmp = Path(__file__).resolve().parents[1] / "data" / "preview" / "_selftest-template"
     shutil.rmtree(tmp, ignore_errors=True)
@@ -1827,7 +1842,12 @@ def test_material_scope() -> None:
         {"标准": "GB/T 6479", "牌号": "Q345B", "许用应力_20": "170", "许用应力_100": "160"},
         # Q345B 三个尺寸档:必须取各温度最小值,不能取第一条
         {"标准": "GB/T 6479", "牌号": "Q345B", "许用应力_20": "165", "许用应力_100": "155"},
-        {"标准": "GB/T 14976", "牌号": "06Cr19Ni10(304)", "许用应力_20": "137", "许用应力_100": "130"},
+        {
+            "标准": "GB/T 14976",
+            "牌号": "06Cr19Ni10(304)",
+            "许用应力_20": "137",
+            "许用应力_100": "130",
+        },
         {"标准": "GB/T 14976", "牌号": "S32168", "许用应力_20": "130", "许用应力_100": "120"},
     ]
     out = pipe_data._stress_from_rows(rows)
@@ -1840,7 +1860,9 @@ def test_material_scope() -> None:
     check_eq("材质: 预置牌号走显式映射", pipe_data.material_code_for("S30408"), ("E", "explicit"))
     check_eq("材质: 321 按前缀判为不锈钢", pipe_data.material_code_for("S32168"), ("E", "prefix"))
     check_eq("材质: Q235 按前缀判为碳钢", pipe_data.material_code_for("Q235B"), ("B", "prefix"))
-    check_eq("材质: Q345R 按前缀判为低合金钢", pipe_data.material_code_for("Q345R"), ("C", "prefix"))
+    check_eq(
+        "材质: Q345R 按前缀判为低合金钢", pipe_data.material_code_for("Q345R"), ("C", "prefix")
+    )
     check_eq("材质: TA2 按前缀判为有色金属", pipe_data.material_code_for("TA2"), ("F", "prefix"))
     check_eq("材质: 判不出来的不硬猜", pipe_data.material_code_for("XYZ"), (None, "unknown"))
 
@@ -1860,7 +1882,9 @@ def test_material_scope() -> None:
             sorted(pipe_data.ALLOWABLE_STRESS),
         )
 
-    _, errors = pipe_data.validate_piping_classes({"rules": [{"medium": ["PL"], "grade": "S30408"}]})
+    _, errors = pipe_data.validate_piping_classes(
+        {"rules": [{"medium": ["PL"], "grade": "S30408"}]}
+    )
     check_eq("等级表: 表内已有的牌号通过", errors, [])
     _, errors = pipe_data.validate_piping_classes({"rules": [{"medium": ["PL"], "grade": "XYZ"}]})
     check("等级表: 表里没有的牌号被拒", any("牌号" in e for e in errors), f"{errors}")
@@ -2366,11 +2390,10 @@ def test_pump_prompt() -> None:
     最要紧的是字段覆盖断言 —— 导出加了列而提示词没提,AI 会把那列当没看见,
     而这种漏改在页面上完全看不出来(上一轮加粘度列就差点漏掉提示词)。
     """
-    import re as _re
     from pathlib import Path as _P
 
-    from app.export import family_xlsx as family_export
     from app.design import pump_prompt
+    from app.export import family_xlsx as family_export
 
     text = pump_prompt.PUMP_SELECTION_PROMPT
     check("提示词:正文非空", len(text) > 1500, f"实际 {len(text)} 字符")
@@ -2649,9 +2672,9 @@ def test_fixtures() -> None:
     """
     from pathlib import Path
 
-    from app.export import aipack
     from app.design import block_family as fam
     from app.design import pump as pump_rules
+    from app.export import aipack
     from app.store import db
     from tools import repair_cases as repair
 
@@ -2782,13 +2805,13 @@ def test_export_consistency() -> None:
     wb = load_workbook(io.BytesIO(xlsx), read_only=True)
     rows = list(wb["泵"].iter_rows(values_only=True))
     header = list(rows[0])
-    excel = {r[0]: dict(zip(header, r)) for r in rows[1:]}
+    excel = {r[0]: dict(zip(header, r, strict=False)) for r in rows[1:]}
 
     with zipfile.ZipFile(io.BytesIO(pack)) as zf:
         text = zf.read("pumps.csv").decode("utf-8-sig")
     lines = [ln for ln in text.splitlines() if ln.strip()]
     csv_header = lines[0].split(",")
-    csv = {ln.split(",")[0]: dict(zip(csv_header, ln.split(","))) for ln in lines[1:]}
+    csv = {ln.split(",")[0]: dict(zip(csv_header, ln.split(","), strict=False)) for ln in lines[1:]}
 
     def num(value):
         if value is None or value == "":
@@ -2810,7 +2833,7 @@ def test_export_consistency() -> None:
         ("p_v bar", "p_v bar", "pv_bar"),
     ]
     bad = []
-    for name in blocks:
+    for name, db_row in blocks.items():
         for csv_key, xls_key, db_key in pairs:
             a = num(csv.get(name, {}).get(csv_key))
             b = num(excel.get(name, {}).get(xls_key))
@@ -2820,7 +2843,7 @@ def test_export_consistency() -> None:
                 bad.append(f"{name}.{csv_key}: 包 {a} / Excel {b}")
                 continue
             if db_key:
-                d = num(blocks[name].get(db_key))
+                d = num(db_row.get(db_key))
                 if d is not None and abs(a - d) > 1e-6:
                     bad.append(f"{name}.{db_key}: 包 {a} / 库 {d}")
     check(
@@ -2992,7 +3015,9 @@ def test_hydraulics() -> None:
     check("管路: 顾毓珍超出 Re 范围返回 None", h.gu_yuzhen(1e7) is None)
 
     lam = h.friction_factor(1e5, 0.05, 100, h.METHOD_COLEBROOK)
-    check("管路: Colebrook 在 1e5 给 0.016~0.024", lam is not None and 0.016 < lam < 0.024, str(lam))
+    check(
+        "管路: Colebrook 在 1e5 给 0.016~0.024", lam is not None and 0.016 < lam < 0.024, str(lam)
+    )
     check_eq("管路: 层流一律 64/Re", round(h.friction_factor(1000, 0.05, 100), 6), 0.064)
 
     hf = h.head_loss_m(40, 32, 17.43, lam_gu, 1.49)
@@ -3001,9 +3026,14 @@ def test_hydraulics() -> None:
 
     out = h.solve(4.32, 723.007, 1.23, 32, 40, 17.43, method=h.METHOD_GU)
     check_eq("管路: solve 汇总 Σhf", round(out["hf_m"], 1), 5.9)
-    check_eq("管路: solve 报出缺失项", h.solve(4.32, 723.007, 1.23, 32, None, None)["missing"],
-             ["管长 L", "管件系数 Σζ"])
-    check_eq("管路: 粘度缺失也报出来", "粘度" in h.solve(4.32, 723.007, None, 32, 40, 1)["missing"], True)
+    check_eq(
+        "管路: solve 报出缺失项",
+        h.solve(4.32, 723.007, 1.23, 32, None, None)["missing"],
+        ["管长 L", "管件系数 Σζ"],
+    )
+    check_eq(
+        "管路: 粘度缺失也报出来", "粘度" in h.solve(4.32, 723.007, None, 32, 40, 1)["missing"], True
+    )
 
     # --- 粘度读取:路径顺序与单位换算(2026-11-15 修正:结果在 STRM_UPP 下)
     from app.aspen import reader as reader_mod
@@ -3081,8 +3111,8 @@ def test_component_dict() -> None:
       * Word / Excel 两个出口保持 Aspen 原名,不受这里影响。
     """
     from app.api import composition
-    from app.export import aipack
     from app.design import component_names as names
+    from app.export import aipack
 
     # --- CAS 归一:只认 数字-数字-数字,别的东西一律当"没有"
     check_eq("组分字典: 正常 CAS 原样保留", names.clean_cas("504-63-2"), "504-63-2")
@@ -3198,7 +3228,7 @@ def test_component_dict() -> None:
     check_eq("模型文件: 第 1 个 CAS", parsed[0]["cas"], "7732-18-5")
     check_eq("模型文件: 自定义组分留空", parsed[1]["cas"], None)
     check_eq("模型文件: 数据库名", parsed[2]["dbname"], "1,3-PROPANEDIOL")
-    check_eq("模型文件: 无 CASN 段时不报错", bkp_components.parse_text("COMPONENTS MAIN ?") , [])
+    check_eq("模型文件: 无 CASN 段时不报错", bkp_components.parse_text("COMPONENTS MAIN ?"), [])
     check_eq("模型文件: 空文本返回空", bkp_components.parse_model_file(""), [])
 
     # 段头被换行拆开(实测某个 .bkp 是 "COMPONENTS \r\nMAIN")
@@ -3345,7 +3375,9 @@ def test_component_dict() -> None:
         payload = composition._payload(
             "S1", "case", [{"component": "DIMHPA", "x_liq": 0.1, "y_vap": None}], meta=meta
         )
-        check_eq("手填 CAS: payload 带 cas_source", payload["components"][0]["cas_source"], "manual")
+        check_eq(
+            "手填 CAS: payload 带 cas_source", payload["components"][0]["cas_source"], "manual"
+        )
 
         db.save_component_cas(conn, mname, "DIMHPA", None)
         check_eq("手填 CAS: 清除后不再补", db.read_cas_map(conn, cid, mname).get("DIMHPA"), None)
@@ -3555,16 +3587,22 @@ def test_model_identity_and_selection() -> None:
     check_eq("身份: 无 hash 退回文件名", model_identity.key_of(None, "m.bkp"), "m.bkp")
     check_eq("身份: 有 hash 优先", model_identity.key_of("abc", "m.bkp"), "sha256:abc")
     check("身份: 空路径返回 None", model_identity.hash_file("") is None)
-    check("身份: 不存在的模型返回 None",
-          model_identity.hash_file("__no_such_model__.bkp") is None)
-    check("身份: SQL 键表达式与 Python 口径同形",
-          "sha256:" in model_identity.same_model_key_sql("c")
-          and "model_name" in model_identity.same_model_key_sql("c"))
+    check("身份: 不存在的模型返回 None", model_identity.hash_file("__no_such_model__.bkp") is None)
+    check(
+        "身份: SQL 键表达式与 Python 口径同形",
+        "sha256:" in model_identity.same_model_key_sql("c")
+        and "model_name" in model_identity.same_model_key_sql("c"),
+    )
 
     # ② 台账实时计算:数值全来自工况,三态必须写明缺什么
     block = {
-        "head_m": 10.0, "flow_m3h": 4.32, "p_in_bar": 2.0, "pv_bar": 0.5,
-        "rho_kgm3": 723.007, "motor_kw": 1.5, "pump_eff": 0.7,
+        "head_m": 10.0,
+        "flow_m3h": 4.32,
+        "p_in_bar": 2.0,
+        "pv_bar": 0.5,
+        "rho_kgm3": 723.007,
+        "motor_kw": 1.5,
+        "pump_eff": 0.7,
     }
     design = {"dz_m": 2.0, "hf_m": 1.0}
     view = selection_rules.compute_view(block, design, {"npshr_m": 3.0, "margin_m": 0.5})
@@ -3574,29 +3612,32 @@ def test_model_identity_and_selection() -> None:
     check_eq("台账: 判据阈值 = NPSHᵣ + 余量", view["npsh_threshold_m"], 3.5)
     check("台账: NPSHₐ 由工况算出", view["npsh_a_m"] is not None)
 
-    no_pv = selection_rules.compute_view(
-        {**block, "pv_bar": None}, design, {"npshr_m": 3.0}
-    )
+    no_pv = selection_rules.compute_view({**block, "pv_bar": None}, design, {"npshr_m": 3.0})
     check("台账: 缺 p_v 判无法判定", no_pv["npsh_state"] == "unknown")
     check("台账: 无法判定写明缺 p_v", "p_v" in no_pv["npsh_reason"])
     no_npshr = selection_rules.compute_view(block, design, {})
     check("台账: 缺 NPSHᵣ 判无法判定", no_npshr["npsh_state"] == "unknown")
     check("台账: 无法判定写明缺 NPSHᵣ", "NPSHᵣ" in no_npshr["npsh_reason"])
-    check_eq("台账: 超出 NPSHₐ 判不满足",
-             selection_rules.compute_view(block, design, {"npshr_m": 100.0})["npsh_state"],
-             "bad")
-    check("台账: 缺 ΔZ/Σhf 时不给设计扬程",
-          selection_rules.compute_view(block, {}, {})["design_head_m"] is None)
-    check("台账: 余量缺省用建议值并标记",
-          no_npshr["margin_is_default"] is True and no_npshr["margin_used_m"] == 0.5)
+    check_eq(
+        "台账: 超出 NPSHₐ 判不满足",
+        selection_rules.compute_view(block, design, {"npshr_m": 100.0})["npsh_state"],
+        "bad",
+    )
+    check(
+        "台账: 缺 ΔZ/Σhf 时不给设计扬程",
+        selection_rules.compute_view(block, {}, {})["design_head_m"] is None,
+    )
+    check(
+        "台账: 余量缺省用建议值并标记",
+        no_npshr["margin_is_default"] is True and no_npshr["margin_used_m"] == 0.5,
+    )
     check("台账: 不写「验过」这类断言", "验过" not in view["npsh_reason"])
 
     # ③ 库层:身份键切换、台账读写与全空清除、overrides 原样往返
     conn = db.open_db(":memory:")
     try:
         conn.execute(
-            "INSERT INTO cases (id, model_path, model_name, read_at) "
-            "VALUES (1, 'p', 'm.bkp', 't')"
+            "INSERT INTO cases (id, model_path, model_name, read_at) VALUES (1, 'p', 'm.bkp', 't')"
         )
         check_eq("库: 老工况身份键退回文件名", db.model_key(conn, 1), "m.bkp")
         conn.execute("UPDATE cases SET model_hash = 'abc' WHERE id = 1")
@@ -3607,12 +3648,15 @@ def test_model_identity_and_selection() -> None:
         got = db.read_pump_selection(conn, key, "P1")
         check_eq("库: 台账型号读回", got["model_no"], "IS65-50-160")
         check_eq("库: 台账台数读回", got["qty"], 2)
-        db.save_pump_selection(conn, key, "P1", {f: None for f in db.SELECTION_FIELDS})
+        db.save_pump_selection(conn, key, "P1", dict.fromkeys(db.SELECTION_FIELDS))
         check("库: 台账全空清除", db.read_pump_selection(conn, key, "P1") is None)
         payload = '{"zeta_sum":17.43,"overrides":{"id_mm":52.5}}'
         db.save_pump_design(conn, key, "P1", 2.0, 1.0, 40.0, payload)
-        check_eq("库: overrides 随设计参数原样读回",
-                 db.read_pump_design(conn, key, "P1")["zeta_json"], payload)
+        check_eq(
+            "库: overrides 随设计参数原样读回",
+            db.read_pump_design(conn, key, "P1")["zeta_json"],
+            payload,
+        )
     finally:
         conn.close()
 
@@ -3647,8 +3691,7 @@ def test_lambda_method() -> None:
     try:
         conn = db.open_db(path)
         conn.execute(
-            "INSERT INTO cases (id, model_path, model_name, read_at) "
-            "VALUES (1, 'p', 'm.bkp', 't')"
+            "INSERT INTO cases (id, model_path, model_name, read_at) VALUES (1, 'p', 'm.bkp', 't')"
         )
         conn.commit()
         conn.close()
@@ -3672,24 +3715,45 @@ def test_lambda_method() -> None:
             handler._pump_design("1", "P1")
             return replies[-1]
 
-        err = post({"l_m": 40.0, "zeta_json": {
-            "zeta_sum": 17.43, "fittings": {"el90": 3}, "overrides": {},
-            "lambda": {"method": "gu", "manual": None},
-        }})
+        err = post(
+            {
+                "l_m": 40.0,
+                "zeta_json": {
+                    "zeta_sum": 17.43,
+                    "fittings": {"el90": 3},
+                    "overrides": {},
+                    "lambda": {"method": "gu", "manual": None},
+                },
+            }
+        )
         check_eq("λ: 顾毓珍口径可保存", err, None)
         check_eq("λ: 顾毓珍口径读回", get()["zeta_json"]["lambda"]["method"], "gu")
 
-        err = post({"l_m": 40.0, "zeta_json": {
-            "zeta_sum": None, "fittings": {}, "overrides": {},
-            "lambda": {"method": "manual", "manual": 0.028},
-        }})
+        err = post(
+            {
+                "l_m": 40.0,
+                "zeta_json": {
+                    "zeta_sum": None,
+                    "fittings": {},
+                    "overrides": {},
+                    "lambda": {"method": "manual", "manual": 0.028},
+                },
+            }
+        )
         check_eq("λ: 手填口径可保存", err, None)
         check_eq("λ: 手填 λ 值读回", get()["zeta_json"]["lambda"]["manual"], 0.028)
 
-        err = post({"l_m": 40.0, "zeta_json": {
-            "zeta_sum": None, "fittings": {}, "overrides": {},
-            "lambda": {"method": "colebrook", "manual": None},
-        }})
+        err = post(
+            {
+                "l_m": 40.0,
+                "zeta_json": {
+                    "zeta_sum": None,
+                    "fittings": {},
+                    "overrides": {},
+                    "lambda": {"method": "colebrook", "manual": None},
+                },
+            }
+        )
         check_eq("λ: 改回默认口径可保存", err, None)
         check("λ: 默认口径不落空挂账", "lambda" not in (get()["zeta_json"] or {}))
 
@@ -3716,7 +3780,11 @@ def test_pipe_2026_rules() -> None:
 
     # §17.1 真空代号 + 外压失稳最小壁厚
     check_eq("rules: 真空压力代号 V", pdata.VACUUM_PN_CODE, "V")
-    check_eq("rules: 真空等级号 V1E", pc.grade_code(0.1, "E", 30.0, options={"vacuum": True})["code"], "V1E")
+    check_eq(
+        "rules: 真空等级号 V1E",
+        pc.grade_code(0.1, "E", 30.0, options={"vacuum": True})["code"],
+        "V1E",
+    )
     t_ext = pc.external_pressure_min_wall(219.0)
     check("rules: DN200 真空外压 t_min 在 0–5 mm", t_ext is not None and 0 < t_ext < 5.0)
     check("rules: 外压 t_min 随外径增大", pc.external_pressure_min_wall(630.0) > t_ext)
@@ -3727,8 +3795,7 @@ def test_pipe_2026_rules() -> None:
     check("rules: DN65 已屏蔽", 65 not in series and 80 in series)
     check("rules: DN125 已屏蔽", 125 not in series and 150 in series)
     check_eq("rules: 92 mm 内径仍选 DN100", pc.pick_dn(92.0, series)[0], 100)
-    check_eq("rules: 70 mm 内径原落 DN65,屏蔽后上圆整到 DN80",
-             pc.pick_dn(70.0, series)[0], 80)
+    check_eq("rules: 70 mm 内径原落 DN65,屏蔽后上圆整到 DN80", pc.pick_dn(70.0, series)[0], 80)
     # §17.2 汽蚀:液相 86 ℃ / 101.3 kPa 命中;气相不命中
     check("rules: 近常压沸点液相反汽蚀", pc.near_boiling_liquid("liquid", 101.3, 86.0))
     check("rules: 气相不算汽蚀", not pc.near_boiling_liquid("gas", 101.3, 86.0))
@@ -3737,11 +3804,16 @@ def test_pipe_2026_rules() -> None:
 
     # §17.3/§17.8 高压不锈钢升 R1E(压力带含 4700 kPa,免与 4800 kPa 跳档)
     check_eq("rules: 5.0 MPa S30408 → R", pc.hp_stainless_force_code("S30408", 5000.0), "R")
-    check_eq("rules: 边界 4.7 MPa → R(合并邻近等级)", pc.hp_stainless_force_code("S30408", 4700.0), "R")
+    check_eq(
+        "rules: 边界 4.7 MPa → R(合并邻近等级)", pc.hp_stainless_force_code("S30408", 4700.0), "R"
+    )
     check_eq("rules: 4.6 MPa 不升档", pc.hp_stainless_force_code("S30408", 4600.0), None)
     check_eq("rules: 碳钢不升档", pc.hp_stainless_force_code("20#", 5000.0), None)
-    check_eq("rules: 升档等级号 R1E-H",
-             pc.grade_code(5.0, "E", 200.0, options={"force_pn_code": "R"})["code"], "R1E-H")
+    check_eq(
+        "rules: 升档等级号 R1E-H",
+        pc.grade_code(5.0, "E", 200.0, options={"force_pn_code": "R"})["code"],
+        "R1E-H",
+    )
 
     # §17.8 R1E 公式化壁厚:t = PD/(2[σ]^t·E_j+P) + C 后 ÷0.875
     check_close("rules: [σ] 100 ℃ → 137", pc.hp_ss_allowable_stress(100.0), 137.0)
@@ -3758,35 +3830,80 @@ def test_pipe_2026_rules() -> None:
 
     # §17.8 汽蚀:排除泵排出口/升压管线
     check("rules: 汽蚀 110 kPa 命中", pc.near_boiling_liquid("liquid", 110.0, 86.0))
-    check("rules: 汽蚀 120 kPa 不命中(收紧到 95–115)", not pc.near_boiling_liquid("liquid", 120.0, 86.0))
-    cstream = [{"name": "C1", "vol_flow_m3h": 20.0, "temperature_c": 90.0,
-                "pressure_bar": 1.02, "vap_frac": 0.0}]
+    check(
+        "rules: 汽蚀 120 kPa 不命中(收紧到 95–115)",
+        not pc.near_boiling_liquid("liquid", 120.0, 86.0),
+    )
+    cstream = [
+        {
+            "name": "C1",
+            "vol_flow_m3h": 20.0,
+            "temperature_c": 90.0,
+            "pressure_bar": 1.02,
+            "vap_frac": 0.0,
+        }
+    ]
     cblocks = [{"name": "P1", "type": "Pump"}]
-    cconns = [{"block": "P1", "direction": "in", "stream": "C0"},
-              {"block": "P1", "direction": "out", "stream": "C1"}]
+    cconns = [
+        {"block": "P1", "direction": "in", "stream": "C0"},
+        {"block": "P1", "direction": "out", "stream": "C1"},
+    ]
     cres = pc.build(cstream, cblocks, cconns, tables=SYNTH_TABLES)
-    check("rules: 泵排出口不触发汽蚀限速",
-          cres["rows"][0]["cavitation_limited"] is False and cres["rows"][0]["pump_outlet"])
+    check(
+        "rules: 泵排出口不触发汽蚀限速",
+        cres["rows"][0]["cavitation_limited"] is False and cres["rows"][0]["pump_outlet"],
+    )
 
     # §17.8 未选型流股按相态分类
-    big_gas = [{"name": "G1", "vol_flow_m3h": 900000.0, "temperature_c": 60.0,
-                "pressure_bar": 1.01325, "vap_frac": 1.0}]
+    big_gas = [
+        {
+            "name": "G1",
+            "vol_flow_m3h": 900000.0,
+            "temperature_c": 60.0,
+            "pressure_bar": 1.01325,
+            "vap_frac": 1.0,
+        }
+    ]
     gres = pc.build(big_gas, tables=SYNTH_TABLES)
     check("rules: 气相未选型 → 风管专项设计", "风管" in gres["missing"][0]["reason"])
-    big_two = [{"name": "T1", "vol_flow_m3h": 900000.0, "temperature_c": 60.0,
-                "pressure_bar": 1.01325, "vap_frac": 0.5}]
+    big_two = [
+        {
+            "name": "T1",
+            "vol_flow_m3h": 900000.0,
+            "temperature_c": 60.0,
+            "pressure_bar": 1.01325,
+            "vap_frac": 0.5,
+        }
+    ]
     tres = pc.build(big_two, tables=SYNTH_TABLES)
     check("rules: 两相未选型 → 多管并联", "并联" in tres["missing"][0]["reason"])
 
     # §17.5 零流量 + 非标编号
 
-    tiny = [{"name": "Z1", "vol_flow_m3h": 0.001, "temperature_c": 25.0,
-             "pressure_bar": 1.01325, "vap_frac": 0.0}]
+    tiny = [
+        {
+            "name": "Z1",
+            "vol_flow_m3h": 0.001,
+            "temperature_c": 25.0,
+            "pressure_bar": 1.01325,
+            "vap_frac": 0.0,
+        }
+    ]
     zres = pc.build(tiny, tables=SYNTH_TABLES)
     check_eq("rules: 零流量进 flagged", len(zres["flagged"]), 1)
     check("rules: 零流量标注人工确认", "需人工确认管径" in zres["flagged"][0]["reason"])
-    vres = pc.build([{"name": "AB", "vol_flow_m3h": 10.0, "temperature_c": 60.0,
-                      "pressure_bar": 11.0, "vap_frac": 0.0}], tables=SYNTH_TABLES)
+    vres = pc.build(
+        [
+            {
+                "name": "AB",
+                "vol_flow_m3h": 10.0,
+                "temperature_c": 60.0,
+                "pressure_bar": 11.0,
+                "vap_frac": 0.0,
+            }
+        ],
+        tables=SYNTH_TABLES,
+    )
     check("rules: AB 标非标编号", vres["rows"][0]["nonstandard_no"] is True)
     vfind = pc.validate(vres["rows"])["findings"]
     check("rules: 非标编号触发 V10", any(f["code"] == "V10" for f in vfind))
@@ -3805,10 +3922,14 @@ def test_pipe_third_round() -> None:
     check("rules: WORK 剔除", pc.is_material_stream(work) is False)
     check("rules: MATERIAL 保留", pc.is_material_stream(mat) is True)
     # 老库没有 stream_type:名字像 Q1 但物料结果非空 → 仍当物流保留
-    check("rules: 老库有物料结果不被误删",
-          pc.is_material_stream({"name": "Q1", "temperature_c": 25.0}) is True)
-    check("rules: 老库空结果 Q1 剔除",
-          pc.is_material_stream({"name": "Q1", "temperature_c": None}) is False)
+    check(
+        "rules: 老库有物料结果不被误删",
+        pc.is_material_stream({"name": "Q1", "temperature_c": 25.0}) is True,
+    )
+    check(
+        "rules: 老库空结果 Q1 剔除",
+        pc.is_material_stream({"name": "Q1", "temperature_c": None}) is False,
+    )
     check("rules: 老库无类型普通流股保留", pc.is_material_stream({"name": "0101"}) is True)
 
     # §19.1 真空阈值 95 kPa
@@ -3822,14 +3943,18 @@ def test_pipe_third_round() -> None:
     # DN1000 容差上限常量
     check_close("rules: DN1000 标准内径 996", pdata.DN1000_STD_INNER_MM, 996.0)
     check_close("rules: DN1000 +5% 上限 1045", pdata.DN1000_TOL_MAX_MM, 1045.0)
-    check_close("rules: 1008.4 mm 超径约 1.2%",
-                pc.dn1000_oversize_pct(1008.4), 1.24, tol=0.05)
-    check_close("rules: 1035.3 mm 超径约 3.9%",
-                pc.dn1000_oversize_pct(1035.3), 3.95, tol=0.05)
+    check_close("rules: 1008.4 mm 超径约 1.2%", pc.dn1000_oversize_pct(1008.4), 1.24, tol=0.05)
+    check_close("rules: 1035.3 mm 超径约 3.9%", pc.dn1000_oversize_pct(1035.3), 3.95, tol=0.05)
 
     # §19.2/§19.4 深真空 + 温度备注:用合成表跑完整 build
-    base = {"name": "0330", "stream_type": "MATERIAL", "vol_flow_m3h": 50.0,
-            "pressure_bar": 0.019, "temperature_c": 292.4, "vap_frac": 0.0}
+    base = {
+        "name": "0330",
+        "stream_type": "MATERIAL",
+        "vol_flow_m3h": 50.0,
+        "pressure_bar": 0.019,
+        "temperature_c": 292.4,
+        "vap_frac": 0.0,
+    }
     rows = pc.build([base], tables=SYNTH_TABLES)["rows"]
     r = rows[0]
     check("rules: 深真空标记", r["deep_vacuum"] is True)
@@ -3865,9 +3990,19 @@ def test_pipe_third_round() -> None:
     for nm, d_calc in (("0222", 1008.4), ("0215", 1035.3)):
         # 反算流量:v=15 m/s 的气相,体积流量使计算内径恰为 d_calc
         q = math.pi * (d_calc / 1000.0) ** 2 / 4.0 * 15.0 * 3600.0
-        srow = pc.build([{"name": nm, "stream_type": "MATERIAL", "vol_flow_m3h": q,
-                          "pressure_bar": 1.01325, "temperature_c": 25.0, "vap_frac": 1.0}],
-                        tables=big_tables)["rows"]
+        srow = pc.build(
+            [
+                {
+                    "name": nm,
+                    "stream_type": "MATERIAL",
+                    "vol_flow_m3h": q,
+                    "pressure_bar": 1.01325,
+                    "temperature_c": 25.0,
+                    "vap_frac": 1.0,
+                }
+            ],
+            tables=big_tables,
+        )["rows"]
         check(f"rules: {nm} 容差后选中 DN1000", srow[0]["dn"] == 1000)
         check(f"rules: {nm} 壁厚 10 mm", srow[0]["wall_mm"] == 10.0)
         check(f"rules: {nm} 标记容差", srow[0]["oversize_tolerated"] is True)
@@ -3877,15 +4012,31 @@ def test_pipe_third_round() -> None:
 
     # 容差只作用于 996–1045:1500 mm 仍不选型
     q_huge = math.pi * (1.5) ** 2 / 4.0 * 15.0 * 3600.0
-    huge = pc.build([{"name": "9999", "stream_type": "MATERIAL", "vol_flow_m3h": q_huge,
-                      "pressure_bar": 1.01325, "temperature_c": 25.0, "vap_frac": 1.0}],
-                    tables=big_tables)
+    huge = pc.build(
+        [
+            {
+                "name": "9999",
+                "stream_type": "MATERIAL",
+                "vol_flow_m3h": q_huge,
+                "pressure_bar": 1.01325,
+                "temperature_c": 25.0,
+                "vap_frac": 1.0,
+            }
+        ],
+        tables=big_tables,
+    )
     check("rules: 1500 mm 仍不选型", huge["rows"] == [] and len(huge["missing"]) == 1)
 
     # §19.5 封面统计与主表同源:焊接管 / 保冷管都从同一份 rows 现算
     cover_rows = [
-        {"name": f"S{i}", "stream_type": "MATERIAL", "vol_flow_m3h": 20.0,
-         "pressure_bar": 1.01325, "temperature_c": t, "vap_frac": 0.0}
+        {
+            "name": f"S{i}",
+            "stream_type": "MATERIAL",
+            "vol_flow_m3h": 20.0,
+            "pressure_bar": 1.01325,
+            "temperature_c": t,
+            "vap_frac": 0.0,
+        }
         for i, t in enumerate((25.0, 120.0, -25.0))
     ]
     cover = pc.build(cover_rows, tables=SYNTH_TABLES)
@@ -3897,8 +4048,7 @@ def test_pipe_third_round() -> None:
 
     # 非物流不进未选型清单
     mix = pc.build([heat, work, mat], tables=SYNTH_TABLES)
-    check("rules: 非物流不进主表/未选型",
-          len(mix["rows"]) + len(mix["missing"]) == 1)
+    check("rules: 非物流不进主表/未选型", len(mix["rows"]) + len(mix["missing"]) == 1)
     check("rules: 剔除条数入 summary", mix["summary"]["excluded_nonmaterial"] == 2)
 
 
@@ -4046,9 +4196,7 @@ def test_reader_fixture() -> None:
     # --- 变异:单点故障不能让整份工况崩
     fahrenheit = reader.read_case(
         fake_session.FakeSession(
-            fake_session.patch(
-                tree, r"\Data\Streams\S01\Output\RES_TEMP", value=185.0, unit="F"
-            )
+            fake_session.patch(tree, r"\Data\Streams\S01\Output\RES_TEMP", value=185.0, unit="F")
         )
     )
     check_close(
@@ -4062,7 +4210,9 @@ def test_reader_fixture() -> None:
             fake_session.patch(tree, r"\Data\Streams\S01\Output\RES_PRES", err="COM 忙")
         )
     )
-    check_eq("夹具变异:取值抛异常时该字段留空、不中断读取", broken["streams"][0]["pressure_bar"], None)
+    check_eq(
+        "夹具变异:取值抛异常时该字段留空、不中断读取", broken["streams"][0]["pressure_bar"], None
+    )
     check_eq("夹具变异:其它流股照旧读出", len(broken["streams"]), 6)
 
     no_comp = reader.read_case(
@@ -4135,9 +4285,11 @@ def test_reader_fixture_real() -> None:
     check("真机夹具:泵密度由 m/V 现算", pump["rho_kgm3"] is not None)
 
     col = by_type["RadFrac"]
-    check("真机夹具:塔冷凝器负荷为负、再沸器为正",
-          col["cond_duty_kw"] < 0 < col["reb_duty_kw"],
-          f"cond={col['cond_duty_kw']} reb={col['reb_duty_kw']}")
+    check(
+        "真机夹具:塔冷凝器负荷为负、再沸器为正",
+        col["cond_duty_kw"] < 0 < col["reb_duty_kw"],
+        f"cond={col['cond_duty_kw']} reb={col['reb_duty_kw']}",
+    )
     check_eq("真机夹具:塔剖面按 45 级展开", len(case["columns"][0]["stages"]), 45)
 
     # --- 焓平衡:三台设备都该过(真机数据,不是构造值)
@@ -4145,7 +4297,9 @@ def test_reader_fixture_real() -> None:
     check_eq("真机夹具:三台设备焓平衡全部 ok", states, {"ok"})
 
     # --- 连接关系:既要有内部连接,也要容忍指向夹具外的设备(模型边界)
-    outside = [r for r in case["connections"] if r["block"] not in {b["name"] for b in case["blocks"]}]
+    outside = [
+        r for r in case["connections"] if r["block"] not in {b["name"] for b in case["blocks"]}
+    ]
     check("真机夹具:连接行 ≥ 8 条", len(case["connections"]) >= 8, str(len(case["connections"])))
     check("真机夹具:指向夹具外设备的连接不丢", bool(outside), f"{len(outside)} 条")
 

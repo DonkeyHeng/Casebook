@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """tools/build_exe.py —— 打 Windows 单文件 exe(PyInstaller)。
 
 产物:`data/preview/dist/Casebook.exe`(单文件,双击即用,不需要装 Python)。
@@ -21,7 +20,6 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -48,6 +46,7 @@ def _pyinstaller_ok() -> bool:
             capture_output=True,
             text=True,
             timeout=120,
+            check=False,
         )
     except Exception:
         return False
@@ -104,7 +103,7 @@ def main(argv: list[str] | None = None) -> int:
         str(entry),
     ]
     print("打包中(第一次要 1–3 分钟)…")
-    proc = subprocess.run(args, cwd=str(ROOT))
+    proc = subprocess.run(args, cwd=str(ROOT), check=False)
     if proc.returncode != 0:
         print("打包失败,退出码:", proc.returncode)
         return proc.returncode

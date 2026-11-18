@@ -220,7 +220,7 @@ def _metrics_rows(
             f"{tear.get('variable') or ''} · 容差 {tear.get('tolerance')}",
         )
 
-    gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case.keys() else {}
+    gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case else {}
     add(
         "数据质量",
         "单位不认识而留空的字段数",
@@ -392,11 +392,7 @@ def _pump_blocks(blocks) -> list:
     from app.design import block_family
 
     # 位号 K 开头的透平在 Aspen 里也是 Pump 类型,不能算泵(见 block_family 注释)
-    return [
-        b
-        for b in blocks
-        if block_family.family_of_block(b) == "pump"
-    ]
+    return [b for b in blocks if block_family.family_of_block(b) == "pump"]
 
 
 def has_pumps(blocks) -> bool:
@@ -482,7 +478,9 @@ def _case_json(
         files["column_profiles.csv"] = "塔逐板剖面"
     if has_pumps(blocks):
         files["pumps.csv"] = "泵参数(流量/扬程/效率/电机/p_v/NPSHa;标注哪几个是算的)"
-        files["pump_prompt.md"] = "泵选型的提示词(配合 pumps.csv 一起给 AI;与工具里「复制选泵提示词」同源)"
+        files["pump_prompt.md"] = (
+            "泵选型的提示词(配合 pumps.csv 一起给 AI;与工具里「复制选泵提示词」同源)"
+        )
     if connections:
         files["connections.csv"] = "设备 ↔ 流股连接关系(拓扑)"
     if composition["rows"]:
@@ -644,7 +642,8 @@ def _readme_fields(w, blocks, composition, connections) -> None:
         w("| 建议电机kW | **算的**:轴功率 ÷ 0.95 × 1.10 后向上取标准档位;功率 ≤ 0 时留空 |")
         w("| 进口压力bar / 出口压力bar | 取自泵的**进口 / 出口流股**,不是泵块的 `IN_PRES` |")
         w(
-            "| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |"
+            "| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:"
+            "`压升 ÷ (ρ·g)` 与 `扬程m` 吻合 |"
         )
         w("| 密度kg/m³ | `RHO_LIQ`(摩尔密度)× `MW_LIQ` |")
         w("| 粘度cP | 进口流股 `STRM_UPP\\MUMX`(混合物粘度);模型没挂 MUMX 时留空 |")
@@ -738,7 +737,8 @@ def _readme(
     w(f"| 工况编号 | #{case['id']}(本机工况库) |")
     w(f"| 采集时间 | {_cell(case['read_at'])} |")
     w(
-        f"| 规模 | {case['stream_count']} 条流股 / {case['block_count']} 个设备 / {len(columns)} 座塔 |"
+        f"| 规模 | {case['stream_count']} 条流股 / {case['block_count']} 个设备 "
+        f"/ {len(columns)} 座塔 |"
     )
     w(f"| 收敛判定 | **{severity_text}**(converged = {'true' if converged else 'false'}) |")
     w(f"| 分析包生成 | {generated} |")
@@ -779,7 +779,7 @@ def _readme(
     w("")
     w("| 文件 | 内容 | 规模 |")
     w("| --- | --- | --- |")
-    w(f"| `README.md` | 本文件:说明 + 数据字典 + 运行状态 | — |")
+    w("| `README.md` | 本文件:说明 + 数据字典 + 运行状态 | — |")
     w(f"| `metrics.csv` | 精简指标(概览 / 状态码 / 异常清单) | {metrics_count} 行 |")
     w(f"| `streams.csv` | 流股完整数据 | {case['stream_count']} 行 |")
     w(f"| `blocks.csv` | 设备完整数据 | {case['block_count']} 行 |")
@@ -792,7 +792,7 @@ def _readme(
     if has_pumps(blocks):
         w("| `pumps.csv` | 泵参数(流量/扬程/效率/轴功率/电机/p_v/NPSHₐ) | — |")
         w("| `pump_prompt.md` | 泵选型提示词:与 `pumps.csv` 一起给 AI | — |")
-    w(f"| `case.json` | 机器可读元数据(同样的信息,便于程序解析) | — |")
+    w("| `case.json` | 机器可读元数据(同样的信息,便于程序解析) | — |")
     w("")
     w("CSV 一律 **UTF-8 带 BOM、逗号分隔、首行是列名**。")
     w("")
@@ -857,7 +857,7 @@ def _readme(
     w("")
     w("- **空值 = 读不到**,不是 0。Aspen 树里找不到节点时,程序读出来是空,")
     w("  表示「这个模型没有这个字段」或「该字段不可读」,不要当 0 参与计算。")
-    unit_gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case.keys() else {}
+    unit_gaps = _json(case["unit_gaps_json"], {}) if "unit_gaps_json" in case else {}
     if unit_gaps.get("count"):
         w(
             f"- **本次有 {unit_gaps['count']} 个字段因为单位不认识被留空**"

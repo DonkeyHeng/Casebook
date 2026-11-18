@@ -27,16 +27,13 @@ from __future__ import annotations
 import io
 from datetime import datetime
 
-from app.design import energy_report
-from app.design import mass_balance
+from app.design import energy_report, mass_balance, stream_table
 from app.design import sections as section_rules
-from app.design import stream_table
 from app.export import docx_kit as kit
 from app.export.docx_kit import (
-    KIND_KEYS,
     KINDS,
-    _Captions,
     _body_section,
+    _Captions,
     _cover,
     _font,
     _heading,
@@ -180,9 +177,9 @@ def filename(case_id: int, kind: str = "all") -> str:
 # ---------------------------------------------------------------- 文档骨架
 
 
-    # 分组行横着合并(组分 · 摩尔流量 / 组分 · 质量流量):合并后要把宽度一起
-    # 改成整行宽,否则文字仍在首列那一格里折行。索引是「rows 列表里的下标」,
-    # 表格行号要加上表头行数(head_rows):有分组表头时是 2,没有时是 1。
+# 分组行横着合并(组分 · 摩尔流量 / 组分 · 质量流量):合并后要把宽度一起
+# 改成整行宽,否则文字仍在首列那一格里折行。索引是「rows 列表里的下标」,
+# 表格行号要加上表头行数(head_rows):有分组表头时是 2,没有时是 1。
 
 
 # ---------------------------------------------------------------- 各章内容
@@ -262,7 +259,7 @@ def _toc(doc, kind: str = "all", has_detail: bool = False) -> None:
     doc.add_page_break()
 
 
-def _summary_chapter(doc, data: dict, cap: "_Captions", kind: str = "all") -> None:
+def _summary_chapter(doc, data: dict, cap: _Captions, kind: str = "all") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     zone_sum = data["zone"]["summary"]
@@ -344,7 +341,7 @@ def _widths(ncols: int):
 
 
 def _wide_table(
-    doc, table: dict, cap: "_Captions", chapter: str, max_cols: int = 5, title: str = ""
+    doc, table: dict, cap: _Captions, chapter: str, max_cols: int = 5, title: str = ""
 ) -> None:  # noqa: D401
     """一张物料平衡宽表:流股做列、属性与组分做行。
 
@@ -462,7 +459,7 @@ def _figure_slot(doc, text: str) -> None:
     p_pr.append(borders)
 
 
-def _mass_chapter(doc, data: dict, cap: "_Captions", chapter: str = "1") -> None:
+def _mass_chapter(doc, data: dict, cap: _Captions, chapter: str = "1") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     cap.start(chapter)
@@ -576,7 +573,7 @@ def _balance_row(block, energy_row, devices_row) -> dict:
     return {"w_kw": w, "q_kw": q, "h_in_kw": h_in, "h_out_kw": h_out, "error_kw": error}
 
 
-def _energy_chapter(doc, data: dict, cap: "_Captions", chapter: str = "2") -> None:
+def _energy_chapter(doc, data: dict, cap: _Captions, chapter: str = "2") -> None:
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     cap.start(chapter)
@@ -794,7 +791,8 @@ def _notes_chapter(doc, data: dict) -> None:
     _heading(doc, "附注", 1)
     case_id = data["case"].get("id")
     notes = [
-        f"数据来源：本工具读取工况 #{case_id} 的快照（{data['case'].get('read_at') or '未知时间'}），"
+        f"数据来源：本工具读取工况 #{case_id} 的快照"
+        f"（{data['case'].get('read_at') or '未知时间'}），"
         "全程只读，未调用 Aspen 的 Run / Reinit / Save。",
         "基准与单位：质量流量 kg/h、摩尔流量 kmol/h、温度 ℃、压力 bar、"
         "热负荷与能量流 kW；单位已在读取时归一，本报告不做二次换算。",

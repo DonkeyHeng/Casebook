@@ -5,10 +5,8 @@
 
 from __future__ import annotations
 
-import json
 import time
 
-from app.api.serialize import row_to_dict
 from app.export import aipack, family_xlsx, pipe_schedule, report
 from app.export.workbook import build_workbook
 from app.store import db
@@ -19,7 +17,6 @@ class ExportRoutes:
 
     def _export_ai(self, conn, case_id: int) -> None:
         """把工况导成给 AI 读的一组文件(Markdown + CSV + JSON,打成 zip)。"""
-        from app.export import aipack
 
         try:
             data, fname = aipack.build_zip(conn, case_id)
@@ -65,12 +62,13 @@ class ExportRoutes:
         不并进 Excel 工作簿:那 9 列是版面表(列宽/字体/跨页表头),Word 才装得下;
         工作簿继续管它的流股 / 设备 / 计算书。
         """
-        from app.export import pipe_schedule
 
         try:
             data, fname = pipe_schedule.build_pipe_docx(conn, case_id)
         except ImportError:
-            self._error("服务器没有安装 python-docx,无法导出 Word。请先 pip install python-docx", 500)
+            self._error(
+                "服务器没有安装 python-docx,无法导出 Word。请先 pip install python-docx", 500
+            )
             return
         except LookupError:
             self._error(f"没有 id={case_id} 的工况", 404)
@@ -95,7 +93,6 @@ class ExportRoutes:
 
         设备页右上角「导出 Excel」用它:只导当前分类,泵分类就是选型要抄的那几列。
         """
-        from app.export import family_xlsx
 
         raw = query.get("family")
         if isinstance(raw, (list, tuple)):
@@ -135,7 +132,6 @@ class ExportRoutes:
         """
         from app.design import block_family
         from app.design import sections as section_rules
-        from app.export import report
         from app.store import sections_config
 
         def _q(key: str) -> str:
@@ -151,11 +147,7 @@ class ExportRoutes:
         picked.update(n for n in _q("blocks").replace(" ", "").split(",") if n)
         for key in _q("families").replace(" ", "").split(","):
             if key:
-                picked.update(
-                    b["name"]
-            for b in blocks
-            if block_family.family_of_block(b) == key
-                )
+                picked.update(b["name"] for b in blocks if block_family.family_of_block(b) == key)
         keys = {b["name"] for b in blocks}
         picked_list = sorted(picked & keys) or None
 

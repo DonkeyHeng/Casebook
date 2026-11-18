@@ -120,7 +120,6 @@ def check(profile: dict, setup: dict) -> list[dict]:
     issues: list[dict] = []
     temps = profile["vars"].get("B_TEMP") or []
     liq = profile["vars"].get("LIQ_FLOW") or []
-    vap = profile["vars"].get("VAP_FLOW") or []
 
     temps_ok = [t for t in temps if t is not None]
     liq_ok = [x for x in liq if x is not None]

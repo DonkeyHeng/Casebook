@@ -110,7 +110,7 @@ def cmd_read(args) -> int:
             mark = "❌" if b.get("status") == 1 else "⚠️"
             print(f"    {mark} {b['name']:<10}{(b.get('type') or '-'):<10}{b.get('message') or ''}")
 
-    codes = {k: v for k, v in conv["codes"].items()}
+    codes = dict(conv["codes"])
     print("\n  状态码:", json.dumps(codes, ensure_ascii=False))
 
     if conv["tears"]:

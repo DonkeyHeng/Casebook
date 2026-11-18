@@ -175,7 +175,7 @@ def scan_registry(rep: Report) -> list[tuple[str, str]]:
         with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, rf"CLSID\{clsid}\LocalServer32") as k:
             srv = str(winreg.QueryValueEx(k, "")[0])
         rep.item("COM 服务器", srv)
-        exe = srv.split('"')[1] if srv.startswith('"') else srv.split(" -")[0]
+        exe = srv.split('"')[1] if srv.startswith('"') else srv.split(" -", maxsplit=1)[0]
         rep.item("可执行文件存在", os.path.isfile(exe.strip()))
     except Exception as e:
         rep.item("COM 服务器", f"(读不到: {type(e).__name__})")
@@ -343,10 +343,9 @@ def probe_convergence(tree, rep: Report):
     # 撕裂流
     tear = r"\Data\Results Summary\Conv-Sum\TEAR-SUMMARY\Output"
     ids = child_names(find(tree, tear + r"\STREAMID"))
-    errs = child_names(find(tree, tear + r"\ERR"))
     if ids:
         rows = []
-        for i, sid in enumerate(ids):
+        for sid in ids:
             s, _ = read(tree, rf"{tear}\STREAMID\{sid}")
             e, _ = read(tree, rf"{tear}\ERR\{sid}")
             var, _ = read(tree, rf"{tear}\VARID\{sid}")
@@ -398,7 +397,7 @@ def probe_streams(tree, rep: Report):
         comps.append(child_names(find(tree, rf"\Data\Streams\{sid}\Output\{phase}")))
     if comps[0]:
         rows = []
-        for i, comp in enumerate(comps[0]):
+        for comp in comps[0]:
             x, _ = read(tree, rf"\Data\Streams\{sid}\Output\X\{comp}")
             y, _ = read(tree, rf"\Data\Streams\{sid}\Output\Y\{comp}")
             rows.append([comp, _fmt(x), _fmt(y)])

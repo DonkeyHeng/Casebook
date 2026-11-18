@@ -33,7 +33,7 @@ def main() -> int:
     calls = {"n": 0}
 
     print("1) 附着")
-    session, t_attach = timed("attach()", lambda: connect.attach())
+    session, t_attach = timed("attach()", connect.attach)
     orig_find = session.find
 
     def counting_find(path):
@@ -64,7 +64,6 @@ def main() -> int:
     _, t_comp1 = timed(
         "read_composition(第一条)", lambda: reader.read_composition(session, streams[0]["name"])
     )
-    c_comp1 = calls["n"]
 
     print("\n3) 全量读取(含/不含组成)")
     calls["n"] = 0
@@ -76,7 +75,6 @@ def main() -> int:
         "read_case(composition=True)",
         lambda: reader.read_case(session, include_composition=True),
     )
-    c_case_c = calls["n"]
 
     # 重复读取取算术平均:以前写 (t_case + t) / 2 是递推加权,
     # 越新的样本权重越大,外推会被最后一次的抖动带偏

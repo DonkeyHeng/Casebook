@@ -19,7 +19,7 @@
 | --- | --- | --- |
 | `pass` 通过 | 相对误差 ≤ 0.5% | 同 |
 | `fail` 超差 | > 0.5%,疑似漏流股 | 同 |
-| `no_data` 无法校验 | 没有进界或出界流股 / 流股缺质量流量 / 配置里的流股库里没有 | 缺连接 / 缺流量 |
+| `no_data` 无法校验 | 缺进界/出界流股、流股缺质量流量、配置里的流股库里没有 | 缺连接 / 缺流量 |
 | `too_small` 流量过小 | 进出合计都 < 1 kg/h | 同 |
 
 为什么容差是纯相对 0.5%
@@ -103,7 +103,7 @@ def _missing_streams(rows) -> str:
 
 def _tally(items) -> dict:
     """状态计数 + 最大相对误差。"""
-    counts = {state: 0 for state in STATE_TEXT}
+    counts = dict.fromkeys(STATE_TEXT, 0)
     worst = None
     for item in items:
         counts[item["state"]] = counts.get(item["state"], 0) + 1

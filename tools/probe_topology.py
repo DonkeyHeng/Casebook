@@ -258,7 +258,7 @@ def fmt(value, limit: int = 60) -> str:
         return str(value)
     if isinstance(value, (int, float)):
         if isinstance(value, float):
-            if value != value:  # nan
+            if value != value:  # noqa: PLR0124 —— 这就是 NaN 的写法
                 return "nan"
             mag = abs(value)
             if mag and (mag >= 1e7 or mag < 1e-4):
@@ -1764,15 +1764,15 @@ def main(argv=None) -> int:
             (
                 "streams",
                 "读流股(每条的温度/流量/上下游 + 样流全字段)",
-                lambda: probe_streams(session),
+                lambda s=session: probe_streams(s),
             ),
-            ("locations", "扫 Data 顶层与 Stream-Sum", lambda: probe_locations(session)),
+            ("locations", "扫 Data 顶层与 Stream-Sum", lambda s=session: probe_locations(s)),
             (
                 "blocks",
                 "读设备连接(IN/OUT_STRMID + 端口字段)",
-                lambda: probe_blocks(session, data["streams"]["names"]),
+                lambda s=session, d=data: probe_blocks(s, d["streams"]["names"]),
             ),
-            ("utilities", "读公用工程 Utilities", lambda: probe_utilities(session)),
+            ("utilities", "读公用工程 Utilities", lambda s=session: probe_utilities(s)),
         )
         for key, label, fn in phases:
             result, err = run_phase(label, fn)

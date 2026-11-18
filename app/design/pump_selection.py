@@ -43,9 +43,9 @@ def compute_view(block: dict, design: dict | None, saved: dict | None) -> dict:
     d = design or {}
     s = saved or {}
 
-    head = _num(b.get("head_m"))          # 压升扬程 HEAD_CAL,m
-    dz = _num(d.get("dz_m"))               # 位压头,m
-    hf = _num(d.get("hf_m"))               # 管路阻力,m
+    head = _num(b.get("head_m"))  # 压升扬程 HEAD_CAL,m
+    dz = _num(d.get("dz_m"))  # 位压头,m
+    hf = _num(d.get("hf_m"))  # 管路阻力,m
     total = head + dz + hf if None not in (head, dz, hf) else None
     selection_head = math.ceil(total * DESIGN_MARGIN) if total is not None else None
 
@@ -95,7 +95,7 @@ def compute_view(block: dict, design: dict | None, saved: dict | None) -> dict:
         "npsh_a_m": npsh_a,
         "motor_suggested_kw": motor_suggested,
         # 判据与三态
-        "npsh_state": state,          # ok / bad / unknown
+        "npsh_state": state,  # ok / bad / unknown
         "npsh_reason": reason,
         "npsh_threshold_m": threshold,
         "margin_used_m": margin,

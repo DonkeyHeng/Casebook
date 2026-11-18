@@ -178,18 +178,17 @@ def watch(
                     save_state(state_path, current)
                     saved = current
                     say(f"[窗口] 记录几何 {current}")
-        else:
-            if missing_since is None:
-                missing_since = time.time()
-                say("[窗口] 窗口不见了,等待确认…")
-            elif time.time() - missing_since >= close_grace:
-                say("[窗口] 确认已关闭 → 停止服务")
-                if on_closed:
-                    try:
-                        on_closed()
-                    except Exception:
-                        pass
-                return
+        elif missing_since is None:
+            missing_since = time.time()
+            say("[窗口] 窗口不见了,等待确认…")
+        elif time.time() - missing_since >= close_grace:
+            say("[窗口] 确认已关闭 → 停止服务")
+            if on_closed:
+                try:
+                    on_closed()
+                except Exception:
+                    pass
+            return
         time.sleep(interval)
 
 

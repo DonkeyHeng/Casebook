@@ -386,5 +386,4 @@ def build_workbook(conn, case_id: int) -> bytes:
 
     bio = io.BytesIO()
     wb.save(bio)
-    data = bio.getvalue()
-    return data
+    return bio.getvalue()

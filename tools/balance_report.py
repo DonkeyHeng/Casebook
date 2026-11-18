@@ -28,9 +28,9 @@ import json
 import os
 import sys
 
-from app.export import report
 from app.design import block_family
 from app.design import sections as section_rules
+from app.export import report
 from app.store import db
 
 CONFIG_PATH = os.path.join("data", "config", "sections.json")

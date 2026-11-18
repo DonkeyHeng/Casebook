@@ -176,6 +176,7 @@ def external_refs(nodes: dict, mapping: dict[str, str]) -> dict[str, str]:
             extra[name] = f"R{len(extra) + 1:02d}"
     return extra
 
+
 _STREAM_OUTPUT = re.compile(r"^\\Data\\Streams\\[^\\]+\\Output$")
 _BLOCK_OUTPUT = re.compile(r"^\\Data\\Blocks\\[^\\]+\\Output$")
 _BLOCK_INPUT = re.compile(r"^\\Data\\Blocks\\[^\\]+\\Input$")
@@ -336,9 +337,9 @@ def collect(tree, *, streams: list[str], blocks: list[str], max_depth: int, cap:
 
     # 流股 / 设备节点上的「可读类型」属性(6)必须显式记下来:reader 靠它分族,
     # 而属性不在 Elements 里,光靠子节点名采不到。
-    for name, root in [
-        (n, rf"\Data\Streams\{n}") for n in streams
-    ] + [(n, rf"\Data\Blocks\{n}") for n in blocks]:
+    for _name, root in [(n, rf"\Data\Streams\{n}") for n in streams] + [
+        (n, rf"\Data\Blocks\{n}") for n in blocks
+    ]:
         node = find(tree, root)
         if node is None:
             continue

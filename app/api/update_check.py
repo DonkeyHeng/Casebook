@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """app/api/update_check.py —— 手动「检查更新」的版本比对。
 
 只做一件事:向 GitHub 发一个 HEAD 请求,从 `/releases/latest` 的 302 重定向里
@@ -26,7 +25,7 @@ from __future__ import annotations
 import re
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app import paths, version
 
@@ -98,7 +97,7 @@ def check() -> dict:
         "release_url": None,
         "releases_url": version.RELEASES_URL,
         "frozen": paths.is_frozen(),
-        "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     try:
         tag, url = latest_tag()

@@ -185,8 +185,7 @@ def normalize_unit(unit: str) -> str:
     if unit is None:
         return ""
     u = str(unit).strip().lower().replace("³", "3").replace("²", "2")
-    u = u.replace("·", "").replace(" ", "")
-    return u
+    return u.replace("·", "").replace(" ", "")
 
 
 def convert(quantity: str, value, unit: str):

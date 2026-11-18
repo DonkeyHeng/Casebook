@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """tools/check_public_safe.py —— 开源前 / 提交前的敏感信息自检。
 
 用法(都在项目根目录跑):
@@ -114,7 +113,13 @@ def sh(*args, **kw):
     扫描结果会变成"未发现敏感内容" —— 公开前的门禁等于失效。
     """
     proc = subprocess.run(
-        ["git", *args], capture_output=True, text=True, encoding="utf-8", errors="replace", **kw
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+        **kw,
     )
     if proc.returncode != 0:
         detail = (proc.stderr or "").strip().replace("\n", " ")[:200]
@@ -135,8 +140,8 @@ def load_local_rules():
     p = Path(".public-safe.local")
     if not p.exists():
         return bans, allows
-    for line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
-        line = line.strip()
+    for raw_line in p.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
         if line.startswith("ban:"):

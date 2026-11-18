@@ -106,7 +106,7 @@ def repair_case(conn, case, apply: bool) -> dict:
             continue
         raw = b["raw"]
 
-        def conv(field: str, quantity: str):
+        def conv(field: str, quantity: str, raw=raw):
             item = raw.get(field)
             if not item or item.get("value") is None:
                 return None

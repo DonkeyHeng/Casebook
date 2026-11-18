@@ -8,9 +8,40 @@ extend-exclude = ["data", "reports", ".venv", "dist", "build"]
 
 [lint]
 select = ["E", "W", "F", "I", "UP", "B", "SIM", "C4", "RET", "PL"]
+# 下面这些是**与本项目既定写法冲突的风格规则**,不是漏改。逐条写明原因,
+# 免得以后有人以为是"忘了修"又给加回来。
+#
+# PLC0415 —— 函数内 import 是刻意的:python-docx / openpyxl / pywin32 都是
+#   可选依赖,懒导入才能在没装的机器上照样起服务;另有几处是为避开循环依赖。
+# PLR2004 —— 魔法值比较。判定阈值(0.001、0.005、1.15)写在使用处并带注释
+#   比抽成常量更好读,尤其这些数字有明确的工程含义。
+# PLR0911 / PLR0912 / PLR0913 / PLR0915 / PLR0917 —— 函数长度、圈复杂度与
+#   参数个数上限。选型、衡算、导出这类流程本身就是"一串顺序判断",硬拆成
+#   十几个小函数反而看不出全貌;参数多的是命令行工具与导出层,拆开收益不大。
+# PLW0603 —— 全局变量。册别主题(activate)这类"进程内唯一当前值"用全局最直白。
+# SIM105 —— try/except/pass 改成 contextlib.suppress。本项目的用法几乎都
+#   带着注释说明"这里忽略什么",写成 suppress 会把注释挪走。
+ignore = [
+    "PLC0415",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR0917",
+    "PLR2004",
+    "PLW0603",
+    "SIM105",
+]
 
 [lint.per-file-ignores]
 "__init__.py" = ["F401"]
+# 下面这些文件里的长行是**内容**,不是代码:提示词正文、markdown 表格、诊断脚本的
+# 输出文本。拆行会改变复制到剪贴板的提示词、或把表格排版弄乱,所以按内容排版。
+"app/design/pump_prompt.py" = ["E501"]
+"app/design/pipe/prompt.py" = ["E501"]
+"app/design/pipe/data.py" = ["E501"]
+"tools/probe_*.py" = ["E501"]
+"tools/column_diag.py" = ["E501"]
 
 [format]
 quote-style = "double"

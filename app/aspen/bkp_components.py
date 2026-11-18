@@ -7,7 +7,7 @@
 
 ```
 COMPONENTS MAIN ? \\
-  CID = H2O ANAME = H2O OUTNAME = H2O DBNAME1 = "WATER" ANAME1 = "H2O" /  
+  CID = H2O ANAME = H2O OUTNAME = H2O DBNAME1 = "WATER" ANAME1 = "H2O" /
   CID = PDO ANAME = C3H8O2-3 OUTNAME = PDO DBNAME1 = "1,3-PROPANEDIOL" ...
 DSET CASN CASN @CASN ( "7732-18-5" "504-63-2" "" ... )
 ```
@@ -35,9 +35,9 @@ from ..design import component_names as names
 # 注意字段之间可能有换行,所以统一把 \r\n 折成空格再匹配。
 _RECORD = re.compile(
     r'CID\s*=\s*("?[^"\s/]+"?)\s+'
-    r'(?:ANAME\s*=\s*([^\s/]+)\s+)?'
+    r"(?:ANAME\s*=\s*([^\s/]+)\s+)?"
     r'OUTNAME\s*=\s*("?[^"\s/]+"?)'
-    r'(?:\s+TYPE\s*=\s*\S+)?'
+    r"(?:\s+TYPE\s*=\s*\S+)?"
     r'(?:\s+DBNAME1\s*=\s*"([^"]*)")?'
     r'(?:\s+ANAME1\s*=\s*"([^"]*)")?'
 )

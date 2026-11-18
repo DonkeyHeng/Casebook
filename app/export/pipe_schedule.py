@@ -22,8 +22,8 @@ from __future__ import annotations
 import io
 import time
 
-from app.export import docx_kit as kit
 from app.design import pipe as pipe_calc
+from app.export import docx_kit as kit
 from app.store import db
 
 TITLE = "管道选型一览表"
@@ -81,7 +81,7 @@ def _pipe_tag(row: dict) -> str:
     2026-11-18 第二轮:保持**纯净**,不拼任何校核标记 —— 这列是 BOM 材料统计与
     PID 匹配的唯一主键;状态提示全部移到「校核备注」列(`_check_remark`)。
     """
-    return f'{row["medium_code"]}-{row["stream"]}-{_num(row["dn"], 0)}-{row["grade_code"]}'
+    return f"{row['medium_code']}-{row['stream']}-{_num(row['dn'], 0)}-{row['grade_code']}"
 
 
 def _check_remark(row: dict) -> str:
@@ -123,7 +123,6 @@ def _check_remark(row: dict) -> str:
     return ";".join(marks)
 
 
-
 def _notes(res: dict) -> list[str]:
     """表下的口径注。数字与 `app/design/pipe/calc.py` / `pipe_data.py` 默认口径一一对应。
 
@@ -163,7 +162,6 @@ def _notes(res: dict) -> list[str]:
     if res["missing"] and not res["flagged"]:
         note.append(f"注 5:另有 {len(res['missing'])} 条流股未选型,见表后清单。")
     return note
-
 
 
 def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
@@ -229,11 +227,9 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
     severity = str(case.get("severity") or "").strip().lower()
     if severity in ("warning", "error"):
         warn_text = (
-            "警告：当前模拟快照存在收敛告警，物性数据仅供参考，"
-            "正式选型前需消除收敛告警"
+            "警告：当前模拟快照存在收敛告警，物性数据仅供参考，正式选型前需消除收敛告警"
             if severity == "warning"
-            else "警告：当前模拟快照收敛失败，物性数据不可信，"
-            "严禁据此开展正式选型"
+            else "警告：当前模拟快照收敛失败，物性数据不可信，严禁据此开展正式选型"
         )
         warn_para = kit._para(doc, warn_text, None, True, WD_ALIGN_PARAGRAPH.LEFT, space_after=6)
         for run in warn_para.runs:
@@ -256,7 +252,6 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
                 _check_remark(r),
             ]
         )
-
 
     table = kit._three_line(
         doc,
@@ -306,7 +301,6 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
             (3.2, 12.8),
             font_pt=9.0,
         )
-
 
     buffer = io.BytesIO()
     doc.save(buffer)
