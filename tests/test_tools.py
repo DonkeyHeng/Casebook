@@ -15,6 +15,52 @@ from tests._harness import (
 )
 
 
+def test_probe_smoke() -> None:
+    """探针脚本:离线也能导入与看帮助(不连 Aspen、不需要 pywin32)。
+
+    探针是双击 .bat / ``python -m`` 跑的一次性诊断工具。pywin32 缺失只该在
+    **真探测**时才报错,而不是导入期炸掉 —— CI 与纯计算环境没有 pythoncom,
+    导入期炸会让"改了探针要冒烟验证"变成一句空话。pywin32 在时 probe_common
+    也不连 Aspen(attach 只在 main 里调),所以这里全程离线。
+    """
+    import importlib
+    import subprocess
+    import sys
+
+    modules = [
+        "probe_aspen",
+        "probe_common",
+        "probe_blocks",
+        "probe_components",
+        "probe_pump",
+        "probe_pv",
+        "probe_topology",
+        "probe_viscosity",
+    ]
+    for name in modules:
+        check(f"探针 {name} 可导入(离线)", importlib.import_module(f"tools.{name}") is not None)
+
+    scripts = [
+        "probe_blocks",
+        "probe_components",
+        "probe_pump",
+        "probe_pv",
+        "probe_topology",
+        "probe_viscosity",
+    ]
+    for name in scripts:
+        run = subprocess.run(
+            [sys.executable, "-m", f"tools.{name}", "--help"],
+            check=False,  # --help 的退出码本身就是要检查的断言,不能让 run 先抛
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=REPO_ROOT,
+        )
+        check_eq(f"探针 {name} --help 退出码", run.returncode, 0)
+        check(f"探针 {name} --help 有 usage", "usage" in run.stdout, run.stdout[:120])
+
+
 def test_column_diag() -> None:
     """塔剖面诊断:低温越界时,标题里的级号与温度都要指向低温那一侧。"""
     from tools import column_diag

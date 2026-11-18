@@ -1706,6 +1706,10 @@ def attach_with_retry(model_path: str):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
+    if _IMPORT_ERROR is not None:
+        print("导入失败,无法探测:", _IMPORT_ERROR)
+        print("请确认:1) 在项目根目录运行;2) 已装 pywin32(requirements.txt)。")
+        return 3
     out_path = args.out or os.path.join(_ROOT, "data", "probe_topology.txt")
     rep = Report()
     rep.say("Casebook 拓扑 / 焓字段探测报告")
@@ -1806,8 +1810,5 @@ def main(argv=None) -> int:
 
 
 if __name__ == "__main__":
-    if _IMPORT_ERROR is not None:
-        print("导入失败,无法探测:", _IMPORT_ERROR)
-        print("请确认:1) 在项目根目录运行;2) 已装 pywin32(requirements.txt)。")
-        sys.exit(3)
+    # 导入错误在 main 里 parse_args 之后才拦:--help 在没有 pywin32 的机器上也能用
     sys.exit(main())

@@ -25,7 +25,13 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from app.aspen import connect, reader  # noqa: E402
+try:  # pywin32 缺失时不在导入期炸掉,留给 main 报错(--help 与离线检查仍可用)
+    from app.aspen import connect, reader  # noqa: E402
+except Exception as _exc:  # noqa: BLE001
+    connect = reader = None
+    _IMPORT_ERROR = _exc
+else:
+    _IMPORT_ERROR = None
 
 
 def _leaves(session, base: str, depth: int = 5, prefix: str = "") -> list[tuple[str, object, str]]:
@@ -83,6 +89,11 @@ def main() -> int:
     ap.add_argument("--all", action="store_true", help="查全部流股")
     ap.add_argument("--leaves", action="store_true", help="额外列出所有有值叶子")
     args = ap.parse_args()
+
+    if _IMPORT_ERROR is not None:
+        print("导入失败,无法探测:", _IMPORT_ERROR)
+        print("请确认:1) 在项目根目录运行;2) 已装 pywin32(requirements.txt)。")
+        return 3
 
     models = connect.list_open_models()
     if not models:

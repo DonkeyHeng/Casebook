@@ -25,7 +25,13 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from app.aspen import connect, reader  # noqa: E402
+try:  # pywin32 缺失时不在导入期炸掉,留给 main 报错(--help 与离线检查仍可用)
+    from app.aspen import connect, reader  # noqa: E402
+except Exception as _exc:  # noqa: BLE001
+    connect = reader = None
+    _IMPORT_ERROR = _exc
+else:
+    _IMPORT_ERROR = None
 
 
 def _dump(session, path: str, depth: int = 2, indent: int = 0) -> None:
@@ -45,6 +51,11 @@ def main() -> int:
     ap.add_argument("--comp", default="", help="只看这个组分(默认取首条流股的第一个组分)")
     ap.add_argument("--depth", type=int, default=2, help="往下打几层(默认 2)")
     args = ap.parse_args()
+
+    if _IMPORT_ERROR is not None:
+        print("导入失败,无法探测:", _IMPORT_ERROR)
+        print("请确认:1) 在项目根目录运行;2) 已装 pywin32(requirements.txt)。")
+        return 3
 
     models = connect.list_open_models()
     print("打开着的模型:", *models, sep="\n  ")

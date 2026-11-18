@@ -52,6 +52,9 @@
 ## 注意
 
 - `probe_*.py` 都要求**在真实桌面会话**里跑,且与 Aspen 同权限级别。
+- 探针的**导入与 `--help` 不需要 Aspen 也不需要 pywin32**:`tests/test_probe_smoke`
+  会离线逐个验证;pywin32 缺失只在真探测时报错(退出码 3)。改探针后不用连 Aspen
+  也能先过这道冒烟。
 - 共用的读取件在 `tools/probe_common.py`;`probe_pump.py` 里的 children / name_of / value_of /
   unit_of 是它的别名,不是另一份实现。
 - `repair_cases.py --apply` 会改 `data/cases.db`,跑之前先复制一份库。

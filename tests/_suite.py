@@ -44,6 +44,7 @@ CASES: list[tuple[str, object]] = [
     ("内置示例库 install_sample()", test_tools.test_install_sample),
     ("设备家族 block_family", test_tools.test_block_family),
     ("塔剖面诊断 column_diag", test_tools.test_column_diag),
+    ("探针离线冒烟 probe_*", test_tools.test_probe_smoke),
     ("泵口径 design.pump", test_pump.test_pump),
     ("泵 p_v 读取", test_pump.test_pump_pv_read),
     ("设备表泵列 blocks", test_pump.test_block_columns),
