@@ -33,6 +33,11 @@ __pycache__/
 .venv/
 venv/
 
+# 工具缓存(各自目录里也有一份自保的 .gitignore,这里兜住换机器的情况)
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
 # 本地工况库与运行日志
 *.db
 *.sqlite3

@@ -1,7 +1,7 @@
 """管道选型一览表 .docx —— 「管道」页的 Word 导出。
 
 版式与衡算报告**共用一套骨架**:封面、页眉页脚、章节标题、三线表全部来自
-`report`,这里只负责"这张表有几列、每列多宽、装什么数"。
+`docx_kit`,这里只负责"这张表有几列、每列多宽、装什么数"。
 
 为什么要复用而不是各写一份
 --------------------------
@@ -22,7 +22,7 @@ from __future__ import annotations
 import io
 import time
 
-from app.export import report as rx
+from app.export import docx_kit as kit
 from app.design import pipe as pipe_calc
 from app.store import db
 
@@ -199,9 +199,9 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
     except ImportError as exc:  # pragma: no cover - 取决于运行环境
         raise ImportError("没有安装 python-docx,无法导出管道 Word") from exc
 
-    rx.activate("pipe")
+    kit.activate("pipe")
     doc = Document()
-    rx._setup(doc, case, "pipe")
+    kit._setup(doc, case, "pipe")
 
     rows = len(pres["rows"])
     welded = sum(1 for r in pres["rows"] if (r.get("pipe_type") or "无缝") == "焊接")
@@ -211,11 +211,11 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
         extra.append(("其中焊接管", f"{welded} 条(DN > 600)"))
     if cold:
         extra.append(("其中保冷管", f"{cold} 条(-C)"))
-    rx._cover(doc, case, "pipe", extra_rows=extra)
-    rx._body_section(doc, case, "pipe")
+    kit._cover(doc, case, "pipe", extra_rows=extra)
+    kit._body_section(doc, case, "pipe")
 
-    rx._heading(doc, TITLE, 1)
-    rx._para(
+    kit._heading(doc, TITLE, 1)
+    kit._para(
         doc,
         f"本表按流股逐条给出公称直径、壁厚与管路等级号,共 {rows} 条。"
         "口径以现行 GB/T 20801 与项目管道等级规定为准;表中数值由工况快照现算,"
@@ -235,9 +235,9 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
             else "警告：当前模拟快照收敛失败，物性数据不可信，"
             "严禁据此开展正式选型"
         )
-        warn_para = rx._para(doc, warn_text, None, True, WD_ALIGN_PARAGRAPH.LEFT, space_after=6)
+        warn_para = kit._para(doc, warn_text, None, True, WD_ALIGN_PARAGRAPH.LEFT, space_after=6)
         for run in warn_para.runs:
-            run.font.color.rgb = rx._rgb("C00000")
+            run.font.color.rgb = kit._rgb("C00000")
 
     table_rows = []
     for r in pres["rows"]:
@@ -258,7 +258,7 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
         )
 
 
-    table = rx._three_line(
+    table = kit._three_line(
         doc,
         HEADERS,
         table_rows,
@@ -273,24 +273,24 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
         text = row.cells[3].text.strip()
         tone = PHASE_TONE.get(text)
         if tone:
-            rx._tint(row.cells[3], color=tone, bold=True)
+            kit._tint(row.cells[3], color=tone, bold=True)
         if row.cells[8].text.strip() == "焊接":
-            rx._tint(row.cells[8], color=rx.KINDS["pipe"]["accent"], bold=True)
+            kit._tint(row.cells[8], color=kit.KINDS["pipe"]["accent"], bold=True)
 
-    rx._gap(doc, 10)
+    kit._gap(doc, 10)
     for line in _notes(pres):
-        para = rx._para(doc, line, Pt(7.5), False, WD_ALIGN_PARAGRAPH.LEFT, space_after=2)
+        para = kit._para(doc, line, Pt(7.5), False, WD_ALIGN_PARAGRAPH.LEFT, space_after=2)
         para.paragraph_format.line_spacing = 1.35
         # 悬挂缩进:换行后对齐到「注 N:」之后,而不是弹回左边界 ——
         # 否则一条注折成两行时,第二行看起来像另一条注
         para.paragraph_format.left_indent = Pt(24)
         para.paragraph_format.first_line_indent = Pt(-24)
         for run in para.runs:
-            run.font.color.rgb = rx._rgb("595959")
+            run.font.color.rgb = kit._rgb("595959")
 
     if pres["missing"]:
-        rx._heading(doc, "未选型流股", 2)
-        rx._para(
+        kit._heading(doc, "未选型流股", 2)
+        kit._para(
             doc,
             "以下流股不进上表 —— 表里每一行都必须是确定的选型结果:零流量 / 备用或"
             "放空管线需人工确认管径;计算内径超出标准管档位的,按相态分类给出出路 ——"
@@ -299,7 +299,7 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
             False,
             WD_ALIGN_PARAGRAPH.LEFT,
         )
-        rx._three_line(
+        kit._three_line(
             doc,
             ["流股", "未选型原因"],
             [[m["stream"], m["reason"]] for m in pres["missing"]],

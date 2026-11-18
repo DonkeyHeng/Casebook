@@ -167,9 +167,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
         from app.export.pipe_schedule import build_pipe_docx
-        from app.export import report as rx
+        from app.export import docx_kit as kit
 
-        rx.activate("pipe")
+        kit.activate("pipe")
         payload, filename = build_pipe_docx(conn, args.case)
     except pipe_calc.TablesNotReady as exc:
         print(f"标准表未录入,无法出表:{exc}", file=sys.stderr)
