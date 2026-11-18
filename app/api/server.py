@@ -1063,16 +1063,42 @@ class Handler(BaseHTTPRequestHandler):
                 {"dir": files["dir"], "files": files["files"], "status": _pipe_table_status()}
             )
             return
+        if parts == ["api", "pipe-standards-prompt"]:
+            # 「复制填写提示词」要复制的那段字。唯一来源是
+            # app/design/pipe_standards_prompt.py:文件名/必需列取自 STD_FILES,
+            # 示例行取自 samples/pipe-standards-template/,不在这里另抄一份。
+            from app.design import pipe_standards_prompt
+
+            text = pipe_standards_prompt.build()
+            self._json(
+                {
+                    "version": pipe_standards_prompt.PROMPT_VERSION,
+                    "chars": len(text),
+                    "text": text,
+                }
+            )
+            return
+        if parts == ["api", "pipe-standards-template.zip"]:
+            # 「下载模板 CSV」:把模板目录打成一个 zip,文件名原样保留
+            self._std_template_zip()
+            return
         if parts == ["api", "piping-classes"]:
             # 管道等级表的当前内容(页面上的「等级表」弹窗读它)
             from app.design import pipe_data
 
+            grades = pipe_data.piping_class_grades()
             self._json(
                 {
                     "status": pipe_data.piping_class_status(),
                     "rules": pipe_data.PIPING_CLASS_RULES,
                     "default": pipe_data.PIPING_CLASS_DEFAULT,
-                    "grades": list(pipe_data.PIPING_CLASS_GRADES),
+                    "grades": list(grades),
+                    # 牌号 → 材质类别代号 + 来源(explicit / prefix / unknown);
+                    # prefix 是"按牌号前缀推断",下拉里会标「·推断」提醒核对
+                    "material_codes": {
+                        g: dict(zip(("code", "source"), pipe_data.material_code_for(g)))
+                        for g in grades
+                    },
                     "media": list(pipe_data.PIPING_CLASS_MEDIA),
                     "file": "data/config/piping-classes.json",
                 }
@@ -1225,6 +1251,45 @@ class Handler(BaseHTTPRequestHandler):
         finally:
             conn.close()
 
+    # ------------------------------------------------------------ 标准表模板下载
+
+    def _std_template_zip(self) -> None:
+        """GET /api/pipe-standards-template.zip —— 三份格式模板 + 说明打成一个 zip。
+
+        文件从 `samples/pipe-standards-template/` 现读(唯一来源),不在代码里内嵌副本:
+        模板改列名或加表,下载包自动跟着变。
+        """
+        import zipfile
+
+        from app.design import pipe_data
+
+        base = pipe_data.TEMPLATE_DIR
+        if not base.is_dir():
+            self._error("这份安装里没带模板目录(samples/pipe-standards-template)", 404)
+            return
+        buf = io.BytesIO()
+        added = 0
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for spec in pipe_data.STD_FILES:
+                path = base / spec["name"]
+                if path.is_file():
+                    zf.writestr(spec["name"], path.read_bytes())
+                    added += 1
+            note = base / "README.md"
+            if note.is_file():
+                zf.writestr("README.md", note.read_bytes())
+        if not added:
+            self._error("模板目录里没有可下载的 CSV", 404)
+            return
+        data = buf.getvalue()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/zip")
+        self.send_header("Content-Disposition", 'attachment; filename="pipe-standards-template.zip"')
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     # ------------------------------------------------------------ 流股组成按需读
 
     def _pipes(self, conn, case_id: int, query: dict) -> None:
@@ -1263,10 +1328,20 @@ class Handler(BaseHTTPRequestHandler):
                 raise BadQuery(f"参数 {key} 要在 {lo}~{hi} 之间,收到 {raw!r}")
             return value
 
-        material = _q("material") or "S30408"
-        if material not in pipe_data.MATERIAL_CODE_BY_GRADE:
-            material = "S30408"  # 认不出的牌号不硬套,退回默认并在页面提示
         try:
+            # 管材跟着**已录入的表 B.1** 走:表里有什么牌号就能选什么(方案 A)。
+            # 以前这里把认不出的牌号静默换成 S30408,页面什么也不说;现在改成明确报错。
+            available = pipe_data.piping_class_grades()
+            default_material = (
+                "S30408" if "S30408" in available else (available[0] if available else "S30408")
+            )
+            material = _q("material") or default_material
+            if material not in available:
+                raise BadQuery(
+                    f"牌号 {material!r} 不在已录入的表 B.1 里;可选 {', '.join(available)}"
+                    if available
+                    else "还没有录入表 B.1,先导入标准表再选管材"
+                )
             options = {
                 "velocity": {
                     "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"], 0.01, 100.0),

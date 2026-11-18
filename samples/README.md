@@ -8,6 +8,7 @@
 | `case-23-error.db` | 一份异常工况快照:121 流股 / 77 模块 / 214 条连接 / 401 条塔板级记录 / 2178 条组成(18 组分 × 121 流股)/ 7 台泵;判定为 `error`、未收敛 |
 | `piping-classes.example.json` | 管路选型的**管道等级表示例**(流股名前缀 + 介质代号 → 材质 / 腐蚀裕量)。复制到 `data/config/piping-classes.json` 生效 |
 | `sections.example.json` | 衡算报告的**工段(界区)边界示例**(按工况 id:进界流股 / 出界流股 / 设备归堆)。复制到 `data/config/sections.json` 生效;不填则按设备名自动推草稿 |
+| `pipe-standards-template/` | 标准表 CSV 的**格式模板**:三份文件各只有表头与 2 行虚构数值,不含任何真实国标数据。用来对照列名填写,导入时会被校验识别并拒绝。详见该目录的 `README.md` |
 
 ## 为什么放一份「有错误的数据」
 

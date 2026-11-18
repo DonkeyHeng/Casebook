@@ -85,7 +85,7 @@ Casebook spans an end-to-end **Read → Store → View → Compute → Report �
 | **5. Balances & Reports** | Process section (battery-limit) confirmation, two-tier mass balance checks, energy summary, dual-volume Word reports | Produces print-ready Material & Energy Balance reports aligned with engineering documentation standards |
 | **6. Exports & Integration** | 7/8-sheet Excel workbook, family-specific Excel export, AI analysis pack (`.zip`), 10-column pipe schedule Word, CLI interface | Supports archival deliverables, spreadsheet workflows, and LLM-assisted pump selection/analysis |
 | **7. Runtime & Security** | Zero-build HTTP server, localhost request guards, single-source versioning & manual update check, path isolation, single-file packaging | Ensures safe local execution, zero cloud leakage, and lossless upgrades |
-| **8. Tooling & Quality Assurance** | 696 offline regression self-tests, headless dual-theme UI sweep, pre-release secret scanner, Aspen COM probes, column diagnostics | Verifies calculation/judgment changes offline and prevents accidental data leaks before release |
+| **8. Tooling & Quality Assurance** | 825 offline regression self-tests (including COM node-tree fixture replay), headless dual-theme UI sweep, pre-release secret scanner, Aspen COM probes, column diagnostics | Verifies calculation/judgment changes offline and prevents accidental data leaks before release |
 
 ### Key Capabilities in Detail
 
@@ -175,7 +175,7 @@ Pipe sizing relies on pipe OD/wall-thickness series from **GB/T 17395-2024** (Ta
 
 **Three-step setup:**
 1. Prepare three UTF-8 CSV files from your licensed standard texts: `t1-17395-table1.csv`, `t4-17395-table4.csv` (requiring `D_mm`, `S_mm` columns), and `t3-20801-tableB1.csv` (requiring `标准`, `牌号`, and `许用应力_<temp>` columns).
-2. Click **"Standard Tables"** in the top-right corner of the Piping page and import the CSVs. Casebook validates schemas/row counts and hot-reloads them atomically without requiring a restart.
+2. Click **"Standard Tables"** in the top-right corner of the Piping page and import the CSVs. Casebook validates schemas/row counts and hot-reloads them atomically without requiring a restart. Unsure about column names? The dialog offers **"Download CSV template"** (`samples/pipe-standards-template/`, headers plus 2 fictional rows only — not importable as-is) and **"Copy filling prompt"**.
 3. See [`docs/pipe-standards-index.md`](docs/pipe-standards-index.md) for clause/page indices and [`docs/pipe-standards-extract-prompt.md`](docs/pipe-standards-extract-prompt.md) for table extraction prompts.
 </details>
 
@@ -196,7 +196,7 @@ After computing pressure-retaining thickness per GB/T 20801.3 and adding corrosi
 <details>
 <summary><strong>6. Other Questions (Material Selection, Default Velocities, Non-Converged Runs)</strong></summary>
 
-- **Does Casebook auto-select pipe materials?** No. Corrosivity depends heavily on concentration, trace impurities (e.g., chlorides), and temperature. Casebook applies the material and corrosion allowance rules you define in `data/config/piping-classes.json` (defaulting to `S30408` when unconfigured).
+- **Does Casebook auto-select pipe materials?** No. Corrosivity depends heavily on concentration, trace impurities (e.g., chlorides), and temperature. Casebook applies the material and corrosion allowance rules you define in `data/config/piping-classes.json` (defaulting to `S30408` when unconfigured). Available grades follow the imported Table B.1 — whatever grades you load become selectable, not just the five built-in ones.
 - **Can default velocities be changed?** Yes, adjust them live in the top parameter bar of the Piping page (defaults: liquid `1.5 m/s`, gas `15 m/s`, two-phase `8 m/s`, pump suction `0.8 m/s`).
 - **Can non-converged simulations be imported?** Yes. They are saved to the database with yellow/red warning banners, isolated from default statistics/comparisons, and retain all raw Aspen error text and stream impact flags.
 </details>
@@ -224,7 +224,7 @@ Casebook/
 | Command | Description |
 | :--- | :--- |
 | `python -m app.cli --list` / `--read` / `--cases` / `--show N` | Headless CLI to list open Aspen models, capture the active case, or inspect saved cases (supports `--composition`) |
-| `python -m tools.selftest [--db data/cases.db]` | Runs **696** standalone offline regression tests (**731** with `--db` database consistency checks), no Aspen or internet required |
+| `python -m tools.selftest [--db data/cases.db]` | Runs **825** standalone offline regression tests (**860** with `--db` database consistency checks), no Aspen or internet required |
 | `python -m tools.repair_cases [--apply]` | Recomputes verdicts, enthalpy checks, and derived parameters offline after rule updates (dry-run by default) |
 | `python -m tools.balance_report --case N` | Batch-generates Material & Energy Balance Word reports for case `N` from the command line |
 | `python -m tools.make_pipe_schedule --case N [--audit]` | Exports the 10-column Pipe Selection Schedule `.docx` (`--audit` prints itemized engineering checks) |

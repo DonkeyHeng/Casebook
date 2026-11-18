@@ -1338,10 +1338,12 @@ def _select_stream(
         }
 
     dn, od, w, wall, min_wall_mm, t_req, pipe_type, ext_wall_mm = sized
-    mcode = pipe_data.MATERIAL_CODE_BY_GRADE.get(material)
+    mcode, _source = pipe_data.material_code_for(material)
     if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
         mcode = "E"
-        warnings.append(f"材质 {material!r} 不在映射表里,等级号末字母按 E 暂记,待人工确认")
+        warnings.append(f"材质 {material!r} 的类别无法判定,等级号末字母按 E 暂记,待人工确认")
+    # 按前缀推断出来的类别不逐行刷警告(一百条流股会刷一百条);
+    # 推断结果在「等级表」弹窗的牌号下拉里以「E·推断」标出,由用户核对。
 
     # 等级号:真空走 V,高压不锈钢升档走 force_code,其余按设计压力(§17.1/§17.3)
     gc_opts = dict(opts)

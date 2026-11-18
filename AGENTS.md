@@ -16,6 +16,10 @@
 
   判定规则写在 `app/aspen/reader.py` 顶部与 `tools/selftest.py` 开头,改之前先读。
   自测网不需要 Aspen,任何人本地都能跑。
+- 改了 `reader.py` 里读的**节点路径**(含目录下钻顺序、叶子层数)→ 用
+  `python tools/dump_fixture.py --case <名字>` 重采 `tools/fixtures/` 的节点树夹具,
+  再跑 `python -m tools.selftest` 必须全绿。夹具能拦住"路径拼错 / 版本少一层"这类
+  静默变空;格式与脱敏约定见 `tools/fixtures/README.md`。
 - `app/aspen/` 只读 Aspen,不调用 Run / Reinit / Save,不要引入写模型的代码路径。
 
 ## 2. 数字纪律
@@ -42,6 +46,9 @@
   `model/` 下只放行 `README.md` 与 `model/full/README.md`)。
 - 样本必须脱敏后入库:`run_user` → `user`、`model_path` → 相对路径,不留本地绝对路径与个人信息。
 - **不提交他人数据**:他人的模型、他人读数、他人作品的分析结果都不进仓库。
+  同样适用于 `tools/fixtures/` 的节点树夹具 —— 夹具保留真实读数(温度、流量、焓、
+  热负荷、组分),改名只去掉位号,数字仍是别人的工艺信息。采集脚本只对本机自己的
+  模型用;拿到别人的 `.bkp` 想看结构,只做口头结论,不落盘、不入库。
 - 提交前自查:
   ```bash
   python -m tools.check_public_safe --all          # 路径 / 密钥 / 隐私 / 内网

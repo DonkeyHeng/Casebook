@@ -37,6 +37,7 @@ from app.design import mass_balance as mass_rules
 from app.design import sections as section_rules
 from app.store import db
 from app.store import impact as impact_rules
+from tools import fake_session
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []
@@ -65,7 +66,7 @@ def test_judge() -> None:
     check_eq("judge: 全零 → ok", r["severity"], "ok")
     check("judge: warning/ok 的数据算可用", r["converged"] is True)
 
-    # ② 真实样本(天大 105 流股):7 个模块全是 status=2 告警、UOSSTAT=1、PER_ERROR=1
+    # ② 真实样本:7 个模块全是 status=2 告警、UOSSTAT=1、PER_ERROR=1
     warnings = [
         {"name": f"M{n}", "status": 2, "message": "PHASE STABILITY CHECK"} for n in range(1, 8)
     ]
@@ -1728,13 +1729,31 @@ def test_std_import() -> None:
         check_eq("std: 真表 B.1 导入通过", (ok, errs), (True, []))
     else:
         print("  (本机没有表 B.1,跳过真表导入的检查)")
+    # 表 B.1 的牌号不再限定 5 个:表里录了什么就能用什么(方案 A,2026-11-18)
     ok, errs, _ = pipe_data.import_standards(
         {"files": {"t3-20801-tableB1.csv": "标准,牌号,许用应力_20\nGB/T 9999,XYZ,100\n"}},
         target_dir=base,
         reload=False,
     )
-    check_eq("std: 牌号对不上的表 B.1 被拒", ok, False)
-    check("std: 拒绝理由写清要哪些牌号", any("牌号" in e for e in errs), f"{errs}")
+    check_eq("std: 表里出现新牌号也能导入", (ok, errs), (True, []))
+    check_eq(
+        "std: 新牌号进了许用应力表",
+        sorted(pipe_data._stress_from_rows([{"标准": "GB/T 9999", "牌号": "XYZ", "许用应力_20": "100"}])),
+        ["XYZ"],
+    )
+    check_eq(
+        "std: 新牌号的材质类别判不出来",
+        pipe_data.material_code_for("XYZ"),
+        (None, "unknown"),
+    )
+    # 牌号列抄成尺寸/纯数字的表:一个牌号都收不进来 → 仍然拒
+    ok, errs, _ = pipe_data.import_standards(
+        {"files": {"t3-20801-tableB1.csv": "标准,牌号,许用应力_20\nGB/T 9999,Φ57×3.5,100\n"}},
+        target_dir=base,
+        reload=False,
+    )
+    check_eq("std: 牌号列不像牌号的表被拒", ok, False)
+    check("std: 拒绝理由点到牌号列", any("牌号" in e for e in errs), f"{errs}")
 
     # reload_standards:按目录重读;目录里没表就是空(页面显示未录),不是异常
     old_count = len(pipe_data.OD_TO_WALLS)
@@ -1745,6 +1764,106 @@ def test_std_import() -> None:
         pipe_data.reload_standards()
     check_eq("std: 重载后原来的表还在", len(pipe_data.OD_TO_WALLS), old_count)
     shutil.rmtree(tmp_root, ignore_errors=True)
+
+
+def test_std_template() -> None:
+    """标准表格式模板:表头合法、示例值虚构、能挡住「把模板当数据导入」。"""
+    from app.design import pipe_data
+    from app.design import pipe_standards_prompt
+
+    preview = pipe_data.template_preview()
+    check_eq("模板: 三份文件齐全", [f["name"] for f in preview["files"]], [s["name"] for s in pipe_data.STD_FILES])
+    check("模板: 目录在仓库里", preview.get("exists") is True)
+    for item in preview["files"]:
+        check_eq(f"模板: {item['name']} 正好 2 行示例", len(item["rows"]), 2)
+        for col in item["columns"]:
+            check(
+                f"模板: {item['name']} 含必需列 {col}",
+                col in item["headers"],
+                f"实际表头 {item['headers']}",
+            )
+    b1 = next(f for f in preview["files"] if f["name"].startswith("t3-"))
+    check(
+        "模板: 表 B.1 有温度列",
+        any(h.startswith("许用应力_") for h in b1["headers"]),
+        f"{b1['headers']}",
+    )
+
+    texts = pipe_data.template_texts()
+    check_eq("模板: 三份都能读出来", len(texts), 3)
+    raw = texts["t1-17395-table1.csv"]
+    check("模板: 原样文本被识别", pipe_data.is_template_text(raw))
+    check(
+        "模板: 带 BOM 与 CRLF 也识别",
+        pipe_data.is_template_text("\ufeff" + raw.replace("\n", "\r\n")),
+    )
+    check("模板: 改过数值就不再算模板", not pipe_data.is_template_text(raw.replace("111.1", "114.3")))
+
+    tmp = Path(__file__).resolve().parents[1] / "data" / "preview" / "_selftest-template"
+    shutil.rmtree(tmp, ignore_errors=True)
+    try:
+        ok, errs, _ = pipe_data.import_standards(
+            {"files": {"t1-17395-table1.csv": raw}}, target_dir=tmp, reload=False
+        )
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    check_eq("模板: 原样导入被拒", ok, False)
+    check("模板: 拒绝理由说明这是模板", any("模板" in e for e in errs), f"{errs}")
+
+    text = pipe_standards_prompt.build()
+    for name in texts:
+        check(f"提示词: 点到 {name}", name in text)
+    check("提示词: 写了必需列", "D_mm" in text and "许用应力_20" in text)
+    check("提示词: 声明示例数值为虚构", "虚构" in text)
+    check("提示词: 说明最少行数", "10 行" in text)
+
+
+def test_material_scope() -> None:
+    """方案 A:牌号清单跟着表 B.1 走 —— 全表解析、别名归一、类别推断。"""
+    from app.design import pipe_data
+
+    rows = [
+        {"标准": "GB/T 8163", "牌号": "20#", "许用应力_20": "130", "许用应力_100": "120"},
+        {"标准": "GB/T 6479", "牌号": "Q345B", "许用应力_20": "170", "许用应力_100": "160"},
+        # Q345B 三个尺寸档:必须取各温度最小值,不能取第一条
+        {"标准": "GB/T 6479", "牌号": "Q345B", "许用应力_20": "165", "许用应力_100": "155"},
+        {"标准": "GB/T 14976", "牌号": "06Cr19Ni10(304)", "许用应力_20": "137", "许用应力_100": "130"},
+        {"标准": "GB/T 14976", "牌号": "S32168", "许用应力_20": "130", "许用应力_100": "120"},
+    ]
+    out = pipe_data._stress_from_rows(rows)
+    check("牌号: 预置牌号仍在", "20#" in out, f"{sorted(out)}")
+    check_eq("牌号: Q345B 多尺寸档取最小值", out["Q345B"][20.0], 165.0)
+    check_eq("牌号: 06Cr19Ni10(304) 归一到 S30408", out["S30408"][20.0], 137.0)
+    check("牌号: 别名不留第二种写法", "06Cr19Ni10(304)" not in out, f"{sorted(out)}")
+    check("牌号: 表里新增的牌号也收进来", "S32168" in out, f"{sorted(out)}")
+
+    check_eq("材质: 预置牌号走显式映射", pipe_data.material_code_for("S30408"), ("E", "explicit"))
+    check_eq("材质: 321 按前缀判为不锈钢", pipe_data.material_code_for("S32168"), ("E", "prefix"))
+    check_eq("材质: Q235 按前缀判为碳钢", pipe_data.material_code_for("Q235B"), ("B", "prefix"))
+    check_eq("材质: Q345R 按前缀判为低合金钢", pipe_data.material_code_for("Q345R"), ("C", "prefix"))
+    check_eq("材质: TA2 按前缀判为有色金属", pipe_data.material_code_for("TA2"), ("F", "prefix"))
+    check_eq("材质: 判不出来的不硬猜", pipe_data.material_code_for("XYZ"), (None, "unknown"))
+
+    check("牌号形状: 20# 像牌号", pipe_data.looks_like_grade("20#"))
+    check("牌号形状: 06Cr19Ni10(304) 像牌号", pipe_data.looks_like_grade("06Cr19Ni10(304)"))
+    check("牌号形状: Φ57×3.5 不像牌号", not pipe_data.looks_like_grade("Φ57×3.5"))
+    check("牌号形状: 112.5 不像牌号", not pipe_data.looks_like_grade("112.5"))
+
+    grades = pipe_data.piping_class_grades()
+    check("可选牌号: 非空", bool(grades), f"{grades}")
+    check("可选牌号: 已排序", list(grades) == sorted(grades), f"{grades}")
+    check("可选牌号: 预置的 S30408 一定在", "S30408" in grades, f"{grades}")
+    if pipe_data.ALLOWABLE_STRESS:
+        check_eq(
+            "可选牌号: 与许用应力表的键一致",
+            list(grades),
+            sorted(pipe_data.ALLOWABLE_STRESS),
+        )
+
+    _, errors = pipe_data.validate_piping_classes({"rules": [{"medium": ["PL"], "grade": "S30408"}]})
+    check_eq("等级表: 表内已有的牌号通过", errors, [])
+    _, errors = pipe_data.validate_piping_classes({"rules": [{"medium": ["PL"], "grade": "XYZ"}]})
+    check("等级表: 表里没有的牌号被拒", any("牌号" in e for e in errors), f"{errors}")
 
 
 def test_piping_class() -> None:
@@ -1975,35 +2094,16 @@ def test_pump_pv_read() -> None:
     有子节点的节点跳过 → 必须有单位 → 换算成 bar → 必须 > 0。
     """
 
-    class _Kid:
-        def __init__(self, name):
-            self.Name = name
-
-    class _Elements:
-        def __init__(self, kids):
-            self._kids = kids
-            self.Count = len(kids)
-
-        def Item(self, i):
-            return self._kids[i]
-
-    class _Node:
-        def __init__(self, value=None, unit="", kids=()):
-            self.Value = value
-            self.UnitString = unit
-            self.Elements = _Elements(list(kids))
-
-    class _Session:
-        def __init__(self, nodes):
-            self._nodes = nodes
-
-        def find(self, path):
-            return self._nodes.get(path)
+    def _session(nodes):
+        """单点用例的迷你夹具:`{路径: {"v": 值, "u": 单位, "kids": [子节点]}}`。"""
+        return fake_session.FakeSession({"case": "inline-pv", "nodes": nodes})
 
     base = r"\Data\Streams\0133\Output"
     pv_path = base + r"\STRM_UPP\PBUB\MIXED\TOTAL"
 
-    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.53383137, "bar")}), "0133")
+    got = reader.read_stream_vapor_pressure(
+        _session({pv_path: {"v": 0.53383137, "u": "bar"}}), "0133"
+    )
     check(
         "泵 p_v:泡点压力叶子读出 0.5338 bar",
         got is not None and abs(got - 0.5338) < 1e-3,
@@ -2011,40 +2111,40 @@ def test_pump_pv_read() -> None:
     )
 
     got = reader.read_stream_vapor_pressure(
-        _Session({base + r"\PL": _Node(1, "bar", [_Kid("MIXED")])}), "0133"
+        _session({base + r"\PL": {"v": 1, "u": "bar", "kids": ["MIXED"]}}), "0133"
     )
     check_eq("泵 p_v:目录节点(PL 值恒 1)不当读数", got, None)
 
-    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.0, "bar")}), "0133")
+    got = reader.read_stream_vapor_pressure(_session({pv_path: {"v": 0.0, "u": "bar"}}), "0133")
     check_eq("泵 p_v:读数为 0 视为没有", got, None)
 
-    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(50.0, "kpa")}), "0133")
+    got = reader.read_stream_vapor_pressure(_session({pv_path: {"v": 50.0, "u": "kpa"}}), "0133")
     check(
         "泵 p_v:单位按 pressure 换算(50 kPa → 0.5 bar)",
         got is not None and abs(got - 0.5) < 1e-9,
         f"实际 {got}",
     )
 
-    got = reader.read_stream_vapor_pressure(_Session({pv_path: _Node(0.5, "")}), "0133")
+    got = reader.read_stream_vapor_pressure(_session({pv_path: {"v": 0.5}}), "0133")
     check_eq("泵 p_v:单位认不出时留空", got, None)
 
-    # V11 布局(2026-11-18 实测,22/22 台):PBUB 下面没有 TOTAL 层,值是 MIXED\LIQUID。
+    # V11 布局(实测):PBUB 下面没有 TOTAL 层,值是 MIXED\LIQUID。
     # 只按 `...\MIXED\TOTAL` 取值会逐台返回 None,泵页 p_v 整列变空 —— 这条守住它。
     v11 = base + r"\STRM_UPP\PBUB\MIXED\LIQUID"
-    got = reader.read_stream_vapor_pressure(_Session({v11: _Node(0.18812677, "bar")}), "0133")
+    got = reader.read_stream_vapor_pressure(_session({v11: {"v": 0.1875, "u": "bar"}}), "0133")
     check(
         "泵 p_v:V11 布局(PBUB\\MIXED\\LIQUID)也能读到",
-        got is not None and abs(got - 0.1881) < 1e-3,
+        got is not None and abs(got - 0.1875) < 1e-3,
         f"实际 {got}",
     )
 
     # 从容器节点取:PBUB(值恒 1)→ MIXED → LIQUID,下钻命中真值
     got = reader.read_stream_vapor_pressure(
-        _Session(
+        _session(
             {
-                base + r"\STRM_UPP\PBUB": _Node(1, "bar", [_Kid("MIXED")]),
-                base + r"\STRM_UPP\PBUB\MIXED": _Node(1, "bar", [_Kid("LIQUID")]),
-                base + r"\STRM_UPP\PBUB\MIXED\LIQUID": _Node(3.33615131, "bar"),
+                base + r"\STRM_UPP\PBUB": {"v": 1, "u": "bar", "kids": ["MIXED"]},
+                base + r"\STRM_UPP\PBUB\MIXED": {"v": 1, "u": "bar", "kids": ["LIQUID"]},
+                base + r"\STRM_UPP\PBUB\MIXED\LIQUID": {"v": 3.33615131, "u": "bar"},
             }
         ),
         "0133",
@@ -2057,12 +2157,12 @@ def test_pump_pv_read() -> None:
 
     # PL 的液相叶子是按组分的分压,认不出组分名时必须放弃,不能拿第一个组分顶上
     got = reader.read_stream_vapor_pressure(
-        _Session(
+        _session(
             {
-                base + r"\STRM_UPP\PL": _Node(1, "bar", [_Kid("MIXED")]),
-                base + r"\STRM_UPP\PL\MIXED": _Node(1, "bar", [_Kid("LIQUID")]),
-                base + r"\STRM_UPP\PL\MIXED\LIQUID": _Node(1, "bar", [_Kid("H2O")]),
-                base + r"\STRM_UPP\PL\MIXED\LIQUID\H2O": _Node(0.0424791, "bar"),
+                base + r"\STRM_UPP\PL": {"v": 1, "u": "bar", "kids": ["MIXED"]},
+                base + r"\STRM_UPP\PL\MIXED": {"v": 1, "u": "bar", "kids": ["LIQUID"]},
+                base + r"\STRM_UPP\PL\MIXED\LIQUID": {"v": 1, "u": "bar", "kids": ["H2O"]},
+                base + r"\STRM_UPP\PL\MIXED\LIQUID\H2O": {"v": 0.0424791, "u": "bar"},
             }
         ),
         "0133",
@@ -2915,68 +3015,34 @@ def test_hydraulics() -> None:
 
     # --- _lower_leaf:MIXED 是目录时要钻到 TOTAL,不能把标志位 1 当读数
     # (实测 STRM_UPP\PL\MIXED 与 PBUB\MIXED 直接取值都是 1 bar,那是目录/标志节点)
-    def _kids_of(tree, path):
-        """按 key 前缀合成子节点名 —— 真实 Aspen 的 Elements 也会列出子目录。"""
-        pre = path + "\\"
-        names = []
-        for key in tree:
-            if key.startswith(pre):
-                head = key[len(pre):].split("\\")[0]
-                if head not in names:
-                    names.append(head)
-        return names
+    def _leaf(nodes, path):
+        session = fake_session.FakeSession({"case": "inline-visc", "nodes": nodes})
+        return reader_mod._lower_leaf(session, path)
 
-    class _Coll:
-        def __init__(self, path, tree):
-            self._path, self._tree = path, tree
-            self._kids = _kids_of(tree, path)
-            self.Count = len(self._kids)
-
-        def Item(self, i):
-            return _Node(rf"{self._path}\{self._kids[i]}", self._tree)
-
-    class _Node:
-        def __init__(self, path, tree):
-            self._path, self._tree = path, tree
-            self.Name = path.rsplit("\\", 1)[-1]
-            _k, value, unit = tree.get(path, ([], None, ""))
-            self.UnitString = unit
-            self.Value = value
-            self.Elements = _Coll(path, tree)
-
-    class _Stub:
-        """极简假 session:tree = {路径: (子节点列表, 值, 单位)}。"""
-
-        def __init__(self, tree):
-            self.tree = tree
-
-        def find(self, path):
-            if path in self.tree or _kids_of(self.tree, path):
-                return _Node(path, self.tree)
-            return None
-
-    flat_visc = {
-        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": ([], 1.23, "cP"),
-    }
+    base = r"\Data\Streams\S\Output\STRM_UPP"
     check_eq(
         "粘度: MIXED 是叶子时直接取",
-        round(reader_mod._lower_leaf(_Stub(flat_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")[0], 2),
+        round(_leaf({base + r"\VISC\MIXED": {"v": 1.23, "u": "cP"}}, base + r"\VISC")[0], 2),
         1.23,
     )
 
-    nested_visc = {
-        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": (["TOTAL"], 1, "bar"),
-        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED\TOTAL": ([], 0.483, "cP"),
-    }
-    value, unit = reader_mod._lower_leaf(_Stub(nested_visc), r"\Data\Streams\S\Output\STRM_UPP\VISC")
+    value, unit = _leaf(
+        {
+            base + r"\VISC\MIXED": {"v": 1, "u": "bar", "kids": ["TOTAL"]},
+            base + r"\VISC\MIXED\TOTAL": {"v": 0.483, "u": "cP"},
+        },
+        base + r"\VISC",
+    )
     check_eq("粘度: MIXED 是目录时钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
 
     # MUMX(M=混合物粘度)是首选属性,真值同样在 MIXED\TOTAL 下
-    mumx_tree = {
-        r"\Data\Streams\S\Output\STRM_UPP\MUMX\MIXED": (["TOTAL"], 1, "cP"),
-        r"\Data\Streams\S\Output\STRM_UPP\MUMX\MIXED\TOTAL": ([], 0.483, "cP"),
-    }
-    value, unit = reader_mod._lower_leaf(_Stub(mumx_tree), r"\Data\Streams\S\Output\STRM_UPP\MUMX")
+    value, unit = _leaf(
+        {
+            base + r"\MUMX\MIXED": {"v": 1, "u": "cP", "kids": ["TOTAL"]},
+            base + r"\MUMX\MIXED\TOTAL": {"v": 0.483, "u": "cP"},
+        },
+        base + r"\MUMX",
+    )
     check_eq("粘度: MUMX 下钻到 TOTAL", (round(value, 3), unit), (0.483, "cP"))
     check(
         "粘度: MUMX 排在 VISC 前面",
@@ -2984,13 +3050,15 @@ def test_hydraulics() -> None:
         reader_mod.VISC_STREAM_PATHS[0],
     )
 
-    unknown_dir = {
-        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED": (["SOMETHING"], 1, "bar"),
-        r"\Data\Streams\S\Output\STRM_UPP\VISC\MIXED\SOMETHING": ([], 9.9, "cP"),
-    }
     check_eq(
         "粘度: 认不出的目录不硬猜",
-        reader_mod._lower_leaf(_Stub(unknown_dir), r"\Data\Streams\S\Output\STRM_UPP\VISC"),
+        _leaf(
+            {
+                base + r"\VISC\MIXED": {"v": 1, "u": "bar", "kids": ["SOMETHING"]},
+                base + r"\VISC\MIXED\SOMETHING": {"v": 9.9, "u": "cP"},
+            },
+            base + r"\VISC",
+        ),
         (None, ""),
     )
 
@@ -3055,51 +3123,11 @@ def test_component_dict() -> None:
     # 不是组分。这里用假 session 把三种真实可能的结构各钉一条。
     from app.aspen import reader as reader_mod
 
-    class _Node:
-        def __init__(self, path, tree):
-            self._p, self._t = path, tree
-
-        @property
-        def Name(self):
-            return self._p.rsplit("\\", 1)[-1]
-
-        @property
-        def UnitString(self):
-            return ""
-
-        @property
-        def Value(self):
-            return self._t.get(self._p)
-
-        @property
-        def Elements(self):
-            # 中间目录(如 Alias)本身不在 tree 里,但要能从 key 的前缀合成出来 ——
-            # 真实 Aspen 的 Elements 会把子目录也列出来,假 session 必须照做
-            pre = self._p + "\\"
-            names = []
-            for path in self._t:
-                if path.startswith(pre):
-                    head = path[len(pre):].split("\\")[0]
-                    if head not in names:
-                        names.append(head)
-            return _Coll([_Node(pre + name, self._t) for name in sorted(names)])
-
-    class _Coll:
-        def __init__(self, items):
-            self._items = items
-            self.Count = len(items)
-
-        def Item(self, i):
-            return self._items[i]
-
-    class _Session:
-        def __init__(self, tree):
-            self._t = tree
-
-        def find(self, path):
-            if any(p == path or p.startswith(path + "\\") for p in self._t):
-                return _Node(path, self._t)
-            return None
+    def _Session(tree):
+        """`{路径: 值}` 的极简夹具:值直接给,单位一律当空。"""
+        return fake_session.FakeSession(
+            {"case": "inline-comp", "nodes": {p: {"v": v} for p, v in tree.items()}}
+        )
 
     # 形状一:CAS / DBNAME1 直接挂在 分组\组分 下
     tree_direct = {
@@ -3867,6 +3895,272 @@ def test_pipe_third_round() -> None:
     check("rules: 剔除条数入 summary", mix["summary"]["excluded_nonmaterial"] == 2)
 
 
+# ---------------------------------------------------------------- COM 节点树夹具
+
+
+def test_reader_fixture() -> None:
+    r"""read_case() 端到端回放:整棵节点树来自 `tools/fixtures/` 的脱敏 JSON。
+
+    为什么不用单路径桩:reader 踩过的坑几乎都是"跨字段"的 —— V11 的 PBUB 少一层,
+    单看一条路径没有异常,后果是泵页 p_v 整列静默变空。所以这里回放整棵树,
+    从流股表一路查到焓平衡、单位缺口(unit_gaps)与组分字典。
+
+    夹具来源见 `tools/fixtures/README.md`。断言分三类:
+      1. 换算口径:夹具故意用 t/hr、kPa、sqft、ft、kcal/hr 这些非目标单位;
+      2. 结构口径:目录下钻(HMX / PBUB)、PL 组分叶子不当读数、V11 布局;
+      3. 夹具自身的体检:死数据、reader 依赖的路径是否齐全。
+    """
+    tree = fake_session.load("v15-typical")
+    session = fake_session.FakeSession(tree)
+    case = reader.read_case(session)
+
+    # --- 规模与结构
+    check_eq("夹具:流股 6 条", len(case["streams"]), 6)
+    check_eq("夹具:设备 3 台", len(case["blocks"]), 3)
+    check_eq("夹具:塔剖面 1 座", len(case["columns"]), 1)
+    check_eq("夹具:连接行 9 条", len(case["connections"]), 9)
+    check_eq("夹具:流股类型读的是属性 6", case["streams"][0]["stream_type"], "MATERIAL")
+    check_eq("夹具:设备类型读的是属性 6", case["blocks"][0]["type"], "RadFrac")
+
+    streams = {s["name"]: s for s in case["streams"]}
+    blocks = {b["name"]: b for b in case["blocks"]}
+
+    # --- 换算口径:同一份数据用非目标单位给出,必须换成项目固定单位
+    s01 = streams["S01"]
+    check_close("夹具:S01 温度(85 C 原样)", s01["temperature_c"], 85.0)
+    check_close("夹具:S01 压力(120 kPa → 1.2 bar)", s01["pressure_bar"], 1.2)
+    check_close("夹具:S01 质量流量(12 t/hr → 12000 kg/h)", s01["mass_flow_kgh"], 12000.0)
+    check_close("夹具:S01 体积流量(cum/hr 原样)", s01["vol_flow_m3h"], 12.5)
+    check_close("夹具:S01 质量焓(HMX_MASS\\MIXED,J/kg → kJ/kg)", s01["enthalpy_kjkg"], -15.6)
+    check_close("夹具:S01 摩尔焓(HMX\\MIXED → kJ/kmol)", s01["enthalpy_kjkmol"], -312.0)
+    check_close("夹具:S01 能量流由 m·h 现算(-52 kW)", s01["enthalpy_flow_kw"], -52.0)
+    check_eq("夹具:S01 上游为空、下游是 HX1", (s01["source"], s01["destination"]), ("", "HX1"))
+
+    hx = blocks["HX1"]
+    check_close("夹具:HX1 热负荷(1000 kcal/hr → 1.163 kW)", hx["duty_kw"], 1.163)
+    check_close("夹具:HX1 面积(100 sqft → 9.290304 m²)", hx["area_m2"], 9.290304)
+    check("夹具:HX1 空着的 HX_AREAC 不挡后面的 HX_AREAC2", hx["area_m2"] is not None)
+
+    col = blocks["COL1"]
+    check_eq("夹具:塔理论级数(Input\\NSTAGE)", col["nstage"], 5)
+    check_eq("夹具:塔顶/底温度取首末级", (col["top_temp_c"], col["bottom_temp_c"]), (95.0, 130.0))
+    check_close("夹具:冷凝器负荷(cal/sec → kW,保持负号)", col["cond_duty_kw"], -5.02416)
+    check_close("夹具:再沸器负荷(cal/sec → kW)", col["reb_duty_kw"], 5.44284)
+    check_eq("夹具:塔板剖面 5 级", len(case["columns"][0]["stages"]), 5)
+
+    pump = blocks["P01"]
+    check_close("夹具:泵扬程(100 ft → 30.48 m)", pump["head_m"], 30.48)
+    check_close("夹具:泵压升(IN_PRES 是 ΔP)", pump["dp_bar"], 3.2)
+    check_close("夹具:泵 p_v(V15:PBUB\\MIXED\\TOTAL)", pump["pv_bar"], 0.53383137)
+    check_close("夹具:泵粘度(MUMX\\MIXED\\TOTAL, cP 原样)", pump["mu_cp"], 0.483)
+    check_close("夹具:泵密度优先用进口 m/V(7000/8)", pump["rho_kgm3"], 875.0)
+    check_close("夹具:泵效率(无量纲原样)", pump["pump_eff"], 0.72)
+    check_close("夹具:泵进口压力来自进口流股", pump["p_in_bar"], 2.0)
+    check_close("夹具:泵出口压力来自出口流股", pump["p_out_bar"], 5.2)
+
+    # --- 收敛判定与撕裂流
+    conv = case["convergence"]
+    check_eq("夹具:收敛判定为 ok", conv["severity"], "ok")
+    check_eq("夹具:撕裂流读到 1 条", len(conv["tears"]), 1)
+    check_eq(
+        "夹具:撕裂流字段按数组下标对齐",
+        (conv["tears"][0]["stream"], conv["tears"][0]["error"], conv["tears"][0]["tolerance"]),
+        ("S02", 0.0012, 0.01),
+    )
+
+    # --- 焓平衡:夹具数值按热平衡反算,所以三台设备都该通过
+    states = {name: row["balance_state"] for name, row in case["balance"].items()}
+    check_eq("夹具:焓平衡三台设备全部 ok", states, {"COL1": "ok", "HX1": "ok", "P01": "ok"})
+
+    # --- 单位诊断与完整性
+    check_eq("夹具:没有单位认不出导致的缺口", case["unit_gaps"]["count"], 0)
+    check_close("夹具:流股数值齐全(coverage=1)", reader.value_coverage(case["streams"]), 1.0)
+
+    # --- 组分字典:COM 树里能拿到 CAS 时就不该退回解析模型文件
+    meta = {row["component"]: row for row in case["component_meta"]}
+    check_eq("夹具:组分清单来自流股 X", sorted(case["components"]), ["ETHANOL", "WATER"])
+    check_eq(
+        "夹具:组分 CAS 与数据库名",
+        (meta["WATER"]["cas"], meta["ETHANOL"]["cas"], meta["WATER"]["dbname"]),
+        ("7732-18-5", "64-17-5", "PURE"),
+    )
+
+    # --- 组成(只有在 include_composition=True 时才读)
+    composed_session = fake_session.FakeSession(tree)
+    composed = reader.read_case(composed_session, include_composition=True)
+    water = next(r for r in composed["streams"][0]["composition"] if r["component"] == "WATER")
+    check_eq("夹具:组成按组分展开", (water["x_liq"], water["mass_flow_kgh"]), (0.6, 7200.0))
+
+    # --- PL 是目录节点:只有 PL、没有 PBUB 的流股不能读出 p_v
+    check_eq(
+        "夹具:PL 的组分分压不当混合物 p_v",
+        reader.read_stream_vapor_pressure(session, "S03"),
+        None,
+    )
+
+    # --- 夹具自身体检:①有没有"采了但没人读"的死数据(按最全的那一轮算:
+    # 组成要 include_composition=True 才读,拿默认那一轮会把 X / Y / MASSFLOW3 误判成死数据)
+    unused = composed_session.unused_outside(list(tree["meta"].get("unread_ok") or []))
+    check("夹具:没有 allowlist 之外的死数据", not unused, "未读:" + "、".join(unused[:3]))
+
+    # ②reader 依赖的路径在夹具里是否齐全(防路径改名后夹具悄悄失效)
+    fence = fake_session.FakeSession(tree)
+    missing = []
+    for stream in case["streams"]:
+        for _key, field, _quantity in reader.STREAM_FIELDS:
+            path = rf"\Data\Streams\{stream['name']}\Output\{field}"
+            if fence.find(path) is None:
+                missing.append(path)
+    run_base = r"\Data\Results Summary\Run-Status\Output"
+    missing += [
+        f"{run_base}\\{key}"
+        for key in reader.RUN_STATUS_FIELDS
+        if fence.find(f"{run_base}\\{key}") is None
+    ]
+    check("夹具:reader 依赖的流股/状态字段齐全", not missing, "缺:" + "、".join(missing[:3]))
+
+    # --- 变异(V11 布局):PBUB 下没有 TOTAL 层,真值在 MIXED\LIQUID
+    v11 = fake_session.load("v11-pump")
+    v11_session = fake_session.FakeSession(v11)
+    v11_case = reader.read_case(v11_session)
+    v11_pump = v11_case["blocks"][0]
+    check(
+        "夹具 V11:确实没有 PBUB\\MIXED\\TOTAL 这一层",
+        v11_session.find(r"\Data\Streams\S01\Output\STRM_UPP\PBUB\MIXED\TOTAL") is None,
+    )
+    check_close("夹具 V11:p_v 从 MIXED\\LIQUID 读到", v11_pump["pv_bar"], 0.1875)
+    check_close("夹具 V11:粘度在 MIXED 叶子上(MUMX 无 TOTAL 层)", v11_pump["mu_cp"], 1.15)
+    check_close(
+        "夹具 V11:HMX_FLOW 有值时直接用,不再用 m·h 现算",
+        v11_case["streams"][0]["enthalpy_flow_kw"],
+        -35.1111,
+    )
+
+    # --- 变异:单点故障不能让整份工况崩
+    fahrenheit = reader.read_case(
+        fake_session.FakeSession(
+            fake_session.patch(
+                tree, r"\Data\Streams\S01\Output\RES_TEMP", value=185.0, unit="F"
+            )
+        )
+    )
+    check_close(
+        "夹具变异:单位换成 ℉ 仍按量纲换算(185 F → 85 C)",
+        fahrenheit["streams"][0]["temperature_c"],
+        85.0,
+    )
+
+    broken = reader.read_case(
+        fake_session.FakeSession(
+            fake_session.patch(tree, r"\Data\Streams\S01\Output\RES_PRES", err="COM 忙")
+        )
+    )
+    check_eq("夹具变异:取值抛异常时该字段留空、不中断读取", broken["streams"][0]["pressure_bar"], None)
+    check_eq("夹具变异:其它流股照旧读出", len(broken["streams"]), 6)
+
+    no_comp = reader.read_case(
+        fake_session.FakeSession(fake_session.drop_subtree(tree, r"\Data\Streams\S01\Output\X"))
+    )
+    check_eq("夹具变异:流股没有 X 时组分清单留空", no_comp["components"], [])
+    check_eq("夹具变异:没有组分名时组分字典留空", no_comp["component_meta"], [])
+
+    no_btemp = reader.read_case(
+        fake_session.FakeSession(
+            fake_session.drop_subtree(tree, r"\Data\Blocks\COL1\Output\B_TEMP")
+        )
+    )
+    check_eq("夹具变异:塔没有 B_TEMP 时顶/底温度留空", no_btemp["blocks"][0]["top_temp_c"], None)
+    check_eq("夹具变异:塔没有 B_TEMP 时不出剖面", len(no_btemp["columns"]), 0)
+
+
+def test_reader_fixture_real() -> None:
+    r"""真机采集的夹具回放(2026-11-18 采自作者自己的全流程模型)。
+
+    与 `test_reader_fixture()` 的分工:那份是**手写**的,数值按热平衡反算,用来钉
+    换算口径;这份是**真机采集**的,结构、单位集、异常状态都来自实际模型,用来钉
+    "真实 Aspen 树叶子的形状"(含 45 级塔、HeatX 双侧、泵的 STRM_UPP\PBUB\MUMX)。
+
+    断言一律**按类型定位**,不按名字:采集时流股/设备名已被改写成 S01…/B01…,
+    换成另一个模型重采后名字会变,类型不会。
+
+    这份样本取自一个**未收敛**的工况(判定 error),所以还多守一条:
+    判定为 error 时数值仍要读全,不能因为状态差就把表读空。
+    """
+
+    tree = fake_session.load("v15-real")
+    session = fake_session.FakeSession(tree)
+    case = reader.read_case(session, include_composition=True)
+
+    check_eq("真机夹具:来源标记为 collector", tree["meta"].get("source"), "collector")
+    check("真机夹具:采集没有被节点上限截断", tree["meta"].get("truncated") is False)
+    check("真机夹具:体积在扫描阈值内", len(tree["nodes"]) < 2000, f"{len(tree['nodes'])} 节点")
+    check_eq("真机夹具:流股 8 条", len(case["streams"]), 8)
+    check_eq("真机夹具:设备 3 台", len(case["blocks"]), 3)
+
+    by_type = {b["type"]: b for b in case["blocks"]}
+    check_eq("真机夹具:设备类型齐全", sorted(by_type), ["HeatX", "Pump", "RadFrac"])
+
+    # --- 数值完整性:模型判定 error,但表不能是空的
+    check_close("真机夹具:流股数值覆盖率 100%", reader.value_coverage(case["streams"]), 1.0)
+    check_eq("真机夹具:没有单位认不出的缺口", case["unit_gaps"]["count"], 0)
+    no_temp = [s["name"] for s in case["streams"] if s["temperature_c"] is None]
+    check("真机夹具:8 条流股都读到温度", not no_temp, "缺:" + "、".join(no_temp))
+    no_enth = [s["name"] for s in case["streams"] if s["enthalpy_flow_kw"] is None]
+    check("真机夹具:8 条流股都读到能量流", not no_enth, "缺:" + "、".join(no_enth))
+
+    # 判定本身:这份样本就是 CVSTAT=1 的未收敛工况(见 samples/README.md)。
+    # 换模型重采时这一条要跟着改,否则它会红。
+    check_eq("真机夹具:判定为 error", case["convergence"]["severity"], "error")
+    check("真机夹具:error 有对应理由", bool(case["convergence"]["reasons"]))
+
+    # --- 三台设备的读数(按类型取,不按名字)
+    hx = by_type["HeatX"]
+    check("真机夹具:HeatX 读到热负荷", hx["duty_kw"] is not None and hx["duty_kw"] > 0)
+    check("真机夹具:HeatX 读到面积(HX_AREAC2)", hx["area_m2"] is not None)
+    cold = [r for r in case["connections"] if r["block"] == hx["name"] and r["side"] == "cold"]
+    hot = [r for r in case["connections"] if r["block"] == hx["name"] and r["side"] == "hot"]
+    check("真机夹具:HeatX 冷/热侧都识别出来", bool(cold) and bool(hot))
+
+    pump = by_type["Pump"]
+    check_close("真机夹具:泵扬程换算成 m", round(pump["head_m"], 4), 12.7728)
+    check("真机夹具:泵 p_v 从 PBUB 读到", pump["pv_bar"] is not None and pump["pv_bar"] > 0)
+    check("真机夹具:泵粘度从 MUMX 读到", pump["mu_cp"] is not None)
+    check("真机夹具:泵密度由 m/V 现算", pump["rho_kgm3"] is not None)
+
+    col = by_type["RadFrac"]
+    check("真机夹具:塔冷凝器负荷为负、再沸器为正",
+          col["cond_duty_kw"] < 0 < col["reb_duty_kw"],
+          f"cond={col['cond_duty_kw']} reb={col['reb_duty_kw']}")
+    check_eq("真机夹具:塔剖面按 45 级展开", len(case["columns"][0]["stages"]), 45)
+
+    # --- 焓平衡:三台设备都该过(真机数据,不是构造值)
+    states = {row["balance_state"] for row in case["balance"].values()}
+    check_eq("真机夹具:三台设备焓平衡全部 ok", states, {"ok"})
+
+    # --- 连接关系:既要有内部连接,也要容忍指向夹具外的设备(模型边界)
+    outside = [r for r in case["connections"] if r["block"] not in {b["name"] for b in case["blocks"]}]
+    check("真机夹具:连接行 ≥ 8 条", len(case["connections"]) >= 8, str(len(case["connections"])))
+    check("真机夹具:指向夹具外设备的连接不丢", bool(outside), f"{len(outside)} 条")
+
+    # --- 组成与组分字典
+    check_eq("真机夹具:组分清单来自流股 X", len(case["components"]), 18)
+    check_eq("真机夹具:组分字典逐条给出", len(case["component_meta"]), 18)
+    check(
+        "真机夹具:COM 树里没有 CAS(与 aspen-field-map §3.1 一致,靠模型文件兜底)",
+        all(row["cas"] is None for row in case["component_meta"]),
+    )
+
+    # --- 采集白名单的栅栏:reader 依赖的路径一条都不能漏
+    fence = fake_session.FakeSession(tree)
+    missing = []
+    for stream in case["streams"]:
+        for _key, field, _quantity in reader.STREAM_FIELDS:
+            path = rf"\Data\Streams\{stream['name']}\Output\{field}"
+            if fence.find(path) is None:
+                missing.append(path)
+    check("真机夹具:白名单覆盖 reader 依赖的字段", not missing, "缺:" + "、".join(missing[:3]))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="判定 / 焓平衡 / 波及范围的回归自测")
     parser.add_argument("--db", default="", help="额外检查这个工况库(如 data/cases.db)")
@@ -3907,8 +4201,12 @@ def main(argv: list[str] | None = None) -> int:
         ("同源校验 guard", test_guard),
         ("组成整条替换 stream_components", test_composition_replace),
         ("组分字典 CAS + 中文名", test_component_dict),
+        ("COM 夹具回放 read_case", test_reader_fixture),
+        ("COM 夹具回放(真机采集)", test_reader_fixture_real),
         ("管路阻力 Re / λ / Σhf", test_hydraulics),
         ("标准表版本化", test_std_versioning),
+        ("标准表模板与填写提示词", test_std_template),
+        ("牌号范围与材质类别", test_material_scope),
         ("塔剖面诊断 column_diag", test_column_diag),
         ("HTTP 入口 body / 静态路径", test_http_entry),
         ("模型身份与选型台账", test_model_identity_and_selection),

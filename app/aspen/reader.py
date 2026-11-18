@@ -935,8 +935,8 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
 # ---------------------------------------------------------------- 泵参数
 
 # 进口流股 p_v(蒸气压)的读取路径。同一属性在不同版本下**叶子层数不一样**:
-#   * 2026-11-14(华东理工模型,V12.1):`STRM_UPP\PBUB\MIXED\TOTAL`,20/20 台有值;
-#   * 2026-11-18(浙大 1 模型,V11):写成 `STRM_UPP\PBUB\MIXED\LIQUID`,22/22 台有值,
+#   * 2026-11-14(V12.1):`STRM_UPP\PBUB\MIXED\TOTAL`,泵进口流股都有值;
+#   * 2026-11-18(V11):写成 `STRM_UPP\PBUB\MIXED\LIQUID`,泵进口流股都有值,
 #     少了 TOTAL 这一层 —— 只按 TOTAL 取值会逐台返回 None(泵页 p_v 整列变空)。
 # 所以容器路径也列进来,取值统一交给 `_lower_leaf` 按 TOTAL → MIXED → LIQUID 下钻,
 # 两种布局都能读到,也不用为一个版本再加一条硬编码路径。
@@ -1168,7 +1168,7 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
         block["dp_bar"] = dp
         block["p_in_bar"] = inlet.get("pressure_bar") if inlet else None
         block["p_out_bar"] = outlet.get("pressure_bar") if outlet else None
-        # p_v:直接取进口流股的泡点压力(实测 20/20 有值);读不到才留 None,页面可手填。
+        # p_v:直接取进口流股的泡点压力(实测都有值);读不到才留 None,页面可手填。
         pv = read_stream_vapor_pressure(session, inlet["name"]) if inlet else None
         block["pv_bar"] = pv
         block["pv_source"] = "aspen" if pv is not None else None

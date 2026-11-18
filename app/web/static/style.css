@@ -1818,9 +1818,10 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
    96vw 在窄窗口下会比可用宽度大,整个遮罩就冒出横向滚动条 */
 #pipeClassTable th:nth-child(1) { width: 20%; }
 #pipeClassTable th:nth-child(2) { width: 20%; }
-#pipeClassTable th:nth-child(3) { width: 12%; }
+/* 牌号列放得下「20#」与推断标注(如 S32168 · E(推断));备注列相应收窄 */
+#pipeClassTable th:nth-child(3) { width: 18%; }
 #pipeClassTable th:nth-child(4) { width: 14%; }
-#pipeClassTable th:nth-child(5) { width: 28%; }
+#pipeClassTable th:nth-child(5) { width: 22%; }
 /* 说明段里行内代码的样式(之前是裸文本) */
 .pipe-class-hint code {
   background: var(--bg); border: 1px solid var(--line);
@@ -1832,6 +1833,11 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 
 /* ---------- 标准表导入弹窗 ---------- */
 .pipe-std-box { width: min(860px, 100%); }
+/* 格式辅助条:下载模板 + 复制提示词。两个入口都只是"帮着对列名",
+   真正的判定仍在服务端导入校验里 */
+.pipe-std-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pipe-std-tools .btn { text-decoration: none; display: inline-flex; align-items: center; }
+.pipe-std-tools .muted { font-size: var(--fs-xs); line-height: 1.6; }
 .pipe-std-status { font-size: var(--fs-sm); line-height: 1.7; }
 .pipe-std-status.ok { color: var(--ok); }
 .pipe-std-files { display: flex; flex-direction: column; gap: 8px; border-radius: var(--r-md); }

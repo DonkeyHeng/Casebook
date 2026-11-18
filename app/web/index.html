@@ -7,7 +7,7 @@
   <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <!-- 资源带版本串:本地服务已经发 no-store,但浏览器/扩展仍可能拿旧副本;
          带 ?v= 的 URL 与旧副本不同,任何一层缓存都无法命中。改前端后把 v 往前推一位。 -->
-  <link rel="stylesheet" href="/static/style.css?v=20261118c">
+  <link rel="stylesheet" href="/static/style.css?v=20261118h">
   <script>
     /* 尽量早地定下主题:深色用户加载时不会先白闪一下。
        真正的三态(auto/light/dark)逻辑在 app.js,这里只是先写属性。 */
@@ -334,11 +334,20 @@
             这些数值受著作权保护,本工具不附带,得你自己取得标准后整理成 CSV 再导进来 ——
             导入的文件<b>只写在本机</b> <code id="pipeStdDir">data/preview/std/docx</code> 下,不上传、不外发。
           </p>
+          <!-- 格式辅助:不想翻文档对列名的人走这两个入口。模板只有表头与 2 行虚构数值 -->
+          <div class="pipe-std-tools" role="group" aria-label="格式辅助">
+            <a id="pipeStdZip" class="btn" href="/api/pipe-standards-template.zip" download
+               title="下载三份只有表头与虚构示例值的 CSV,按同样列名填真实数据">下载 CSV 模板</a>
+            <button id="pipeStdPrompt" class="btn" type="button"
+                    title="复制一段提示词:交给能看图的 AI,让它按三张表的列名直接输出 CSV">复制填写提示词</button>
+            <span id="pipeStdPromptMsg" class="muted" role="status" aria-live="polite"></span>
+          </div>
           <div id="pipeStdStatus" class="pipe-std-status muted">正在读取当前状态…</div>
           <div id="pipeStdFiles" class="pipe-std-files"></div>
           <p class="muted pipe-std-note">
+            列名拿不准就先点「下载 CSV 模板」(只有表头与 2 行虚构数值,不能直接导入)。
             每张表在哪一页、分页怎么拼,见 <code>docs/pipe-standards-index.md</code>;
-            要交给能看图的 AI 帮着抄数,用 <code>docs/pipe-standards-extract-prompt.md</code> 里的提示词。
+            要交给能看图的 AI 帮着抄数,直接用「复制填写提示词」,或看 <code>docs/pipe-standards-extract-prompt.md</code>。
             文件名不用改,选中后按名字自动对到对应位置,导入完立即生效、不用重启服务。
           </p>
           <div id="pipeStdError" class="pipe-notice err hidden"></div>
@@ -668,7 +677,7 @@
 
   <!-- pipe.js 必须排在 app.js 前面:app.js 末尾会立刻调 init() → bindEvents(),
        那时管道页的 initPipePanel / renderPipes 必须已经存在 -->
-  <script src="/static/pipe.js?v=20261118c"></script>
-  <script src="/static/app.js?v=20261118c"></script>
+  <script src="/static/pipe.js?v=20261118h"></script>
+  <script src="/static/app.js?v=20261118h"></script>
 </body>
 </html>

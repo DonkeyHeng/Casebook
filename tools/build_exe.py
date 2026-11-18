@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
         f"{ROOT / 'assets'}{sep}assets",
         "--add-data",
         f"{ROOT / 'samples' / 'case-23-error.db'}{sep}samples",
+        # 标准表格式模板(只有表头与虚构示例值):「下载 CSV 模板」与填写提示词要读它
+        "--add-data",
+        f"{ROOT / 'samples' / 'pipe-standards-template'}{sep}samples/pipe-standards-template",
         "--paths",
         str(ROOT),
         "--distpath",

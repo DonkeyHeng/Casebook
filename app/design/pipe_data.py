@@ -64,7 +64,8 @@ MATERIAL_CODES = {
     "H": "衬里/内防腐",
 }
 
-#: 牌号 → 材质类别代号(本项目只用到这五个,见 pipe-selection-plan.md §14.4)
+#: 牌号 → 材质类别代号(本项目预置的五个,见 pipe-selection-plan.md §14.4)。
+#: 表 B.1 里其它牌号由 `material_code_for()` 按前缀给建议值,判不出来的才告警。
 MATERIAL_CODE_BY_GRADE = {
     "20#": "B",
     "Q345A": "C",
@@ -72,6 +73,24 @@ MATERIAL_CODE_BY_GRADE = {
     "S30408": "E",
     "S31603": "E",
 }
+
+#: 表 B.1 里的牌号写法 → 本项目叫法。同一牌号在标准表里常写成完整牌号
+#: (06Cr19Ni10(304)),而模型、导出与等级号都用短代号(S30408);不归一会出现两个名字,
+#: 下拉里看着像两种材料、等级号却对不上。
+GRADE_ALIASES = {
+    "06Cr19Ni10(304)": "S30408",
+    "022Cr17Ni12Mo2(316L)": "S31603",
+}
+
+#: 未预置牌号的材质类别**建议**规则(按牌号前缀)。只作建议:等级号末字母仍会在
+#: 行内警告里说明来源,真要改类别由用户在等级表里核对。
+MATERIAL_CODE_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^(S\d{5}|0?[0-9]Cr\d|1Cr\d|2Cr\d|3Cr\d)", re.I), "E"),  # 不锈钢
+    (re.compile(r"^(Q235|10#|20#|20G|25#)", re.I), "B"),  # 碳钢
+    (re.compile(r"^(Q\d{3}|16Mn|15Mn)", re.I), "C"),  # 低合金钢
+    (re.compile(r"^(TA\d|Ti)", re.I), "F"),  # 钛材
+    (re.compile(r"^(PVC|PP|PE|PTFE|HDPE|FRP)", re.I), "G"),  # 非金属
+)
 
 #: 绝热代号(HG/T 20519.6;C/P/T 需人工勾选)
 INSULATION_CODES = {
@@ -447,6 +466,11 @@ def minimum_wall(dn: int | None) -> float | None:
 
 _CURATED_DIR = paths.data_dir("preview", "std", "docx")
 
+#: 只含表头与 2 行虚构数值的格式模板(随仓库分发、不含任何真实标准数据)。
+#: 页面「下载 CSV 模板」与填写提示词都读这里;exe 打包时
+#: `tools/build_exe.py` 会把这个目录一起塞进只读资源根。
+TEMPLATE_DIR = paths.resource_root() / "samples" / "pipe-standards-template"
+
 # 标准表改成"版本化目录 + 原子切换":
 #   data/preview/std/versions/<时间戳>/   每个版本一整套 CSV
 #   data/preview/std/current.txt          当前生效的是哪个版本(一行)
@@ -522,9 +546,8 @@ def _check_staged(staging: Path, accepted: dict[str, str]) -> list[str]:
         errors.append("表 4 一个外径都没读出来:检查 D_mm / S_mm 两列的值")
     if "t3-20801-tableB1.csv" in accepted and not stress:
         errors.append(
-            "表 B.1 里没有本工具用到的牌号:「标准」+「牌号」两列要能对上 "
-            "GB/T 8163、GB/T 6479、GB/T 14976 里的 20# / Q345A / Q345B / "
-            "S30408 / S31603"
+            "表 B.1 一行许用应力都没读出来:检查「许用应力_<温度>」列是不是数值,"
+            "以及「牌号」列抄的是不是材料牌号(不是尺寸或标准号)"
         )
     return errors
 
@@ -645,25 +668,64 @@ def _load_od_to_walls(
     )
 
 
+def project_grade(raw: str) -> str:
+    """表 B.1 里的牌号写法 → 本项目的牌号叫法(查 `GRADE_ALIASES`,不认识就原样)。"""
+    text = str(raw or "").strip()
+    for alias, name in GRADE_ALIASES.items():
+        if text == alias or text.startswith(alias):
+            return name
+    return text
+
+
+def material_code_for(grade: str) -> tuple[str | None, str]:
+    """牌号 → (HG/T 20519.6 材质类别代号, 来源)。
+
+    来源三种:`explicit`(预置映射)、`prefix`(按前缀推断)、`unknown`(判不出来)。
+    判不出来时调用方按 E 暂记并告警,不在这里替用户拍板。
+    """
+    text = str(grade or "").strip()
+    if not text:
+        return None, "unknown"
+    code = MATERIAL_CODE_BY_GRADE.get(text)
+    if code:
+        return code, "explicit"
+    for pattern, code in MATERIAL_CODE_RULES:
+        if pattern.match(text):
+            return code, "prefix"
+    return None, "unknown"
+
+
+#: 牌号至少要有这些字符之一(字母或 #),且不能太长。用来把"牌号列其实抄的是尺寸"
+#: 这类错位挡在外面 —— 例如 Φ57×3.5、112.5 都不像材料牌号。
+_GRADE_SHAPE = re.compile(r"[A-Za-z#]")
+
+
+def looks_like_grade(text: str) -> bool:
+    """牌号写法是否像个牌号(形状判断,不判断牌号真假)。"""
+    value = str(text or "").strip()
+    return bool(value) and len(value) <= 24 and bool(_GRADE_SHAPE.search(value))
+
+
 def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
-    """表 B.1 的行 → {本项目牌号: {温度: 许用应力 MPa}}(不碰模块状态)。"""
+    """表 B.1 的行 → {本项目牌号: {温度: 许用应力 MPa}}(不碰模块状态)。
+
+    两组来源:
+    * `_STRESS_PICK` 里的预置牌号:按固定「标准 + 牌号」取行(Q345B 三个尺寸档取
+      各温度最小值),保证放开全表后历史工况的结论不变;
+    * 其余牌号:表里录了什么就收什么,同一牌号多行(多尺寸档 / 多标准)同样取最小值。
+      牌号先经 `project_grade()` 归一到项目叫法,避免 06Cr19Ni10(304) 与 S30408
+      变成两种材料。
+    """
     temps = {}
     for key in rows[0].keys() if rows else []:
         m = re.fullmatch(r"许用应力_(\d+)", key or "")
         if m:
             temps[int(m.group(1))] = key
     temps = dict(sorted(temps.items()))
+    if not temps:
+        return {}
 
-    out: dict[str, dict[float, float]] = {}
-    for grade, (std, mark) in _STRESS_PICK.items():
-        matched = [
-            r
-            for r in rows
-            if r.get("标准") == std
-            and (mark in ("", "*") or str(r.get("牌号", "")).startswith(mark))
-        ]
-        if not matched:
-            continue
+    def table_of(matched: list[dict]) -> dict[float, float]:
         table: dict[float, float] = {}
         for t, col in temps.items():
             vals = []
@@ -674,12 +736,43 @@ def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
                         vals.append(float(raw))
                     except ValueError:
                         pass
-            if not vals:
-                continue
-            # mark="*" 表示多尺寸档并存,取保守值(最小);其余直接取第一个
-            table[float(t)] = min(vals)
+            if vals:
+                # 多行并存时取保守值(最小),与 Q345B 原来的口径一致
+                table[float(t)] = min(vals)
+        return table
+
+    out: dict[str, dict[float, float]] = {}
+
+    # ① 预置牌号:固定取行规则优先
+    for grade, (std, mark) in _STRESS_PICK.items():
+        matched = [
+            r
+            for r in rows
+            if r.get("标准") == std
+            and (mark in ("", "*") or str(r.get("牌号", "")).startswith(mark))
+        ]
+        if not matched:
+            continue
+        table = table_of(matched)
         if table:
             out[grade] = table
+
+    # ② 其余牌号:表里有什么收什么,已被 ① 收过的跳过
+    grouped: dict[str, list[dict]] = {}
+    for r in rows:
+        raw_grade = str(r.get("牌号") or "").strip()
+        if not raw_grade:
+            continue
+        if not looks_like_grade(raw_grade):
+            continue
+        name = project_grade(raw_grade)
+        if name in out:
+            continue
+        grouped.setdefault(name, []).append(r)
+    for name, matched in grouped.items():
+        table = table_of(matched)
+        if table:
+            out[name] = table
     return out
 
 
@@ -808,6 +901,66 @@ def standards_status(dir_: Path | None = None) -> dict:
     return {"dir": _dir_label(base), "files": files}
 
 
+# ---------------------------------------------------------------- 格式模板
+#: 模板只有表头 + 2 行虚构数值:用来对列名,不能当数据。导入时按文本比对挡掉,
+#: 免得有人把示例里的 111.1 / 11.1 当真实规格导进去算出一张看着像真的表。
+
+
+def _norm_csv_text(text) -> str:
+    """比较模板用的归一化:去 BOM、统一换行、去行尾空白。"""
+    raw = str(text or "").lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n")
+    return "\n".join(line.rstrip() for line in raw.split("\n")).strip()
+
+
+def template_texts() -> dict[str, str]:
+    """三份模板的归一化文本;读不到的那份不出现在结果里(不回退、不造)。"""
+    out: dict[str, str] = {}
+    for spec in STD_FILES:
+        path = TEMPLATE_DIR / spec["name"]
+        try:
+            out[spec["name"]] = _norm_csv_text(path.read_text(encoding="utf-8-sig"))
+        except OSError:
+            continue
+    return out
+
+
+def is_template_text(text) -> bool:
+    """是不是原封不动的那份示例模板。"""
+    norm = _norm_csv_text(text)
+    if not norm:
+        return False
+    return any(norm == t for t in template_texts().values())
+
+
+def template_preview() -> dict:
+    """填写提示词要用的示例:表头 + 示例行 + 导入门槛。"""
+    files = []
+    for spec in STD_FILES:
+        path = TEMPLATE_DIR / spec["name"]
+        rows = _read_csv(path)
+        headers = list(rows[0].keys()) if rows else list(spec["columns"])
+        files.append(
+            {
+                "name": spec["name"],
+                "label": spec["label"],
+                "from": spec["from"],
+                "columns": list(spec["columns"]),
+                "need": spec["need"],
+                "headers": headers,
+                "rows": [[str(r.get(h) or "") for h in headers] for r in rows],
+            }
+        )
+    return {
+        "dir": "samples/pipe-standards-template",
+        "exists": all((TEMPLATE_DIR / s["name"]).is_file() for s in STD_FILES),
+        "files": files,
+        "note": (
+            "示例数值为虚构,仅示列名与写法。表 1 / 表 4 至少 10 行、表 B.1 至少 1 行才能导入;"
+            "模板原样导入会被拒绝。"
+        ),
+    }
+
+
 def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
     """校验单个 CSV 的文本,返回 (错误列表, 统计)。"""
     if not isinstance(text, str) or not text.strip():
@@ -892,6 +1045,13 @@ def import_standards(
         if spec is None:
             errors.append(
                 f"不认识的文件名 {name!r};只收 " + "、".join(s["name"] for s in STD_FILES)
+            )
+            continue
+        if is_template_text(text):
+            # 模板是给人对列名用的,数值是编的;真导进去会算出一张看着像真的假表
+            errors.append(
+                f"{name}:这是随项目分发的格式模板(示例数值),不是标准表原文 —— "
+                "按模板的列名填入真实数据后再导入"
             )
             continue
         errs, _info = _validate_std_text(spec, text)
@@ -1070,11 +1230,19 @@ def piping_class_status() -> dict:
 
 PIPING_CLASS_PATH = _CONFIG_DIR / "piping-classes.json"
 
-#: 允许填进等级表的牌号(与许用应力表一致)
-PIPING_CLASS_GRADES = tuple(MATERIAL_CODE_BY_GRADE)
-
 #: 介质代号可以填的取值(空列表 = 不限制介质)
 PIPING_CLASS_MEDIA = ("PL", "PG", "PGL")
+
+
+def piping_class_grades() -> tuple[str, ...]:
+    """等级表与管材下拉可选的牌号。
+
+    以**已录入的表 B.1** 为准:录了什么牌号就能选什么牌号(含 06Cr19Ni10(304)
+    这类完整写法,已归一成 S30408)。表没录时退回 5 个预置牌号,保证空环境下页面
+    仍可用;此时页面的标准表状态会明确显示"未录入",不会让人以为表已经生效。
+    """
+    grades = tuple(sorted(ALLOWABLE_STRESS))
+    return grades or tuple(sorted(MATERIAL_CODE_BY_GRADE))
 
 
 def reload_piping_classes() -> None:
@@ -1090,6 +1258,7 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
     前缀/介质至少给一个 —— 至于"这个介质该不该用这个材质"不在这里判断。
     """
     errors: list[str] = []
+    grades_ok = piping_class_grades()
     data = payload if isinstance(payload, dict) else {}
     raw_rules = data.get("rules") or []
     if not isinstance(raw_rules, list):
@@ -1115,8 +1284,10 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
         if not prefixes and not media:
             errors.append(f"第 {i} 条:前缀和介质至少填一个")
             continue
-        if grade not in PIPING_CLASS_GRADES:
-            errors.append(f"第 {i} 条:牌号 {grade!r} 不在 {'/'.join(PIPING_CLASS_GRADES)} 里")
+        if grade not in grades_ok:
+            errors.append(
+                f"第 {i} 条:牌号 {grade!r} 不在已录入的表 B.1 里(可用 {'/'.join(grades_ok)})"
+            )
             continue
         bad_media = [m for m in media if m not in PIPING_CLASS_MEDIA]
         if bad_media:
@@ -1148,8 +1319,8 @@ def validate_piping_classes(payload) -> tuple[dict, list[str]]:
     raw_default = data.get("default")
     if isinstance(raw_default, dict) and str(raw_default.get("grade") or "").strip():
         grade = str(raw_default.get("grade")).strip()
-        if grade not in PIPING_CLASS_GRADES:
-            errors.append(f"兜底牌号 {grade!r} 不在 {'/'.join(PIPING_CLASS_GRADES)} 里")
+        if grade not in grades_ok:
+            errors.append(f"兜底牌号 {grade!r} 不在已录入的表 B.1 里(可用 {'/'.join(grades_ok)})")
         else:
             try:
                 c2 = float(raw_default.get("corrosion_mm") or 0.0)

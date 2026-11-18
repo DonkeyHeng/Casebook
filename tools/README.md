@@ -12,13 +12,16 @@
 | `probe_components.py` | 组分字典探测:打印 `\Data\Components` 树与各候选父路径命中情况,判断这版 COM 树有没有组分属性层(CAS 读取路径的依据) | ✅ | 只打印 |
 | `probe_viscosity.py` | 粘度节点探测:打印流股 `Output\STRM_UPP` 下的子节点(`PL` / `PBUB` / `MUMX`)与候选路径读到的值+单位;加 `--leaves` 列出 5 层内所有有值叶子 | ✅ | 只打印 |
 | `probe_blocks.bat` / `probe_blocks.py` | **双击入口**:探测塔的冷凝器/再沸器负荷节点、换热器面积节点(Output 与 Input 都扫) | ✅ 模型已打开且跑过 | 只打印(`--save` 写 `probe_out/`) |
+| `dump_fixture.py` | 把当前打开的模型导出成**脱敏节点树夹具**(流股名/设备名自动改写),写 `tools/fixtures/<case>/tree.json` | ✅ 模型已打开且跑过 | 写 `tools/fixtures/` |
+| `fake_session.py` | 回放夹具的假 COM session:`read_case()` 不连 Aspen 也能跑;带 `drop_subtree` / `as_leaf` / `patch` 变异,用来守版本差异与单点故障 | ❌ | 只读夹具 |
+| `fixtures/` | 脱敏节点树夹具(JSON),给 `selftest.py` 的 `test_reader_fixture()` 用;格式与约定见 `fixtures/README.md` | ❌ | 只读 |
 | `build_sample.py` | 从当前打开的模型重读一份工况,生成**脱敏**的公开示例库 `samples/case-23-error.db`;`--from-db data/cases.db --case N` 可改成从已读工况复制(不用 Aspen) | ✅ 模型已打开(用 `--from-db` 时不用) | 写 `samples/` |
 | `build_sample.bat` | **双击入口**:同上,必须在桌面会话跑(DSH 沙箱里 ROT 为空) | ✅ | 同上 |
 | `bench.py` | 性能基准:COM 调用成本与规模曲线 | ✅ | 只打印 |
 | `column_diag.py` | 塔逐板剖面 + 异常标记(只标记,不给修复建议) | ✅ | 只打印 |
 | `fill_composition.py` | 给已存工况**批量补**流股组成(网页只能一条条点) | ✅ 且必须是同一运行 | 写库 |
 | `balance_report.py` | 批量生成《物料与能量衡算报告》.docx:`python -m tools.balance_report --case 40 [--blocks …] [--families …]`;与网页「衡算报告」页同一套代码 | ❌ | 写 `data/preview/`(或 `--out`) |
-| `selftest.py` | 判定 / 单位 / 焓平衡 / 管路选型回归自测,拿真实工况当固定样本 | ❌ | 只读库 |
+| `selftest.py` | 判定 / 单位 / 焓平衡 / 管路选型回归自测,拿真实工况当固定样本;含 `test_reader_fixture()` 用 `fixtures/` 回放整棵 COM 节点树 | ❌ | 只读库 |
 | `make_pipe_schedule.py` | 命令行生成《管道选型一览表》.docx(与网页导出同一套代码):`python -m tools.make_pipe_schedule --case 55 [--audit] [--out …]` | ❌ | 写 `data/preview/`(或 `--out`) |
 | `check_render.mjs` | 前端渲染回归(180 条):Node + DOM 桩跑真实 `app.js` 的泵设计块 / 流股表 / 首页 / 家族页签 / 折叠面板 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底 / 详细参数折叠,挡住「模板读 state 缺字段 → 整块静默空白」;`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
@@ -36,6 +39,8 @@
 - 要确认「扬程 / 汽蚀余量 / 蒸气压 能不能直接从 Aspen 读」→ `probe_pump.py --attach --save`
 - 示例库要跟着新字段更新(读的字段变了、示例还是旧的)→ `build_sample.py`,只读重读一份并脱敏
 - 改了判定 / 单位 / 焓平衡口径 → 先跑 `selftest.py`;过了再 `repair_cases.py --apply`
+- 改了 `reader.py` 里读的节点路径、或换了 Aspen 版本 → 用 `dump_fixture.py` 重采一份
+  `fixtures/`,再跑 `selftest.py`:夹具会拦住"新路径拼错 / 版本少了一层"这类静默变空
 - 改了 `app/web/static/app.js` 的渲染逻辑 → `node --check` 查语法,再 `node tools/check_render.mjs` 查静默空白
 - 改了前端 / CSS 且服务已起来 → `python -m tools.ui_sweep`(无头浏览器过 7 页 × 两主题,抓控制台报错);脚本不会自己启动服务,截图不入库
 - 读完工况、想给整份工况补组成(导出样本 / 离线分析)→ `fill_composition.py --case N`,要趁 Aspen 还开着

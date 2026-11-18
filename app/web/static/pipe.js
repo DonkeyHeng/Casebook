@@ -304,6 +304,8 @@ function bindPipeEvents() {
   if (stdCancel) stdCancel.addEventListener("click", closePipeStd);
   const stdImport = document.getElementById("pipeStdImport");
   if (stdImport) stdImport.addEventListener("click", doPipeStdImport);
+  const stdPrompt = document.getElementById("pipeStdPrompt");
+  if (stdPrompt) stdPrompt.addEventListener("click", copyPipeStdPrompt);
   const stdModal = document.getElementById("pipeStdModal");
   if (stdModal) {
     stdModal.addEventListener("click", (e) => {
@@ -384,16 +386,17 @@ function openPipeClass() {
   document.addEventListener("keydown", pipeClassEsc);
   api("/api/piping-classes").then((data) => {
     const grades = (data && data.grades) || PIPE_CLASS_GRADES;
+    const codes = (data && data.material_codes) || {};
     const defaultSel = document.getElementById("pipeClassDefault");
     if (defaultSel) {
       defaultSel.innerHTML = '<option value="">(不指定,走页面上的默认管材)</option>'
-        + grades.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`).join("");
+        + grades.map((g) => `<option value="${esc(g)}">${esc(gradeLabel(g, codes))}</option>`).join("");
       defaultSel.value = (data && data.default && data.default.grade) || "";
     }
     const tbody = document.querySelector("#pipeClassTable tbody");
     if (tbody) tbody.innerHTML = "";
-    ((data && data.rules) || []).forEach((rule) => addPipeClassRow(rule, grades));
-    if (!((data && data.rules) || []).length) addPipeClassRow({}, grades);
+    ((data && data.rules) || []).forEach((rule) => addPipeClassRow(rule, grades, codes));
+    if (!((data && data.rules) || []).length) addPipeClassRow({}, grades, codes);
   }).catch((err) => showPipeClassError(`读不到当前配置:${err.message}`));
 }
 
@@ -417,8 +420,19 @@ function showPipeClassError(text) {
   el.textContent = text;
 }
 
+/* 牌号选项文案:带上材质类别代号(HG/T 20519.6 的 A–H)。
+   按前缀推断出来的标「推断」—— 等级号末字母会影响成品编号,不能装作是查过表的结论 */
+function gradeLabel(grade, codes) {
+  const info = (codes || {})[grade];
+  if (!info) return grade;
+  // 只有"推断"和"待定"才加注:常规牌号的类别是查表来的,加代号只会把窄窗口里的下拉撑爆
+  if (info.source === "prefix" && info.code) return `${grade} · ${info.code}(推断)`;
+  if (!info.code || info.source === "unknown") return `${grade}(类别待定)`;
+  return grade;
+}
+
 /* 一行 = 一条规则:前缀(逗号分隔) / 介质(逗号分隔) / 牌号 / 腐蚀裕量 / 说明 */
-function addPipeClassRow(rule, grades) {
+function addPipeClassRow(rule, grades, codes) {
   const tbody = document.querySelector("#pipeClassTable tbody");
   if (!tbody) return;
   const list = grades || PIPE_CLASS_GRADES;
@@ -427,7 +441,7 @@ function addPipeClassRow(rule, grades) {
     <td><input class="pc-prefix" placeholder="如 CW,CWR" value="${esc((rule.stream_prefix || []).join(","))}"></td>
     <td><input class="pc-medium" placeholder="如 PL" value="${esc((rule.medium || []).join(","))}"></td>
     <td><select class="pc-grade">${list.map((g) =>
-      `<option value="${esc(g)}"${g === rule.grade ? " selected" : ""}>${esc(g)}</option>`).join("")}</select></td>
+      `<option value="${esc(g)}"${g === rule.grade ? " selected" : ""}>${esc(gradeLabel(g, codes))}</option>`).join("")}</select></td>
     <td><input class="pc-c2" type="number" step="0.1" min="0" max="20" value="${rule.corrosion_mm ?? 0}"></td>
     <td><input class="pc-note" placeholder="可选" value="${esc(rule.note || "")}"></td>
     <td><button class="btn pc-del" type="button" title="删掉这一条"><svg class="ico"><use href="#i-close"/></svg></button></td>`;
@@ -504,6 +518,9 @@ function closePipeStd() {
   const modal = document.getElementById("pipeStdModal");
   if (modal) modal.classList.add("hidden");
   document.removeEventListener("keydown", pipeStdEsc);
+  // 关窗即复位:下次打开是干净状态,不会停在上次那条复制提示上
+  const msg = document.getElementById("pipeStdPromptMsg");
+  if (msg) msg.textContent = "";
   restoreModalFocus();
 }
 
@@ -525,6 +542,28 @@ function showPipeStdOk(text) {
   if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
   el.classList.remove("hidden");
   el.textContent = text;
+}
+
+/* 「复制填写提示词」:正文由后端按 STD_FILES 与模板 CSV 现拼,JS 里不存第二份。
+   与「复制选泵提示词」同一套理由:那段字里有反引号、温度列名和表格样例,
+   内联会反复转义,且必然与校验逻辑漂移。 */
+async function copyPipeStdPrompt() {
+  const msg = document.getElementById("pipeStdPromptMsg");
+  const say = (text) => { if (msg) msg.textContent = text; };
+  say("正在取提示词…");
+  try {
+    const res = await fetch("/api/pipe-standards-prompt");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const text = typeof data.text === "string" ? data.text : "";
+    if (!text) throw new Error("提示词为空");
+    const ok = await copyPlainText(text);
+    say(ok
+      ? `已复制 ${text.length} 字 —— 粘进 AI 对话框,再把标准表格的截图或文字一并给它`
+      : "复制失败:浏览器不允许写剪贴板,可打开 docs/pipe-standards-extract-prompt.md 手动复制");
+  } catch (err) {
+    say(`取提示词失败:${err.message}(后台服务是不是没起来?)`);
+  }
 }
 
 async function loadPipeStdInfo() {

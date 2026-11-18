@@ -1,0 +1,373 @@
+{
+  "case": "v11-pump",
+  "meta": {
+    "schema": 1,
+    "source": "handcrafted",
+    "aspen_version": "V11",
+    "unit_set": "METCBAR",
+    "collected_at": "2026-11-18",
+    "model_path": "model/v11-pump.apw",
+    "server": "Aspen Plus (fixture)",
+    "unread_ok": [
+      "\\Data\\Streams\\*\\Output\\PL\\MIXED\\LIQUID\\*",
+      "\\Data\\Blocks\\*\\Input\\FCOLD",
+      "\\Data\\Blocks\\*\\Input\\FHOT",
+      "\\Data\\Blocks\\*\\Input\\PRES"
+    ],
+    "note": "V11 布局:PBUB 下没有 TOTAL 层(真值在 MIXED\\LIQUID)、粘度在 MIXED 叶子上。全部数值为构造值,模型结构取自公开的 Aspen 版本行为描述,不含任何第三方模型数据。"
+  },
+  "nodes": {
+    "\\Data\\Blocks": {
+      "kids": [
+        "P01"
+      ]
+    },
+    "\\Data\\Components": {
+      "kids": [
+        "Attr-Comps"
+      ]
+    },
+    "\\Data\\Streams": {
+      "kids": [
+        "S01"
+      ]
+    },
+    "\\Data\\Blocks\\P01": {
+      "v": null,
+      "kids": [
+        "Input",
+        "Output"
+      ],
+      "attrs": {
+        "6": "Pump"
+      }
+    },
+    "\\Data\\Components\\Attr-Comps": {
+      "kids": [
+        "ETHANOL",
+        "WATER"
+      ]
+    },
+    "\\Data\\Streams\\S01": {
+      "v": null,
+      "kids": [
+        "Output"
+      ],
+      "attrs": {
+        "6": "MATERIAL"
+      }
+    },
+    "\\Data\\Blocks\\P01\\Input": {
+      "kids": [
+        "PRES"
+      ]
+    },
+    "\\Data\\Blocks\\P01\\Output": {
+      "kids": [
+        "BLKMSG",
+        "BLKSTAT",
+        "BRAKE_POWER",
+        "CEFF",
+        "HEAD_CAL",
+        "IN_PRES",
+        "MW_LIQ",
+        "RHO_LIQ",
+        "VFLOW"
+      ]
+    },
+    "\\Data\\Components\\Attr-Comps\\ETHANOL": {
+      "kids": [
+        "CAS",
+        "DBName1"
+      ]
+    },
+    "\\Data\\Components\\Attr-Comps\\WATER": {
+      "kids": [
+        "CAS",
+        "DBName1"
+      ]
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output": {
+      "kids": [
+        "CSSTAT",
+        "CVSTAT",
+        "ITDATE",
+        "ITSTAT",
+        "MACHINE",
+        "NODENAME",
+        "PER_ERROR",
+        "PPSTAT",
+        "RSTAT",
+        "RUNID",
+        "SENSSTAT",
+        "UOSSTAT",
+        "USER",
+        "VERNO"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output": {
+      "kids": [
+        "DESTINATION",
+        "HMX",
+        "HMX_FLOW",
+        "HMX_MASS",
+        "MASSFLOW3",
+        "PL",
+        "RES_MASSFLOW",
+        "RES_MOLEFLOW",
+        "RES_PRES",
+        "RES_TEMP",
+        "RES_VFRAC",
+        "RES_VOLFLOW",
+        "SOURCE",
+        "STRM_UPP",
+        "X",
+        "Y"
+      ]
+    },
+    "\\Data\\Blocks\\P01\\Input\\PRES": {
+      "v": 3.2,
+      "u": "bar"
+    },
+    "\\Data\\Blocks\\P01\\Output\\BLKMSG": {
+      "v": ""
+    },
+    "\\Data\\Blocks\\P01\\Output\\BLKSTAT": {
+      "v": 0
+    },
+    "\\Data\\Blocks\\P01\\Output\\BRAKE_POWER": {
+      "v": 2.2,
+      "u": "kW"
+    },
+    "\\Data\\Blocks\\P01\\Output\\CEFF": {
+      "v": 0.72
+    },
+    "\\Data\\Blocks\\P01\\Output\\HEAD_CAL": {
+      "v": 100.0,
+      "u": "ft"
+    },
+    "\\Data\\Blocks\\P01\\Output\\IN_PRES": {
+      "v": 3.2,
+      "u": "bar"
+    },
+    "\\Data\\Blocks\\P01\\Output\\MW_LIQ": {
+      "v": 18.0
+    },
+    "\\Data\\Blocks\\P01\\Output\\RHO_LIQ": {
+      "v": 55.4,
+      "u": "kmol/cum"
+    },
+    "\\Data\\Blocks\\P01\\Output\\VFLOW": {
+      "v": 8.0,
+      "u": "cum/hr"
+    },
+    "\\Data\\Components\\Attr-Comps\\ETHANOL\\CAS": {
+      "v": "64-17-5"
+    },
+    "\\Data\\Components\\Attr-Comps\\ETHANOL\\DBName1": {
+      "v": "PURE"
+    },
+    "\\Data\\Components\\Attr-Comps\\WATER\\CAS": {
+      "v": "7732-18-5"
+    },
+    "\\Data\\Components\\Attr-Comps\\WATER\\DBName1": {
+      "v": "PURE"
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\CSSTAT": {
+      "v": 2
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\CVSTAT": {
+      "v": 0
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\ITDATE": {
+      "v": "2026-11-18 10:00:00"
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\ITSTAT": {
+      "v": 0
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\MACHINE": {
+      "v": ""
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\NODENAME": {
+      "v": ""
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\PER_ERROR": {
+      "v": 0
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\PPSTAT": {
+      "v": 2
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\RSTAT": {
+      "v": 0
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\RUNID": {
+      "v": 42
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\SENSSTAT": {
+      "v": 2
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\UOSSTAT": {
+      "v": 0
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\USER": {
+      "v": "user"
+    },
+    "\\Data\\Results Summary\\Run-Status\\Output\\VERNO": {
+      "v": "41.0"
+    },
+    "\\Data\\Streams\\S01\\Output\\DESTINATION": {
+      "v": "P01"
+    },
+    "\\Data\\Streams\\S01\\Output\\HMX": {
+      "v": 1,
+      "u": "J/kmol",
+      "kids": [
+        "MIXED"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\HMX_FLOW": {
+      "v": 1,
+      "u": "kW",
+      "kids": [
+        "MIXED"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\HMX_MASS": {
+      "v": 1,
+      "u": "J/kg",
+      "kids": [
+        "MIXED"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\MASSFLOW3": {
+      "kids": [
+        "ETHANOL",
+        "WATER"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\PL": {
+      "v": 1,
+      "u": "bar",
+      "kids": [
+        "MIXED"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\RES_MASSFLOW": {
+      "v": 8.0,
+      "u": "t/hr"
+    },
+    "\\Data\\Streams\\S01\\Output\\RES_MOLEFLOW": {
+      "v": 440.0,
+      "u": "kmol/hr"
+    },
+    "\\Data\\Streams\\S01\\Output\\RES_PRES": {
+      "v": 180.0,
+      "u": "kPa"
+    },
+    "\\Data\\Streams\\S01\\Output\\RES_TEMP": {
+      "v": 60.0,
+      "u": "C"
+    },
+    "\\Data\\Streams\\S01\\Output\\RES_VFRAC": {
+      "v": 0.0
+    },
+    "\\Data\\Streams\\S01\\Output\\RES_VOLFLOW": {
+      "v": 8.0,
+      "u": "cum/hr"
+    },
+    "\\Data\\Streams\\S01\\Output\\SOURCE": {
+      "v": ""
+    },
+    "\\Data\\Streams\\S01\\Output\\X": {
+      "kids": [
+        "ETHANOL",
+        "WATER"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\Y": {
+      "kids": [
+        "ETHANOL",
+        "WATER"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\HMX\\MIXED": {
+      "v": -316000.0,
+      "u": "J/kmol"
+    },
+    "\\Data\\Streams\\S01\\Output\\HMX_FLOW\\MIXED": {
+      "v": -35.1111,
+      "u": "kW"
+    },
+    "\\Data\\Streams\\S01\\Output\\HMX_MASS\\MIXED": {
+      "v": -15800.0,
+      "u": "J/kg"
+    },
+    "\\Data\\Streams\\S01\\Output\\MASSFLOW3\\ETHANOL": {
+      "v": 3200.0,
+      "u": "kg/hr"
+    },
+    "\\Data\\Streams\\S01\\Output\\MASSFLOW3\\WATER": {
+      "v": 4800.0,
+      "u": "kg/hr"
+    },
+    "\\Data\\Streams\\S01\\Output\\PL\\MIXED": {
+      "v": 1,
+      "u": "bar",
+      "kids": [
+        "LIQUID"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\STRM_UPP\\PBUB": {
+      "v": 1,
+      "u": "bar",
+      "kids": [
+        "MIXED"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\STRM_UPP\\VISC": {
+      "v": 1,
+      "u": "cP",
+      "kids": [
+        "MIXED"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\X\\ETHANOL": {
+      "v": 0.4
+    },
+    "\\Data\\Streams\\S01\\Output\\X\\WATER": {
+      "v": 0.6
+    },
+    "\\Data\\Streams\\S01\\Output\\Y\\ETHANOL": {
+      "v": 0.1
+    },
+    "\\Data\\Streams\\S01\\Output\\Y\\WATER": {
+      "v": 0.9
+    },
+    "\\Data\\Streams\\S01\\Output\\PL\\MIXED\\LIQUID": {
+      "v": 1,
+      "u": "bar",
+      "kids": [
+        "WATER"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\STRM_UPP\\PBUB\\MIXED": {
+      "v": 1,
+      "u": "bar",
+      "kids": [
+        "LIQUID"
+      ]
+    },
+    "\\Data\\Streams\\S01\\Output\\STRM_UPP\\VISC\\MIXED": {
+      "v": 1.15,
+      "u": "cP"
+    },
+    "\\Data\\Streams\\S01\\Output\\PL\\MIXED\\LIQUID\\WATER": {
+      "v": 0.0424791,
+      "u": "bar"
+    },
+    "\\Data\\Streams\\S01\\Output\\STRM_UPP\\PBUB\\MIXED\\LIQUID": {
+      "v": 0.1875,
+      "u": "bar"
+    }
+  }
+}
