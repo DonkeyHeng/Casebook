@@ -1,0 +1,12 @@
+# 开发与 CI 依赖:只跑主程序不需要装这些。
+# 装法:`py -m pip install -r requirements-dev.txt`
+-r requirements.txt
+
+# 静态检查(CI 里跑 ruff check / ruff format --check)
+ruff>=0.14
+
+# 自测框架(tools/selftest.py 仍可独立跑;tests/ 下的用例用 pytest)
+pytest>=8.4
+
+# 只有 tools/build_exe.py 打 exe 时需要;不装不影响任何自测
+pyinstaller>=6.10

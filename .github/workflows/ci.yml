@@ -1,0 +1,51 @@
+name: CI
+
+# 三道闸门:静态检查 / 自测(不接 Aspen) / 前端渲染回归。
+# 自测与渲染回归都不需要 Aspen:节点树夹具回放(fake_session + fixtures)与
+# 内置样本库(samples/case-23-error.db)已覆盖整条读取链路。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    # 3.13 是 ruff.toml 的 target-version。开发机用更新的解释器(本机 3.15),
+    # 这里守住发布面必须兼容的版本与代码风格口径。
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: 静态检查
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: 自测(不接 Aspen)
+        run: python -m tools.selftest --db samples/case-23-error.db
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 前端渲染回归
+        run: node tools/check_render.mjs
