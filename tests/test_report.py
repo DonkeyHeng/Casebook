@@ -377,7 +377,9 @@ def test_export_consistency() -> None:
     src = _Path("app/api/routes/meta.py").read_text(encoding="utf-8")
     hit = re.search(r"block_fields = \[(.*?)\]", src, re.S)
     server_fields = set(re.findall(r'"([a-z_0-9]+)"', hit.group(1))) if hit else set()
-    js = _Path("app/web/static/app.js").read_text(encoding="utf-8")
+    from tests._harness import frontend_js
+
+    js = frontend_js()  # BLOCK_COMPARE_FIELDS / FAMILY_COLS 在 views/table.js,统一扫全部前端 JS
     hit_js = re.search(r"BLOCK_COMPARE_FIELDS = \[(.*?)\];", js, re.S)
     js_fields = set(re.findall(r'key: "([a-z_0-9]+)"', hit_js.group(1))) if hit_js else set()
     check(

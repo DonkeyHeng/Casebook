@@ -373,7 +373,9 @@ def test_pump_prompt() -> None:
         and "上传刚导出的 Excel 文件并粘贴提示词" in html
         and "剧毒（如 HCN）" in html,
     )
-    js = _P("app/web/static/app.js").read_text(encoding="utf-8")
+    from tests._harness import frontend_js
+
+    js = frontend_js()  # 提示词相关代码在 views/pump.js,统一扫全部前端 JS
     check(
         "提示词:前端从接口取正文",
         "fetchPumpPromptText" in js and "/api/pump-prompt" in js,

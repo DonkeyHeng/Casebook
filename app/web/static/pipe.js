@@ -15,6 +15,7 @@
 
 import { api, esc, fmt } from "./lib/core.js";
 import { state } from "./lib/store.js";
+import { copyPlainText } from "./views/pump.js";
 
 /* ------------------------------------------------------------ 常量 */
 

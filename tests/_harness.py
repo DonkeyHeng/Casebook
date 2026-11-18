@@ -28,6 +28,17 @@ def check(label: str, cond: bool, detail: str = "") -> None:
     raise AssertionError(f"{label}" + (f" — {detail}" if detail else ""))
 
 
+def frontend_js() -> str:
+    """前端全部 JS 拼接后的文本。
+
+    前端已按页面拆成多个 ES Module(app.js + views/*.js + lib/*.js + pipe.js)。
+    "前端字段必须与接口同一组"这类断言不该关心实现落在哪个文件 —— 统一扫全部,
+    以后再拆文件也不会让这类断言悄悄失效。
+    """
+    root = REPO_ROOT / "app" / "web" / "static"
+    return "\n".join(path.read_text(encoding="utf-8") for path in sorted(root.rglob("*.js")))
+
+
 def check_eq(label: str, got, want) -> None:
     check(label, got == want, f"期望 {want!r},实际 {got!r}")
 

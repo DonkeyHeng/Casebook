@@ -46,7 +46,7 @@
 `--chart-1` … `--chart-6` 专供曲线/相态条。**不复用状态色**——
 之前 `#f59e0b` 既是"警告"又是"气相曲线",图上一看就以为是"这条曲线有警告"。
 
-JS 里取颜色统一用 `cssVar("--chart-1")`(定义在 `app.js`),
+JS 里取颜色统一用 `cssVar("--chart-1")`(定义在 `lib/ui.js`),
 不要在 JS 里另抄一份调色板。
 
 ## 2. 字号:5 档
@@ -101,7 +101,7 @@ JS 里取颜色统一用 `cssVar("--chart-1")`(定义在 `app.js`),
   新增可点元素不要 `outline: none`,要改就改这个统一规则。
 - 弹窗(`pipe.js` 三个)必须:Esc 可关、打开时焦点移进去、关闭时焦点还给触发按钮。
   三个用的是同一组 `focusIntoModal()` / `restoreModalFocus()`。
-- 抽屉的 Esc 关在 `app.js::closeDataDrawers()`,只作用于数据页。
+- 抽屉的 Esc 关在 `views/pump.js::closeDataDrawers()`,只作用于数据页。
 - `prefers-reduced-motion: reduce` 时关掉全部动画与过渡(做法见第 12 节)。
 - `color-scheme: light` 已声明:本工具只有一个浅色主题,系统开深色时原生控件
   不会变黑而面板还是白的。
@@ -140,7 +140,7 @@ JS 里取颜色统一用 `cssVar("--chart-1")`(定义在 `app.js`),
 - 三态:`auto`(跟随系统)/ `light` / `dark`,侧栏底部按钮循环切换,记在
   `localStorage["casebook-theme"]`。
 - CSS 只认 `html[data-theme]` 的**明确值**(`light` / `dark`)。
-  `auto` 由 `app.js` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析后写成明确值,
+  `auto` 由 `lib/ui.js` 用 `matchMedia("(prefers-color-scheme: dark)")` 解析后写成明确值,
   所以样式表里只需要**一套** `[data-theme="dark"]`,不用把 prefers-color-scheme 抄两遍。
 - 深色只覆盖**语义层**;原始色板与组件规则一行不动。加/改深色值时,记得同时验对比度。
 - 实测:文字 14.64 / muted 7.05 / accent 6.85 / ok 6.81 / warn 6.85 / err 5.16(对 `#161b22`);
@@ -184,7 +184,7 @@ JS 里取颜色统一用 `cssVar("--chart-1")`(定义在 `app.js`),
 - 复述信息(流股 / 设备 / 运行 ID)= `--fs-xs` 12px。卡片里还会再出现一次,不必抢。
 - `.metric b`(规模、焓平衡四项)= `--fs-lg` 17px。仍明显大于正文 13px,扫读够用。
 
-改这两处之前先读一遍 `app.js::bannerVerdict()`:判定句只有一句,不要在里面复述状态码。
+改这两处之前先读一遍 `lib/ui.js::bannerVerdict()`:判定句只有一句,不要在里面复述状态码。
 
 ## 12. 动效
 

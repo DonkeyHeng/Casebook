@@ -60,14 +60,20 @@ app/
     composition.py 组成按需读(先校验模型与运行 ID,避免旧快照混入)
     window.py     窗口几何记忆(ctypes)
   web/     零构建前端(原生 ES Module):index.html + static/
-    app.js         主页面:状态编排、路由、事件绑定
-    pipe.js        管道页(单独一个模块:进页才拉数据)
-    lib/core.js    请求封装与数字格式化(两个页面共用)
-    lib/store.js   共享页面状态(当前工况、流股表)
-    lib/ui.js      界面外壳公用件:主题、提示条、徽章、判定条
-    views/column.js  塔剖面图
-    views/report.js  衡算报告页
-    style.css      样式
+    app.js       入口:事件绑定与 init;页面实现在 views/
+    pipe.js      管道页(单独一个模块:进页才拉数据)
+    lib/core.js  请求封装与数字格式化(全部页面共用)
+    lib/store.js 共享页面状态(state 是唯一数据源,字段归属表见文件头)
+    lib/ui.js    界面外壳公用件:主题、提示条、徽章、判定条
+    views/table.js       数据页表格:流股 / 设备 / 对比 / 家族页签 / 泵列
+    views/pump.js        泵参数抽屉:参数卡、设计扬程、电机选型
+    views/composition.js 塔剖面详情与流股组成 / CAS 编辑
+    views/column.js      塔剖面图(曲线)
+    views/report.js      衡算报告页
+    views/read.js        读取进度:启动、轮询、完成与错误
+    views/flow.js        流程图:布局、缩放、聚焦、导出
+    views/shell.js       应用外壳:工况载入、页面路由、首页、更新检查
+    style.css    样式
 ```
 
 `api/routes/` 按 URL 前缀分域,加接口是"表里加一行 + 对应域加一个方法",不用在

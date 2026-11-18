@@ -9,10 +9,12 @@
    页面却是空的。这里把**真实的模块源码**去掉 import/export 与末尾 init()
    后拼成一段,装进 vm 用 DOM 桩跑一遍纯渲染函数与保存逻辑,把这类空白挡在提交前。
 
-   前端现在是 ES Module:`app.js` 从 `lib/core.js`(工具)、`lib/store.js`(共享状态)
-   与 `pipe.js`(管道页)取东西。vm 不支持 import,所以这里按模块顺序拼接并去掉
-   模块语法 —— 跑的还是同一份源码,只是换了装载方式。`pipe.js` 不进这轮覆盖
-   (它要真浏览器,归 tools/ui_sweep.py),两个入口给空实现。
+   前端现在是 ES Module:入口 `app.js` 只做事件绑定与 init,页面实现在
+   `views/`(table / pump / composition / read / flow / shell / column / report),
+   共享状态在 `lib/store.js`。vm 不支持 import,所以这里按模块顺序拼接并去掉
+   模块语法 —— 跑的还是同一份源码,只是换了装载方式;模块间的 import 可达性
+   由上面的静态检查兜住。`pipe.js` 不进这轮覆盖(它要真浏览器,归
+   tools/ui_sweep.py),两个入口给空实现。
 
    覆盖分组:
      ①~⑤ 原有:renderPumpDesign / savePumpDesign / pumpDesignNum
@@ -33,13 +35,21 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STATIC = path.join(ROOT, "app", "web", "static");
 
-/* 按依赖顺序拼:工具 → 共享状态 → 界面外壳 → 视图模块 → 主页面。 */
+/* 按依赖顺序拼:工具 → 共享状态 → 界面外壳 → 各视图模块 → 主入口。
+   视图模块之间有少量互相引用（都发生在函数体内），拼接后同处一个作用域，
+   与浏览器里 ES Module 的 live binding 等价；真实模块图由 ui_sweep 兜底。 */
 const MODULES = [
   path.join(STATIC, "lib", "core.js"),
   path.join(STATIC, "lib", "store.js"),
   path.join(STATIC, "lib", "ui.js"),
   path.join(STATIC, "views", "column.js"),
   path.join(STATIC, "views", "report.js"),
+  path.join(STATIC, "views", "table.js"),
+  path.join(STATIC, "views", "pump.js"),
+  path.join(STATIC, "views", "composition.js"),
+  path.join(STATIC, "views", "read.js"),
+  path.join(STATIC, "views", "flow.js"),
+  path.join(STATIC, "views", "shell.js"),
   path.join(STATIC, "app.js"),
 ];
 
@@ -56,6 +66,70 @@ if (appHeadless === appRaw) {
   console.error("✗ 没找到文件末尾的 init(); —— app.js 结构变了,请同步更新本脚本");
   process.exit(1);
 }
+
+/* ── 模块依赖静态检查 ───────────────────────────────────────────────
+   vm 拼接后所有模块同处一个作用域,"引用了别的模块的名字却忘了 import"
+   在这里查不出来,只有真浏览器会报 ReferenceError。所以先静态对一遍:
+   ① 每条 import 的名字必须存在于目标模块的顶层定义;
+   ② 每个模块里出现过的、定义在其它模块的顶层名字,必须出现在它的
+      import 列表里(app.js 的 bindEvents / init / installSampleData 是
+      入口私有,不对外导出,见外的引用只会来自注释,排除)。 */
+function topDefs(src) {
+  const defs = new Set();
+  const re =
+    /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)|^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)/gm;
+  for (let m; (m = re.exec(src)); ) defs.add(m[1] || m[2]);
+  return defs;
+}
+
+function checkModuleDeps() {
+  const files = [...MODULES, path.join(STATIC, "pipe.js")];
+  const sources = new Map(files.map((f) => [path.basename(f), fs.readFileSync(f, "utf8")]));
+  const defsByFile = new Map([...sources].map(([f, s]) => [f, topDefs(s)]));
+  const allDefs = new Set([...defsByFile.values()].flatMap((d) => [...d]));
+  const ENTRY_PRIVATE = new Set(["bindEvents", "init", "installSampleData"]);
+  const problems = [];
+  for (const [file, src] of sources) {
+    // 先剥注释再找引用:注释里提到的函数名不算引用(实测占误报的大头)
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(?:^|\s)\/\/[^\n]*/g, " ");
+    // 再剥字符串(含跨行模板):class 名、URL 里的词不算引用;${} 内的调用
+    // 走下面的"调用形式"检查,不受影响
+    const bare = code
+      .replace(/`(?:\\.|[^\\`])*`/gs, "``")
+      .replace(/(["'])(?:\\.|(?!\1)[^\\])*\1/g, '""')
+      // 局部 const/let/var/function 定义不是对外部名字的引用,一并抹掉
+      .replace(/\b(?:const|let|var|function)\s+[A-Za-z_$][\w$]*/g, "kw");
+    const imported = new Set();
+    for (const m of src.matchAll(/import\s*\{([^}]*)\}\s*from\s*"[^"]+"/g)) {
+      const target = path.basename(m[0].match(/from\s*"([^"]+)"/)[1]);
+      const tdefs = defsByFile.get(target);
+      for (const raw of m[1].split(",")) {
+        const name = raw.trim().split(/\s+as\s+/)[0].trim();
+        if (!name) continue;
+        imported.add(name);
+        if (!tdefs) problems.push(`${file}: import 的目标 ${target} 不在检查清单里`);
+        else if (!tdefs.has(name))
+          problems.push(`${file}: import { ${name} } — ${target} 里没有这个名字`);
+      }
+    }
+    const own = defsByFile.get(file);
+    for (const name of allDefs) {
+      if (own.has(name) || imported.has(name) || ENTRY_PRIVATE.has(name)) continue;
+      const callHit = new RegExp(`\\b${name}\\s*\\(`).test(code);
+      const wordHit = new RegExp(`\\b${name}\\b`).test(bare);
+      if (callHit || wordHit)
+        problems.push(`${file}: 引用了 ${name}(定义在别的模块)但没有 import`);
+    }
+  }
+  if (problems.length) {
+    console.error("✗ 前端模块依赖检查不过:");
+    for (const p of problems) console.error("  ✗ " + p);
+    process.exit(1);
+  }
+  console.log("前端模块依赖检查:import 全部可达,无漏 import");
+}
+
+checkModuleDeps();
 
 const headless = [
   "/* pipe.js 的两个入口:本轮不覆盖管道页,给空实现 */",

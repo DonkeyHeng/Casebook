@@ -1,12 +1,22 @@
-/* 两个页面共用的页面状态:当前工况、流股/设备表、各页子视图。
+/* 所有页面共用的页面状态:当前工况、流股/设备表、各页子视图。
 
 为什么单独一个模块
 ------------------
-`app.js`(主页面)与 `pipe.js`(管道页)都要读"当前选中哪个工况、这次读出来的
-流股表"。以前靠全局作用域共享:普通 <script> 里 `const state` 其实不在 window 上,
-pipe.js 能读到全靠脚本加载顺序与全局词法环境 —— 换个加载方式就断。
+以前靠全局作用域共享:普通 <script> 里 `const state` 其实不在 window 上,
+其它文件能读到全靠脚本加载顺序与全局词法环境 —— 换个加载方式就断。
+现在每个模块显式 `import { state }`,依赖关系在文件头上就能读出来。
 
-这里只放**数据**,不放渲染:两个页面往里写自己那部分字段,读法不变(`state.xxx`)。
+这里只放**数据**,不放渲染。字段归属(谁读写谁,详见各视图模块的 docstring):
+
+  table        streams / blocks / tab / family / families / compare / impact
+               / pumpSpec / filter
+  pump         pump / pumpDesign / pumpSelection / pumpFold / pumpSpec
+  composition  column / streams
+  flow         flow
+  report       report(勾选 / 过滤 / 数据缓存;字段挂在这里由 views/report.js 初始化)
+  shell        current / cases / page / emptyText / emptyIsError / bannerCollapsed
+               (载入工况时顺带重置各页子状态)
+  read         不直接持有状态,读完经 shell 的 loadCase / refreshCases 更新
 */
 
 export const state = {
