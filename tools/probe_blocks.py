@@ -32,8 +32,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from app.design import block_family  # noqa: E402
-from tools.probe_aspen import Report, attach, find  # noqa: E402
-from tools.probe_pump import children, name_of, unit_of, value_of  # noqa: E402
+from tools.probe_common import Report, attach, children, find, name_of, unit_of, value_of  # noqa: E402  # noqa: E402
 
 # 塔:负荷类候选(名字里出现这些子串的都列出来)
 TOWER_KEYS = ("COND", "REB", "DUTY", "QCALC", "QNET", "HEAT")

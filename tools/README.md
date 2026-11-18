@@ -6,6 +6,7 @@
 | --- | --- | --- | --- |
 | `probe_topology.bat` | **双击入口**:只读探测拓扑 / 焓值 / 公用工程,产出 `data/probe_topology.txt` | ✅ 模型已打开且跑过 | 写 `data/probe_topology.txt` |
 | `probe_topology.py` | 上面 bat 的本体,支持 `--model` / `--out` | ✅ | 同上 |
+| `probe_common.py` | 探针共用的 COM 读取件:附着 Aspen、在结果树里找节点、读子节点与值单位 | ✅ | 只读 |
 | `probe_aspen.py` | COM 诊断:注册表、附着、字段全名(`--attach --deep`) | ✅ | 写 `--out` 指定目录 |
 | `probe_pump.py` | 泵字段探测:泵块 Output 全节点、进出口流股的蒸气压/密度、Input 里的曲线 | ✅ | 只打印(`--save` 写 `probe_out/`) |
 | `probe_pv.py` | 蒸气压 p_v 探测:逐台泵进口流股试候选节点、扫子树、按数值反查,定 p_v 到底在哪个节点 | ✅ 模型已打开且跑过 | 只打印(`--save` 写 `probe_out/`) |
@@ -51,5 +52,7 @@
 ## 注意
 
 - `probe_*.py` 都要求**在真实桌面会话**里跑,且与 Aspen 同权限级别。
+- 共用的读取件在 `tools/probe_common.py`;`probe_pump.py` 里的 children / name_of / value_of /
+  unit_of 是它的别名,不是另一份实现。
 - `repair_cases.py --apply` 会改 `data/cases.db`,跑之前先复制一份库。
 - 改了安装步骤 → 同时改 `docs/install.md` 与 `docs/install-text.txt`(发布包根目录里的 `安装说明.txt` 就是后者)。

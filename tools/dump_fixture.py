@@ -54,8 +54,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.probe_aspen import Report, attach, find  # noqa: E402
-from tools.probe_pump import children, name_of, unit_of, value_of  # noqa: E402
+from tools.probe_common import Report, attach, children, find, name_of, unit_of, value_of  # noqa: E402  # noqa: E402
 
 SCHEMA = 1
 

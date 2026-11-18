@@ -31,7 +31,15 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.probe_aspen import Report, attach, find  # noqa: E402
+from tools.probe_common import (  # noqa: E402
+    Report,
+    attach,
+    children,
+    find,
+    name_of,
+    unit_of,
+    value_of,
+)
 
 # 蒸气压候选名:Aspen 流股输出里可能叫这些,逐个试,不做假设
 PV_CANDIDATES = (
@@ -72,44 +80,6 @@ INPUT_KEYWORDS = ("HEAD", "CURVE", "EFF", "NPSH", "PRES", "FLOW", "SPEED")
 
 
 # ---------------------------------------------------------------- 树操作
-
-
-def children(node) -> list:
-    out = []
-    if node is None:
-        return out
-    try:
-        els = node.Elements
-        for i in range(els.Count):
-            try:
-                out.append(els.Item(i))
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return out
-
-
-def name_of(node) -> str:
-    try:
-        return str(node.Name)
-    except Exception:
-        return "?"
-
-
-def value_of(node):
-    try:
-        return node.Value
-    except Exception:
-        return None
-
-
-def unit_of(node) -> str:
-    try:
-        u = node.UnitString
-        return str(u() if callable(u) else u)
-    except Exception:
-        return ""
 
 
 def dump_children(rep: Report, node, limit: int = 200) -> list[list]:
