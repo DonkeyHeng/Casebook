@@ -9,7 +9,7 @@ With an active Aspen Plus simulation open, click **"Read Current Case"** to insp
 [简体中文](README.md) | **English**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.5.0](https://img.shields.io/badge/version-v1.5.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.0)
+[![Version: v1.5.1](https://img.shields.io/badge/version-v1.5.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)
 [![Install Guide](https://img.shields.io/badge/Install%20Guide-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **Disclaimer & Privacy Notice**
@@ -225,7 +225,7 @@ Casebook/
 | Command | Description |
 | :--- | :--- |
 | `python -m app.cli --list` / `--read` / `--cases` / `--show N` | Headless CLI to list open Aspen models, capture the active case, or inspect saved cases (supports `--composition`) |
-| `python -m tools.selftest [--db data/cases.db]` | Runs **828** standalone offline regression tests (**835** with `--db` database consistency checks), no Aspen or internet required |
+| `python -m tools.selftest [--db data/cases.db]` | Runs **848** standalone offline regression tests (**855** with `--db` database consistency checks), no Aspen or internet required |
 | `python -m pytest tests/ -q` | The same suite under pytest (cases live in `tests/`: run one domain at a time, filter with `-k`) |
 | `python -m tools.repair_cases [--apply]` | Recomputes verdicts, enthalpy checks, and derived parameters offline after rule updates (dry-run by default) |
 | `python -m tools.balance_report --case N` | Batch-generates Material & Energy Balance Word reports for case `N` from the command line |
@@ -244,8 +244,9 @@ Casebook/
 
 ## Release History
 
-**Latest Release: [v1.5.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.0)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for binaries and full changelogs)
+**Latest Release: [v1.5.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for binaries and full changelogs)
 
+- **v1.5.1 (Repo-Wide Architecture Refactor & Test Infrastructure, behavior and verdict rules unchanged)**: API routes moved to declarative tables split by domain, export layer extracted to `app/export/`, ten-step pipe sizing split into `app/design/pipe/` submodules, frontend migrated to native ES Modules with six per-page view modules, and regression cases migrated to `tests/` under pytest; CI added `ruff check` / `ruff format` gates plus a frontend module-dependency static check. The standards import page gained "Copy fill-in prompt / Download template CSV" entries and rejects importing the template verbatim; allowed material grades now follow Table B.1 (no longer limited to 5 preset grades); added Aspen COM node-tree fixtures with offline regression so reader node-path drift is caught by tests; probe scripts' `--help` no longer requires pywin32.
 - **v1.5.0 (Third-Round Pipe Validation Revisions & Pump Selection Assistance)**: Switched vacuum detection to `< 95 kPa` absolute pressure, added long-cylinder external buckling screening, unified high-pressure/high-temperature stainless steel wall thickness under GB/T 20801.3 (eliminating temperature-thickness inversion), excluded pump discharge lines from cavitation velocity limits, and set thermal insulation threshold at `65 ℃` design temperature; added validation codes **`V10–V14`**, filtered non-material streams, and added a `5%` rounding tolerance at `DN1000`; expanded the Word Pipe Schedule to 10 columns with a dedicated `Verification Remarks` column. On the pump side, fixed bubble-point $p_v$ extraction under Aspen V11 node layouts (`PBUB\MIXED\LIQUID`), added a `Viscosity (cP)` column, and introduced the unified **AI Pump Selection Prompt**.
 - **v1.4.0 (Code-Aligned Pipe Sizing & Dual-Volume Balance Reports)**: Derived design pressure from gauge operating pressure, enforced process minimum wall thickness floors, added homogeneous dynamic head limits and upstream liquid ID constraints for two-phase lines, extended nominal diameters to `DN1000` (welded pipe above `DN600`), and appended `-C` suffixes for cryogenic lines. Separated the Pipe Schedule into a standalone 3-line Word appendix, split Material and Energy Balance reports into independent `.docx` volumes, elevated convergence judgment as the home screen's primary focus, added ARIA accessibility landmarks, and introduced manual update checks.
 - **v1.3.0 (Design Head, Line Friction & Pump Selection Ledger)**: Persisted pump piping inputs (pipe length, $\Sigma\zeta$, fitting counts, property overrides, $\lambda$ method) and selection ledger entries per model content hash, dynamically recalculating adequacy against the active case; supported Colebrook, Gu Yuzhen, and manual friction factor methods; redesigned the pump drawer into three collapsible panels sharing one scrollbar and added headless UI sweeps plus automatic legacy DB migration.
@@ -275,7 +276,7 @@ Casebook/
 Issues and Pull Requests are welcome:
 
 1. Read [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md), [`app/README.md`](app/README.md), and [`docs/conventions.md`](docs/conventions.md) before contributing.
-2. After modifying judgment rules, unit conversions, or engineering calculations, keep all three gates green: `ruff check .`, `python -m pytest tests/ -q` (equivalent entry point: `python -m tools.selftest`), and `node tools/check_render.mjs`; run `python -m tools.check_public_safe` before committing.
+2. After modifying judgment rules, unit conversions, or engineering calculations, keep all five gates green: `ruff check .`, `ruff format --check .`, `python -m pytest tests/ -q` (equivalent entry point: `python -m tools.selftest`), and `node tools/check_render.mjs`; run `python -m tools.check_public_safe` before committing.
 3. Never commit `.apw` / `.bkp` simulation files, copyrighted GB/T standard PDFs/CSVs, or local `data/` files.
 4. Report security vulnerabilities privately via [`.github/SECURITY.md`](.github/SECURITY.md).
 

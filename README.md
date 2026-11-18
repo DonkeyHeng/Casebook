@@ -9,7 +9,7 @@
 **简体中文** | [English](README-en.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.5.0](https://img.shields.io/badge/version-v1.5.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.0)
+[![Version: v1.5.1](https://img.shields.io/badge/version-v1.5.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)
 [![安装说明](https://img.shields.io/badge/安装说明-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **免责与隐私声明**
@@ -225,7 +225,7 @@ Casebook/
 | 命令 | 用途说明 |
 | :--- | :--- |
 | `python -m app.cli --list` / `--read` / `--cases` / `--show N` | 无网页命令行接口：列出打开的模型、读取当前工况、查看已存工况列表与明细（支持 `--composition`） |
-| `python -m tools.selftest [--db data/cases.db]` | 运行 **828 条**独立离线回归自测（含 `--db` 库一致性校验共 **835 条**），无需 Aspen 与网络 |
+| `python -m tools.selftest [--db data/cases.db]` | 运行 **848 条**独立离线回归自测（含 `--db` 库一致性校验共 **855 条**），无需 Aspen 与网络 |
 | `python -m pytest tests/ -q` | 同一批用例的 pytest 入口（用例正文在 `tests/`，可按域单独跑、可 `-k` 筛选） |
 | `python -m tools.repair_cases [--apply]` | 判定或计算口径升级后，离线回算历史工况（默认 dry-run 预览，加 `--apply` 写入） |
 | `python -m tools.balance_report --case N` | 命令行批量导出指定工况的 Word《物料衡算报告》与《能量衡算报告》 |
@@ -244,8 +244,9 @@ Casebook/
 
 ## 版本演进
 
-**当前最新版本：[v1.5.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.0)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+**当前最新版本：[v1.5.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
 
+- **v1.5.1（全仓架构重构与测试基建，行为与判定口径不变）**：API 层改声明式路由表并按域拆分、导出层独立为 `app/export/`、管路十步选型拆入 `app/design/pipe/` 子模块、前端改用原生 ES Module 并按页拆成六个视图模块、回归用例迁入 `tests/` 交 pytest 管理；CI 新增 `ruff check` / `ruff format` 与前端模块依赖静态检查闸门。标准表导入新增「复制填写提示词 / 下载模板 CSV」入口并拒绝原样导入模板，管材牌号范围随表 B.1 放开（不再限 5 个预置牌号）；新增 Aspen COM 节点树夹具与离线回归，reader 节点路径漂移可被自测拦截；探针脚本 `--help` 不再依赖 pywin32。
 - **v1.5.0（管道校核三次修订与泵选型辅助）**：真空改按绝压 `< 95 kPa` 判定，新增外压失稳长圆筒屈曲筛查、高压高温不锈钢按 GB/T 20801.3 计算（消除温度与壁厚倒挂）、汽蚀限速排除泵出口升压线、保温按设计温度 `65 ℃` 判定；新增 **V10–V14** 校验码，按流股类型剔除材质流与热流，`DN1000` 留 5% 圆整容差；《管道选型一览表》增设独立「校核备注」列并改为十列。泵侧修复 Aspen V11 布局下泡点压力 $p_v$ 读取（兼容 `PBUB\MIXED\LIQUID`），新增「粘度 cP」列与三出口同源的「AI 选泵提示词」。
 - **v1.4.0（管道选型规范修订与双册报告重构）**：管道设计压力改由表压换算，壁厚依 GB/T 20801.3 计算并叠加工艺最小壁厚下限；气液两相流增加均相动压头限速且内径不小于上游纯液相进料；管径序列扩展至 `DN1000`（超 `DN600` 改用焊接管），低温管线自动追加保冷后缀 `-C`。导出独立的《管道选型一览表》Word（三线表）；《物料衡算报告》与《能量衡算报告》拆分为两册独立成文；首屏把收敛判定提为唯一焦点，补齐无障碍语义并新增手动「检查更新」。
 - **v1.3.0（泵设计扬程、阻力计算与选型台账）**：泵设计输入（管长、$\Sigma\zeta$、管件数量、物性覆盖值、$\lambda$ 口径）与选型台账按模型内容哈希持久化，台账校核随当前工况实时重算；阻力支持 Colebrook / 顾毓珍 / 手填三种口径；泵抽屉重构为三面板共滚动条布局，新增无头浏览器界面巡检与老库自动迁移。
@@ -275,7 +276,7 @@ Casebook/
 欢迎提交 Issue 反馈 Bug 或提出功能建议，也欢迎直接发起 Pull Request：
 
 1. 开发前请先阅读 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)、[`app/README.md`](app/README.md) 与 [`docs/conventions.md`](docs/conventions.md)。
-2. 改动判定、单位或计算口径后，请务必让三道闸门全绿：`ruff check .`、`python -m pytest tests/ -q`（等价入口 `python -m tools.selftest`）、`node tools/check_render.mjs`；提交前再运行 `python -m tools.check_public_safe` 完成脱敏自检。
+2. 改动判定、单位或计算口径后，请务必让五道闸门全绿：`ruff check .`、`ruff format --check .`、`python -m pytest tests/ -q`（等价入口 `python -m tools.selftest`）、`node tools/check_render.mjs`；提交前再运行 `python -m tools.check_public_safe` 完成脱敏自检。
 3. 请勿提交任何 `.apw` / `.bkp` 模型文件、国标 PDF/CSV 原文或本地 `data/` 目录文件。
 4. 如发现安全漏洞，请通过 [`.github/SECURITY.md`](.github/SECURITY.md) 私密反馈。
 
