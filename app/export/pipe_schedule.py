@@ -125,7 +125,7 @@ def _check_remark(row: dict) -> str:
 
 
 def _notes(res: dict) -> list[str]:
-    """表下的口径注。数字与 `app/design/pipe.py` / `pipe_data.py` 默认口径一一对应。
+    """表下的口径注。数字与 `app/design/pipe/calc.py` / `pipe_data.py` 默认口径一一对应。
 
     每条回答一个问题;2026-11-18 第二轮修订见 docs/pipe-selection-plan.md §17.8:
     校核标记移「校核备注」列、R1E 公式化壁厚、汽蚀/-H 触发收紧、真空专项校核。

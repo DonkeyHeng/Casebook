@@ -27,7 +27,7 @@
 > 整理 CSV 时可以直接用 [`pipe-standards-extract-prompt.md`](pipe-standards-extract-prompt.md)
 > 里的提示词:整段复制给一个能看图的 AI,连同标准页面一起交给它,让它照格式抄。
 
-> 同样的说明在页面里也会显示(`app/design/pipe_data.py` 的 `SETUP_GUIDE`,由
+> 同样的说明在页面里也会显示(`app/design/pipe/data.py` 的 `SETUP_GUIDE`,由
 > `/api/cases/{id}/pipes` 的 409 响应带给前端),这里只是同一份内容的长版本。
 
 ## 1. 两份标准的总览
@@ -172,7 +172,7 @@ frac = max((band[:, int(f * w) + d] < 128).mean() for d in range(-3, 4))
 - 无缝钢管常用 **S2-B / NS1(−12.5%)** 作为负偏差,本项目默认取 `−12.5% × S`,做成可配置项;
 - 因为 C1 依赖最终选定的标准壁厚 S,壁厚圆整要解一个不等式:
   `S ≥ (t_c + C2) / (1 − 0.125)`,再向 T2 的标准壁厚序列上取整;
-- 已编码进 `app/design/pipe_data.py`(`WALL_TOLERANCE_T8` / `WALL_TOLERANCE_T9` / `negative_deviation()`)。
+- 已编码进 `app/design/pipe/data.py`(`WALL_TOLERANCE_T8` / `WALL_TOLERANCE_T9` / `negative_deviation()`)。
 
 ## 5. 工具与产物(都在 `.gitignore` 覆盖范围内,不入库)
 
@@ -206,7 +206,7 @@ pdftoppm -f 35 -l 35 -r 200 -png standards/GBT-17395-2024.pdf data/preview/std/p
 | `t4-17395-table4.csv` | 表 4:2341 个圆点(不锈钢管的 D×S 组合) |
 | `t3-20801-tableB1.csv` | 表 B.1:14 行(20# 7 行、Q345A 1 行、Q345B 3 行、304 1 行、316L 2 行) |
 
-`app/design/pipe_data.py` **运行时**读这三个 CSV:读不到就保持空表,`build()` 抛 `TablesNotReady`、
+`app/design/pipe/data.py` **运行时**读这三个 CSV:读不到就保持空表,`build()` 抛 `TablesNotReady`、
 页面显示"标准表未录入"而不是算出一张假表。换机器 / 清 `data/` 后要重新录入 ——
 新机器上把整理好的三个 CSV 从「管道」页的「标准表」按钮导入即可,不用重启服务。
 

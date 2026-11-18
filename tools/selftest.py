@@ -1407,7 +1407,7 @@ def test_pipe() -> None:
     check_eq("pipe: 无壁厚序列(T2 未录)→ None", pipe_calc.round_up_wall(1.0, None)["wall_mm"], None)
 
     # ⑧b 最小壁厚下限(DN10–100 不设限那档之外):下限只抬高、不降低
-    from app.design import pipe_data as pd_mod
+    from app.design.pipe import data as pd_mod
 
     check_close("pipe: 下限 DN25 → 2.0", pd_mod.minimum_wall(25), 2.0)
     check_close("pipe: 下限 DN32 → 3.0", pd_mod.minimum_wall(32), 3.0)
@@ -1609,7 +1609,7 @@ def test_pipe_checks() -> None:
 
 def test_pipe_setup() -> None:
     """标准表没录时给使用者的说明:要哪两份标准、什么文件、放哪、为什么不在仓库里。"""
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     g = pipe_data.setup_guide()
     check(
@@ -1654,7 +1654,7 @@ def test_std_import() -> None:
     import shutil
     from pathlib import Path
 
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     # 临时目录放在 data/preview/ 下(已被 .gitignore 覆盖):系统 Temp 目录在沙箱里
     # 清理时会 chmod 失败,自测得自己 rmtree
@@ -1768,8 +1768,8 @@ def test_std_import() -> None:
 
 def test_std_template() -> None:
     """标准表格式模板:表头合法、示例值虚构、能挡住「把模板当数据导入」。"""
-    from app.design import pipe_data
-    from app.design import pipe_standards_prompt
+    from app.design.pipe import data as pipe_data
+    from app.design.pipe import prompt as pipe_standards_prompt
 
     preview = pipe_data.template_preview()
     check_eq("模板: 三份文件齐全", [f["name"] for f in preview["files"]], [s["name"] for s in pipe_data.STD_FILES])
@@ -1820,7 +1820,7 @@ def test_std_template() -> None:
 
 def test_material_scope() -> None:
     """方案 A:牌号清单跟着表 B.1 走 —— 全表解析、别名归一、类别推断。"""
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     rows = [
         {"标准": "GB/T 8163", "牌号": "20#", "许用应力_20": "130", "许用应力_100": "120"},
@@ -1868,7 +1868,7 @@ def test_material_scope() -> None:
 
 def test_piping_class() -> None:
     """管道等级表:按「流股名前缀 + 介质代号」匹配,工具只套用不判断腐蚀性。"""
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     rules = [
         {"stream_prefix": ["CW", "CWR"], "grade": "20#", "corrosion_mm": 1.0, "note": "循环水"},
@@ -3361,7 +3361,7 @@ def test_std_versioning() -> None:
     import shutil
     from pathlib import Path
 
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     root = Path(__file__).resolve().parents[1] / "data" / "preview" / "_selftest-vers"
     shutil.rmtree(root, ignore_errors=True)
@@ -3456,7 +3456,7 @@ def test_http_entry() -> None:
     from http.server import ThreadingHTTPServer
 
     from app.api import server as srv
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     root = Path(__file__).resolve().parents[1]
     tmp = root / "data" / "preview" / "_selftest-http"
@@ -3707,7 +3707,7 @@ def test_lambda_method() -> None:
 def test_pipe_2026_rules() -> None:
     """2026-11-18 工程校核口径(§17):真空 V1E / 外压 / 升 R1E / 非优先 DN / 汽蚀 / 零流量。"""
     from app.design import pipe as pc
-    from app.design import pipe_data as pdata
+    from app.design.pipe import data as pdata
 
     # §17.1 真空代号 + 外压失稳最小壁厚
     check_eq("rules: 真空压力代号 V", pdata.VACUUM_PN_CODE, "V")
@@ -3790,7 +3790,7 @@ def test_pipe_2026_rules() -> None:
 def test_pipe_third_round() -> None:
     """§19 第三轮:非物流剔除 / 95 kPa / 深真空 / DN1000 容差 / 温度备注。"""
     from app.design import pipe as pc
-    from app.design import pipe_data as pdata
+    from app.design.pipe import data as pdata
 
     # §19.1 流股类型:Aspen 属性 6 的三种值
     heat = {"name": "Q1", "stream_type": "HEAT", "vol_flow_m3h": 10.0}

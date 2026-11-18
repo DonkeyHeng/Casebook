@@ -36,7 +36,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Any, Iterable, Mapping, Sequence
 
-from app.design import pipe_data
+from . import data as pipe_data
 
 # 相态阈值:痕量汽化率(库里实测有 1e-8)不能按 ==0 判
 PHASE_EPS = 1e-4
@@ -802,7 +802,7 @@ def _pump_streams(
     泵入口按 0.8 m/s 选型,泵出口不能沿用这个口径(V8)。
     """
     # 泵入口流速只对泵成立;位号 K 开头的透平不算泵(见 block_family 注释)
-    from . import block_family
+    from app.design import block_family
 
     pump_names = {
         b["name"] for b in blocks if block_family.family_of_block(b) == "pump"

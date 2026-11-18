@@ -22,11 +22,19 @@ app/
     stream_table.py 物料平衡宽表:流股做列、属性与组分做行(工段级 + 全流程 + 年量)
     mass_balance.py 物料衡算:界区 Σ进界=Σ出界 + 逐设备 Σ进口=Σ出口(纯函数)
     energy_report.py 能量衡算表与全流程汇总(ΔH 由调用方注入 compute() 的结果)
-    pipe_data.py  标准数据表(表 8/9 壁厚偏差、Y 值、PN/材质代号、DN→外径)+ 运行时加载
-                  表 1 / 表 4 / 表 B.1 的 CSV(`data/preview/std/docx/`,不入库)+ 管道等级表(用户配置)
-    pipe.py       十步选型:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → [σ] → 壁厚 →
+    block_family.py 设备家族:把 Aspen 几十种块类型收敛成 8 个页签
+    component_names.py 组分中文名:CAS 号 → 中文名(纯查表)
+    model_identity.py 模型身份:内容哈希优先,文件名兜底(选型台账按模型去重靠它)
+    hydraulics.py  管路阻力:流速 / Re / λ / Σhf(供选泵的设计扬程用)
+    pump.py        泵的派生量:密度、自算扬程、NPSHₐ、建议电机功率
+    pump_selection.py 选型台账的实时计算层:只算不存,台账只放人工决定
+    pump_prompt.py 选泵提示词正文(唯一来源,三个出口都读它)
+    pipe/         管路选型(改一处要一起看的三块,放在一个包里)
+      calc.py     十步选型:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → [σ] → 壁厚 →
                   圆整(含负偏差)→ 等级号;外加校验 V1–V14
-    pipe_standards_prompt.py 「复制填写提示词」的正文:文件名/必需列取自 STD_FILES,
+      data.py     标准数据表(表 8/9 壁厚偏差、Y 值、PN/材质代号、DN→外径)+ 运行时加载
+                  表 1 / 表 4 / 表 B.1 的 CSV(`data/preview/std/docx/`,不入库)+ 管道等级表(用户配置)
+      prompt.py   「复制填写提示词」的正文:文件名/必需列取自 STD_FILES,
                   示例行取自 samples/pipe-standards-template/(唯一来源)
   export/  数据 → 文件字节(.docx / .xlsx / zip);不认 HTTP,网页与命令行共用同一套
     report.py         衡算报告 .docx(物料 + 能量,三线表;python-docx 懒导入)

@@ -168,7 +168,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
 
 def _pipe_table_status() -> dict:
     """管路选型依赖的三张标准表录到什么程度(不连 Aspen、不查库)。"""
-    from app.design import pipe_data
+    from app.design.pipe import data as pipe_data
 
     stress_grades = sorted(pipe_data.ALLOWABLE_STRESS)
     return {
@@ -309,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/piping-classes":
                 # 保存管道等级表:校验 → 写 data/config/piping-classes.json → 重新加载
-                from app.design import pipe_data
+                from app.design.pipe import data as pipe_data
 
                 ok, errors = pipe_data.save_piping_classes(self._read_json_body())
                 payload = {"ok": ok, "errors": errors, "status": pipe_data.piping_class_status()}
@@ -317,7 +317,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/pipe-standards":
                 # 导入标准表:校验 → 写 data/preview/std/docx/ → 立即重新加载(不用重启)
-                from app.design import pipe_data
+                from app.design.pipe import data as pipe_data
 
                 ok, errors, files = pipe_data.import_standards(
                     self._read_json_body(STANDARDS_BODY_LIMIT)
@@ -966,7 +966,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if parts == ["api", "piping-classes"]:
                 # 清除等级表 = 回到"全部按默认材质"
-                from app.design import pipe_data
+                from app.design.pipe import data as pipe_data
 
                 ok, errors = pipe_data.save_piping_classes({"rules": [], "default": None})
                 self._json(
@@ -1056,7 +1056,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "pipe-standards"]:
             # 标准表导入弹窗:三个 CSV 各自有没有、多少行、什么时候放进来的
-            from app.design import pipe_data
+            from app.design.pipe import data as pipe_data
 
             files = pipe_data.standards_status()
             self._json(
@@ -1065,9 +1065,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "pipe-standards-prompt"]:
             # 「复制填写提示词」要复制的那段字。唯一来源是
-            # app/design/pipe_standards_prompt.py:文件名/必需列取自 STD_FILES,
+            # app/design/pipe/prompt.py:文件名/必需列取自 STD_FILES,
             # 示例行取自 samples/pipe-standards-template/,不在这里另抄一份。
-            from app.design import pipe_standards_prompt
+            from app.design.pipe import prompt as pipe_standards_prompt
 
             text = pipe_standards_prompt.build()
             self._json(
@@ -1084,7 +1084,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         if parts == ["api", "piping-classes"]:
             # 管道等级表的当前内容(页面上的「等级表」弹窗读它)
-            from app.design import pipe_data
+            from app.design.pipe import data as pipe_data
 
             grades = pipe_data.piping_class_grades()
             self._json(
@@ -1261,7 +1261,7 @@ class Handler(BaseHTTPRequestHandler):
         """
         import zipfile
 
-        from app.design import pipe_data
+        from app.design.pipe import data as pipe_data
 
         base = pipe_data.TEMPLATE_DIR
         if not base.is_dir():
@@ -1300,7 +1300,7 @@ class Handler(BaseHTTPRequestHandler):
         标准表没录全时返回 409 并说明缺哪张,而不是吐一张空表。
         """
         from app.design import pipe as pipe_calc
-        from app.design import pipe_data
+        from app.design.pipe import data as pipe_data
 
         # query 的值是 list(parse_qs 的行为),取第一个;不取的话 float(list) 会失败,
         # 参数就被静默换成默认值了(界面改了流速、结果却不变,就是这样来的)

@@ -62,7 +62,7 @@ _FALLBACK_HEADERS = {
 
 def _example_blocks() -> str:
     """三张表的文件清单 + 表头 + 示例行。示例行直接取模板 CSV,不在这里另抄一份。"""
-    from app.design import pipe_data
+    from . import data as pipe_data
 
     preview = pipe_data.template_preview()
     by_name = {f["name"]: f for f in preview.get("files", [])}
@@ -86,7 +86,7 @@ def _example_blocks() -> str:
 
 def build() -> str:
     """完整的提示词正文。每次调用现拼:模板改了,提示词跟着改。"""
-    from app.design import pipe_data
+    from . import data as pipe_data
 
     file_lines = [
         f"- `{spec['name']}` —— {spec['from']},必需列 "

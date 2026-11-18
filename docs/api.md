@@ -67,7 +67,7 @@ Word / Excel 两个出口刻意保持 Aspen 原名;AI 包的 `composition.csv` �
 GET /api/cases/21/pipes?liquid=1.5&gas=15&two=8&pump_inlet=0.8&factor=1.1&floor=1.0&max_dn=600&material=S30408
 ```
 
-参数全部可省(省了用 `app/design/pipe.py` 的默认值):流速 m/s(液 / 气 / 两相 / 泵入口)、
+参数全部可省(省了用 `app/design/pipe/calc.py` 的默认值):流速 m/s(液 / 气 / 两相 / 泵入口)、
 设计压力系数与下限 MPa、DN 上限、默认牌号。
 
 响应:

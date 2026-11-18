@@ -316,24 +316,24 @@ GB/T 17395 系列 1 作为可切换项(默认关)。
 
 | # | 步骤 | 产出 / 验收 |
 | --- | --- | --- |
-| 1 | 建 `app/design/pipe_data.py`:DN→OD(20 档)、标准壁厚系列(GB/T 17395 表 1/表 2/表 4 渲染核对)、PN 代号表、材质代号表、组分→材质初稿、代号字典 | 表能 import、数值抽查 3 个 DN 正确 |
+| 1 | 建 `app/design/pipe/data.py`:DN→OD(20 档)、标准壁厚系列(GB/T 17395 表 1/表 2/表 4 渲染核对)、PN 代号表、材质代号表、组分→材质初稿、代号字典 | 表能 import、数值抽查 3 个 DN 正确 |
 | 2 | 录 `[σ]` 表:20#/Q345B/S30408/S31603 × 20–400 ℃(渲染表 B.1 页,逐格核对) | 4 个牌号 × 温度列齐全,注明"已人工核对" |
-| 3 | 写 `app/design/pipe.py` 纯函数:`build(streams, blocks, connections, options) -> {rows, summary, missing}` | 用 #20/#21 跑出 178/218 量级的表;`tools/selftest.py` 加 8–10 条用例(相态阈值、DN 取整、DN600 退回、真空、泵入口、等级号、壁厚圆整) |
+| 3 | 写 `app/design/pipe/calc.py` 纯函数:`build(streams, blocks, connections, options) -> {rows, summary, missing}` | 用 #20/#21 跑出 178/218 量级的表;`tools/selftest.py` 加 8–10 条用例(相态阈值、DN 取整、DN600 退回、真空、泵入口、等级号、壁厚圆整) |
 | 4 | **不做** | 读取层加"组分名"逐流股读——**2026-11-07 决定不做**,理由见 §14.4.1(+5–8 s 换不来判断力);材质改由用户定义的管道等级表驱动。**2026-11-15 补充**:组分 CAS 现在能拿到(读 Aspen 组分字典,取不到时解析模型文件,见 `aspen-field-map.md` §3.1),但"材质由等级表驱动"的结论不变 —— 腐蚀不是物质清单的函数,CAS 只用于辅助归类 | |
 | 5 | API:`GET /api/cases/{id}/pipes?liquid=1.5&gas=15&two=8&pump_inlet=0.8&factor=1.1&floor=1.0&max_dn=600&material=S30408`(数字以 §5 第 3 步定稿口径为准) | 参数改了结果变;409/404 有中文原因 |
 | 6 | 前端「管道」页:主表 + 参数面板 + 单元格标黄 + 计算书列 + 空态 | 用真数据核对 10 行(含 V2/V5/V6/V9 标黄位置) |
 | 7 | 导出:Excel 两张表(主表/计算书)、AI 包加 `pipe_schedule.csv` | 打开 Excel 对格式;zip 里多一份 csv |
 | 8 | 文档:README 功能表 / 目录树、内部交接文档 | 新会话按交接文档接手 |
 
-**数据状态(2026-11-07)**:表 1 / 表 4 / 表 B.1 已由外部视觉录入并落到 `data/preview/std/docx/*.csv`(**不入库**,`data/` 已 gitignore),`app/design/pipe_data.py` 运行时加载;反算校验结果见 `pipe-standards-index.md` §7。
+**数据状态(2026-11-07)**:表 1 / 表 4 / 表 B.1 已由外部视觉录入并落到 `data/preview/std/docx/*.csv`(**不入库**,`data/` 已 gitignore),`app/design/pipe/data.py` 运行时加载;反算校验结果见 `pipe-standards-index.md` §7。
 
 ### 15.1 进度(2026-11-07)
 
 | 步 | 状态 | 说明 |
 | --- | --- | --- |
-| 1 | ✅ 完成 | `app/design/pipe_data.py`:表 8/表 9 壁厚偏差、Y 值、PN 代号、材质代号、DN→外径 20 档;**20 档外径已在表 1/表 4 的 D 列全部核对存在** |
+| 1 | ✅ 完成 | `app/design/pipe/data.py`:表 8/表 9 壁厚偏差、Y 值、PN 代号、材质代号、DN→外径 20 档;**20 档外径已在表 1/表 4 的 D 列全部核对存在** |
 | 2 | ✅ 完成 | 许用应力表 B.1 已录(20# / Q345A / Q345B / S30408 / S31603,各 11 个温度点 40–400 ℃);原件首列是 **40 ℃**(无 20 ℃ 列),低于 40 ℃ 按 40 ℃ 值取 |
-| 3 | ✅ 完成 | `app/design/pipe.py` 十步流程 + `build()` + 校验 `validate()`(V1–V9);`tools/selftest.py` 纯函数 **136 条**、含库一致性 **171 条**全过(2026-11-07 收工实测) |
+| 3 | ✅ 完成 | `app/design/pipe/calc.py` 十步流程 + `build()` + 校验 `validate()`(V1–V9);`tools/selftest.py` 纯函数 **136 条**、含库一致性 **171 条**全过(2026-11-07 收工实测) |
 | 4 | ❌ 不做 | 逐流股读组分名 → 见 §14.4.1(成本 +5–8 s,判不出腐蚀性,名字也不可靠);材质改由管道等级表驱动 |
 | 5 | ✅ 完成 | API:`/api/cases/{id}/pipes` + `/api/pipe-tables`,参数可调,409 有中文原因 |
 | 6 ✅ | 前端「管道」页:主表 + 参数面板 + 单元格标黄 + 计算书列 + 空态 | 已用 #23(121 流股)真数据核对:112 条选型、9 条超 DN600、21 条警告 |
@@ -396,7 +396,7 @@ Excel「管道计算书」有「最小壁厚 mm」「壁厚是否按下限」两
 
 ## 17. 2026-11-18 工程规范与校核修订(工况55 起)
 
-来源:对工况55 的逐流股复核意见。全部实现在 `app/design/pipe.py` + `pipe_data.py`,
+来源:对工况55 的逐流股复核意见。全部实现在 `app/design/pipe/calc.py` + `pipe_data.py`,
 **对所有工况生效**(不是工况55 专用补丁);命令行复现见 `tools/make_pipe_schedule.py`,
 Word 表下注由 `app/export/pipe_schedule.py::_notes()` 同源生成。
 
