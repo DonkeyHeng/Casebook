@@ -30,3 +30,12 @@ Aspen Plus 会把**运行中间文件**写在 `.apw` 所在目录,文件名形�
 | `_<运行ID>.*` | 运行中间文件(出现在这里说明跑过) | 可随时删 |
 
 > 所有 `*.apw`、`*.bkp` 与运行中间文件都不进 Git,这个文件夹可以放任意多个模型。
+
+## 读泵块字段前先跑一遍模型
+
+泵的扬程、体积流量、效率、轴功率、NPSH 这些值只在模型 Run 过一次之后才写进
+`\Data\Blocks\<泵>\Output`;没跑过的模型读回来是空,不是程序没读到。
+
+- 字段全名、单位与实测口径见 [`docs/aspen-field-map.md`](../docs/aspen-field-map.md) §13。
+  两处最容易误判:`NPSH-AVAIL` 有值但不代表可用;`IN_PRES` 实测是**压升**,不是进口压力。
+- 要自己核对某个节点:`python tools/probe_pump.py --attach --save`(只读,不 Run / 不改模型)。
