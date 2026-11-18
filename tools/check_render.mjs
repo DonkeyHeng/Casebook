@@ -33,10 +33,13 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const STATIC = path.join(ROOT, "app", "web", "static");
 
-/* 按依赖顺序拼:工具 → 共享状态 → 主页面。 */
+/* 按依赖顺序拼:工具 → 共享状态 → 界面外壳 → 视图模块 → 主页面。 */
 const MODULES = [
   path.join(STATIC, "lib", "core.js"),
   path.join(STATIC, "lib", "store.js"),
+  path.join(STATIC, "lib", "ui.js"),
+  path.join(STATIC, "views", "column.js"),
+  path.join(STATIC, "views", "report.js"),
   path.join(STATIC, "app.js"),
 ];
 
@@ -46,7 +49,7 @@ function stripModuleSyntax(src) {
     .replace(/^export\s+/gm, "");
 }
 
-const appRaw = fs.readFileSync(MODULES[2], "utf8");
+const appRaw = fs.readFileSync(MODULES[MODULES.length - 1], "utf8");
 // 末尾的 init() 会拉接口、绑定整页事件;这里只需要函数声明本身
 const appHeadless = appRaw.replace(/^init\(\);\s*$/m, "");
 if (appHeadless === appRaw) {
@@ -58,8 +61,7 @@ const headless = [
   "/* pipe.js 的两个入口:本轮不覆盖管道页,给空实现 */",
   "function initPipePanel() {}",
   "function renderPipes() {}",
-  stripModuleSyntax(fs.readFileSync(MODULES[0], "utf8")).trim(),
-  stripModuleSyntax(fs.readFileSync(MODULES[1], "utf8")).trim(),
+  ...MODULES.slice(0, -1).map((file) => stripModuleSyntax(fs.readFileSync(file, "utf8")).trim()),
   stripModuleSyntax(appHeadless).trim(),
 ].join("\n\n");
 

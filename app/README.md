@@ -59,7 +59,15 @@ app/
     read_job.py   「读取当前工况」后台任务(状态机 + 进度 + 卡住提示)
     composition.py 组成按需读(先校验模型与运行 ID,避免旧快照混入)
     window.py     窗口几何记忆(ctypes)
-  web/     零构建前端:index.html + static/{app.js,pipe.js,style.css}
+  web/     零构建前端(原生 ES Module):index.html + static/
+    app.js         主页面:状态编排、路由、事件绑定
+    pipe.js        管道页(单独一个模块:进页才拉数据)
+    lib/core.js    请求封装与数字格式化(两个页面共用)
+    lib/store.js   共享页面状态(当前工况、流股表)
+    lib/ui.js      界面外壳公用件:主题、提示条、徽章、判定条
+    views/column.js  塔剖面图
+    views/report.js  衡算报告页
+    style.css      样式
 ```
 
 `api/routes/` 按 URL 前缀分域,加接口是"表里加一行 + 对应域加一个方法",不用在
