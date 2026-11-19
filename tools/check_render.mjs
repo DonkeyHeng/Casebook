@@ -50,6 +50,7 @@ const MODULES = [
   path.join(STATIC, "views", "read.js"),
   path.join(STATIC, "views", "flow.js"),
   path.join(STATIC, "views", "shell.js"),
+  path.join(STATIC, "download.js"),
   path.join(STATIC, "app.js"),
 ];
 
@@ -87,7 +88,9 @@ function checkModuleDeps() {
   const sources = new Map(files.map((f) => [path.basename(f), fs.readFileSync(f, "utf8")]));
   const defsByFile = new Map([...sources].map(([f, s]) => [f, topDefs(s)]));
   const allDefs = new Set([...defsByFile.values()].flatMap((d) => [...d]));
-  const ENTRY_PRIVATE = new Set(["bindEvents", "init", "installSampleData"]);
+  // installSampleData 已从 app.js 移到 views/shell.js 并导出(空态首屏会直接调它),
+  // 所以不再算"入口私有函数":谁引用它就必须 import,否则这里会报。
+  const ENTRY_PRIVATE = new Set(["bindEvents", "init"]);
   const problems = [];
   for (const [file, src] of sources) {
     // 先剥注释再找引用:注释里提到的函数名不算引用(实测占误报的大头)
@@ -310,6 +313,27 @@ ok("渲染结果不含 undefined", !html.includes("undefined"));
 ok("渲染结果不含 NaN", !html.includes("NaN"));
 ok("结果行有内容", byId("pumpDesignSum").innerHTML.includes("m"));
 
+// ①b 值借自同模型旧版本时:必须标出来源,不能让人以为是本版填的
+vm.runInContext(`
+  state.pumpDesign.source = { case_id: 66, read_at: "2026-11-19 10:30:00", match: "same-path" };
+`, ctx);
+vm.runInContext("renderPumpDesign(__row)", ctx);
+ok("借来的参数渲染出来源提示", box.innerHTML.includes("来自同模型旧版本 #66"));
+has("来源提示带时间", box.innerHTML, "2026-11-19 10:30");
+has("来源提示用统一样式", box.innerHTML, "pump-design-note");
+ok("来源提示写明保存后写回当前工况", box.innerHTML.includes("再次保存后写入当前工况"));
+vm.runInContext("state.pumpDesign.source = null", ctx);
+vm.runInContext("renderPumpDesign(__row)", ctx);
+ok("本版自己填的不出现来源提示", !box.innerHTML.includes("pump-design-note"));
+vm.runInContext(`
+  state.pumpDesign = {
+    dz: 9.45, hf: 5.93, l: 40, zeta: 17.43,
+    idMm: 52.5, muCp: 0.6, epsMm: 0.05, calc: null, idNote: "", source: null,
+    fittings: { el90: 3, gate: 1, globe: 0, check: 1, reducer: 0 },
+  };
+`, ctx);
+vm.runInContext("renderPumpDesign(__row)", ctx);
+
 const inputs = box._lastQueries[".pump-design-input"] || [];
 ok(
   "7 个手填输入都绑了 input / change",
@@ -482,6 +506,9 @@ vm.runInContext("renderHome()", ctx);
 const emptyHome = byId("homeCards").innerHTML;
 ok("⑦ 无工况时首页不静默空白", emptyHome.length > 0);
 has("⑦ 无工况时渲染出引导卡片", emptyHome, "还没有工况");
+// 空态按钮的回调是 views/shell.js 导出的 installSampleData;谁引用谁 import,
+// 漏 import 时浏览器里首屏会直接抛 ReferenceError(2026-11-19 空库首屏事故)
+ok("⑦ 空态给出载入示例按钮", !!byId("loadSampleBtn"));
 
 // ⑦b 判定条:empty 状态必须用 verdict 专属类名,不能撞上 .empty 空表占位样式
 //     (padding:40px + text-align:center 会把首屏判定条撑成巨型居中卡片)
@@ -580,6 +607,21 @@ has("⑨ 台账收起时显示型号", selFoldHtml, "IS65-50-160");
 has("⑨ 台账收起时显示三态", selFoldHtml, "pump-sel-state-mini");
 ok("⑨ 台账默认收起", selFold.open === false);
 ok("⑨ 台账折叠头不含 undefined", !selFoldHtml.includes("undefined"));
+ok("⑨ 本版自己填的台账不出现来源提示", !selFoldHtml.includes("pump-design-note"));
+
+vm.runInContext(`
+  renderPumpSelection(__row, {
+    saved: { model_no: "IS65-50-160" },
+    npsh_state: "ok", npsh_reason: "渲染桩值", margin_is_default: true,
+    margin_used_m: 0.5, flow_m3h: 4.32, design_head_m: 13.0,
+    selection_head_m: 15, npsh_a_m: 21.16, motor_suggested_kw: 1.5,
+    sources: { selection: { case_id: 66, read_at: "2026-11-19 10:30:00" }, design: null },
+  });
+`, ctx);
+const selSrcHtml = selFold.innerHTML;
+ok("⑨ 台账借自旧版本时标来源", selSrcHtml.includes("台账来自同模型旧版本 #66"));
+has("⑨ 台账来源带时间", selSrcHtml, "2026-11-19 10:30");
+ok("⑨ 台账来源提示也写明保存写回", selSrcHtml.includes("保存后写入当前工况"));
 
 const roundBase = passed;   // 本轮新增(⑩/⑪/⑫)前的基线:原有 76 条
 

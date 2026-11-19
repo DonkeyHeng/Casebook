@@ -5,14 +5,19 @@
    开发者文档 / 占位目录靠 `.gitattributes` 的 `export-ignore` 挡掉,
    再塞一份中文 `安装说明.txt`(来自 `docs/install-text.txt`)。
 2. **Windows 包** `Casebook-windows-x64.zip`
-   `Casebook.exe` + `安装说明.txt` + `LICENSE`,解压出来只有这三个文件,
-   给不装 Python 的同学用。
+   桌面壳 onedir 产物整个目录(`Casebook-Desktop.exe` + `_internal/`)+
+   `安装说明.txt` + `LICENSE`,解压出来是一个 `Casebook` 文件夹,
+   给不装 Python 的同学用。自带窗口,不依赖本机浏览器。
+
+> 为什么是 onedir 而不是单文件:单文件包要先把自身解到临时目录,在受限环境里
+> 会直接报 `Could not create temporary directory!`;目录版省掉这一步,也和
+> pythonnet 的 .NET 运行时解析更合得来。
 
 版本号取自 `app/version.py`(运行期与发布包共用一处),不在本脚本里另写一份。
 
 ```bash
-python -m tools.build_exe        # 先出 exe
-python -m tools.make_release     # 再打两个包(会打印大小与 SHA-256)
+python -m tools.build_exe --desktop --onedir   # 先出 onedir 桌面版
+python -m tools.make_release                   # 再打两个包(会打印大小与 SHA-256)
 ```
 
 上传与 Release 说明由发布流程负责(见 `docs/install.md`),本脚本只管出包。
@@ -32,7 +37,8 @@ DIST = ROOT / "data" / "preview" / "dist"
 TXT_SRC = ROOT / "docs" / "install-text.txt"
 TXT_NAME = "安装说明.txt"
 PREFIX = "Casebook"
-EXE = DIST / "Casebook.exe"
+DESKTOP_DIR = DIST / "Casebook-Desktop"
+DESKTOP_EXE = DESKTOP_DIR / "Casebook-Desktop.exe"
 VERSION = version.__version__
 
 
@@ -74,10 +80,15 @@ def build_source_zip() -> Path:
 
 def build_exe_zip() -> Path:
     out = DIST / f"{PREFIX}-windows-x64.zip"
-    if not EXE.is_file():
-        raise FileNotFoundError(f"没有 exe,先跑 python -m tools.build_exe:{EXE}")
+    if not DESKTOP_EXE.is_file():
+        raise FileNotFoundError(
+            f"没有桌面版产物,先跑 python -m tools.build_exe --desktop --onedir:{DESKTOP_EXE}"
+        )
+    out.unlink(missing_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(EXE, f"{PREFIX}/{EXE.name}")
+        for path in sorted(DESKTOP_DIR.rglob("*")):
+            if path.is_file():
+                z.write(path, f"{PREFIX}/{path.relative_to(DESKTOP_DIR).as_posix()}")
         z.writestr(f"{PREFIX}/{TXT_NAME}", _txt_bytes())
         z.write(ROOT / "LICENSE", f"{PREFIX}/LICENSE")
     return out

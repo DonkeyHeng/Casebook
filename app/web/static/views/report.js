@@ -2,6 +2,7 @@
 
 import { api, apiPost } from "../lib/core.js";
 import { state } from "../lib/store.js";
+import { inShell, saveFromUrl } from "../download.js";
 
 
 /* ------------------------------------------------------------ 衡算报告页 */
@@ -243,17 +244,23 @@ export async function saveReportSections() {
 }
 
 /* kind: mass 物料册 / energy 能量册。两个按钮共用这一个下载函数 */
-export function downloadReport(kind) {
+export async function downloadReport(kind) {
   const c = state.current;
   if (!c) { reportNotice("还没有工况", "warn"); return; }
   const picked = [...state.report.picked];
   const query = new URLSearchParams({ kind });
   if (picked.length) query.set("blocks", picked.join(","));
-  // 直接用地址栏下载:文件名走 Content-Disposition,和「导出 Excel」一致
-  window.location.href = `/api/cases/${c.id}/balance-report.docx?${query}`;
-  reportNotice(kind === "energy"
-    ? "正在生成能量衡算册,请留意浏览器下载栏。"
-    : "正在生成物料衡算册,请留意浏览器下载栏。");
+  const url = `/api/cases/${c.id}/balance-report.docx?${query}`;
+  const label = kind === "energy" ? "能量衡算册" : "物料衡算册";
+  if (inShell()) {
+    // 桌面壳没有下载栏:主进程存进 data/exports/ 并打开文件夹
+    reportNotice(`正在生成${label}…`);
+    await saveFromUrl(url);
+    return;
+  }
+  // 浏览器:直接用地址栏下载,文件名走 Content-Disposition,和「导出 Excel」一致
+  window.location.href = url;
+  reportNotice(`正在生成${label},请留意浏览器下载栏。`);
 }
 
 export function bindReportPage() {
@@ -275,8 +282,9 @@ export function bindReportPage() {
         state.report.data = fresh;
         state.report.removed = new Set();
         reportRenderSections(fresh);
+        const how = payload.match ? "(同模型旧版本)" : "";
         reportNotice(
-          `已从工况 #${payload.from_case} 沿用 ${(payload.zones || []).length} 个工段,记得核对后保存`
+          `已从工况 #${payload.from_case}${how} 沿用 ${(payload.zones || []).length} 个工段,记得核对后保存`
         );
       } catch (err) {
         reportNotice(`没沿用:${err.message}`, "warn");

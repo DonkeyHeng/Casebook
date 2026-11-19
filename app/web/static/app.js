@@ -14,8 +14,9 @@ import { ZHONGLIAN_URL, closeDataDrawers, closePumpPromptTip, copyPlainText, fet
 import { resumeReadIfRunning, startRead } from "./views/read.js";
 import { checkForUpdate, closeUpdatePop, deleteCurrentCase, hideEmpty, loadAppVersion, loadCase, positionUpdatePop, quitApp, readHashPage, refreshCases, setPage, showEmpty, updatePopOpen } from "./views/shell.js";
 import { inheritPv, loadFamilies, loadPumpSpec, readPumpBar, renderCompare, renderTable, runCompare, schedulePvSave, scheduleTableRender, setCompareScope } from "./views/table.js";
-import { api, apiPost } from "./lib/core.js";
+import { api } from "./lib/core.js";
 import { initPipePanel } from "./pipe.js";
+import { installShellHooks, saveFromUrl } from "./download.js";
 import { state } from "./lib/store.js";
 import { initTheme } from "./lib/ui.js";
 import { bindReportPage } from "./views/report.js";
@@ -24,6 +25,7 @@ import { bindReportPage } from "./views/report.js";
 /* 所有按钮都只绑定一次 —— 即使库里一条工况都没有,也得能点「读取当前工况」 */
 function bindEvents() {
   initPipePanel();      // 管道页的参数面板与事件(pipe.js)
+  installShellHooks();  // 桌面壳里把外链转给系统浏览器(浏览器里什么都不做)
 
   document.getElementById("updateBtn").addEventListener("click", checkForUpdate);
   document.getElementById("updateClose").addEventListener("click", () => {
@@ -198,6 +200,8 @@ function bindEvents() {
       const url = `/api/cases/${state.current.id}/export-family.xlsx?family=${encodeURIComponent(family)}`;
       exportFamily.disabled = true;
       try {
+        // 桌面壳:主进程取回并落盘,不用走页面里的 blob 下载(WebView 没有下载栏)
+        if (await saveFromUrl(url)) return;
         const res = await fetch(url);
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
@@ -229,15 +233,19 @@ function bindEvents() {
   document.getElementById("readBtn").addEventListener("click", startRead);
 
   // 导出 Excel:给人看
-  document.getElementById("exportBtn").addEventListener("click", () => {
+  document.getElementById("exportBtn").addEventListener("click", async () => {
     if (!state.current) return;
-    window.location.href = `/api/cases/${state.current.id}/export.xlsx`;
+    const url = `/api/cases/${state.current.id}/export.xlsx`;
+    if (await saveFromUrl(url)) return;
+    window.location.href = url;
   });
 
   // 导出 AI 分析包:给 AI 读(Markdown 说明 + CSV)
-  document.getElementById("aiPackBtn").addEventListener("click", () => {
+  document.getElementById("aiPackBtn").addEventListener("click", async () => {
     if (!state.current) return;
-    window.location.href = `/api/cases/${state.current.id}/export.ai.zip`;
+    const url = `/api/cases/${state.current.id}/export.ai.zip`;
+    if (await saveFromUrl(url)) return;
+    window.location.href = url;
   });
 
   document.getElementById("quitBtn").addEventListener("click", quitApp);
@@ -352,34 +360,6 @@ function bindEvents() {
     });
   }
   document.getElementById("deleteBtn").addEventListener("click", deleteCurrentCase);
-}
-
-/* 首页空态的「载入示例工况」:把内置示例库装进当前库(等价于 --sample,先备份原库) */
-async function installSampleData() {
-  const ok = confirm(
-    "载入内置示例工况?\n\n"
-    + "会先用示例数据覆盖当前工况库,原库自动备份成 cases.db.bak。\n"
-    + "如果你已经读过自己的模型,点「取消」即可。"
-  );
-  if (!ok) return;
-
-  const btn = document.getElementById("loadSampleBtn");
-  const label = btn ? btn.textContent : "";
-  if (btn) { btn.disabled = true; btn.textContent = "正在载入…"; }
-  try {
-    const res = await apiPost("/api/sample/install");
-    hideEmpty();
-    await refreshCases(res.case_id ?? null);
-    if (state.cases.length) {
-      await loadCase(res.case_id ?? state.cases[0].id);
-    } else {
-      showEmpty("示例库装好了,但没读到工况。刷新一下页面试试。");
-    }
-  } catch (err) {
-    alert(`载入示例失败:${err.message}`);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = label || "载入示例工况(无需 Aspen)"; }
-  }
 }
 
 async function init() {

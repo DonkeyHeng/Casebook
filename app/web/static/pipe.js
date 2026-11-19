@@ -16,6 +16,7 @@
 import { api, esc, fmt } from "./lib/core.js";
 import { state } from "./lib/store.js";
 import { copyPlainText } from "./views/pump.js";
+import { saveFromUrl } from "./download.js";
 
 /* ------------------------------------------------------------ 常量 */
 
@@ -261,16 +262,20 @@ function bindPipeEvents() {
 
   // 导出:这张表单独出 Word(.docx)/ 整份 AI 包
   const expDoc = document.getElementById("pipeExportDocx");
-  if (expDoc) expDoc.addEventListener("click", () => {
+  if (expDoc) expDoc.addEventListener("click", async () => {
     const c = state.current;
     if (!c) return;
-    window.location.href = `/api/cases/${c.id}/pipes.docx`;
+    const url = `/api/cases/${c.id}/pipes.docx`;
+    if (await saveFromUrl(url)) return;   // 桌面壳:主进程落盘
+    window.location.href = url;
   });
   const expAi = document.getElementById("pipeExportAi");
-  if (expAi) expAi.addEventListener("click", () => {
+  if (expAi) expAi.addEventListener("click", async () => {
     const c = state.current;
     if (!c) return;
-    window.location.href = `/api/cases/${c.id}/export.ai.zip`;
+    const url = `/api/cases/${c.id}/export.ai.zip`;
+    if (await saveFromUrl(url)) return;
+    window.location.href = url;
   });
 
   // ---- 管道等级表(可选覆盖) ----

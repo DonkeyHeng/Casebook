@@ -43,6 +43,9 @@ venv/
 *.sqlite3
 *.log
 data/window.json
+# 桌面壳(app/desktop.py)的 WebView 缓存目录与导出落盘目录(都是本机生成物)
+data/webview/
+data/exports/
 # 服务启动时写的 PID 文件(停止脚本用),含本机进程号,不入库
 data/server.pid
 # 换示例库时的临时库文件

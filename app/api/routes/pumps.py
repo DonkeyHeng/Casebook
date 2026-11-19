@@ -11,6 +11,7 @@ import json
 from app.design import hydraulics
 from app.design import pipe as pipe_calc
 from app.design import pump_selection as selection_rules
+from app.design.pipe.constants import TablesNotReady
 from app.store import db
 
 
@@ -74,10 +75,11 @@ class PumpRoutes:
             if row is None:
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
+            found = db.find_pump_design(conn, case_id, block)
             data = dict(
-                db.read_pump_design(conn, db.model_key(conn, case_id), block)
-                or {"dz_m": None, "hf_m": None, "l_m": None, "zeta_json": None}
+                found["row"] or {"dz_m": None, "hf_m": None, "l_m": None, "zeta_json": None}
             )
+            source = found["source"]
         finally:
             conn.close()
         raw = data.get("zeta_json")
@@ -85,7 +87,7 @@ class PumpRoutes:
             data["zeta_json"] = json.loads(raw) if raw else None
         except (TypeError, ValueError):
             data["zeta_json"] = None
-        self._json({"ok": True, "block": block, **data})
+        self._json({"ok": True, "block": block, **data, "source": source})
 
     def _pump_hydraulics(self, raw_id: str, block_name: str) -> None:
         """GET …/pumps/{位号}/hydraulics —— 手算 Σhf 需要的输入(含管道选型内径)。
@@ -143,6 +145,10 @@ class PumpRoutes:
                         )
                         if hit:
                             id_note = str(hit.get("reason") or "")
+                except TablesNotReady:
+                    # 标准表没录入(打包版 data/ 里没有 preview/std/ 时就这样):
+                    # 内径算不出来,但必须说清原因,否则页面只留一个空白输入框
+                    id_note = "标准表未录入,内径无从算起 —— 先在「管道」页导入标准表"
                 except Exception:
                     pass  # 标准表没录全 / 缺数据:不给默认内径,前端手填
         finally:
@@ -390,13 +396,23 @@ class PumpRoutes:
             if row is None:
                 self._error(f"没有位号 {block} 的泵", 404)
                 return
-            key = db.model_key(conn, case_id)
-            design = db.read_pump_design(conn, key, block)
-            saved = db.read_pump_selection(conn, key, block)
-            view = selection_rules.compute_view(dict(row), design, saved)
+            design_found = db.find_pump_design(conn, case_id, block)
+            selection_found = db.find_pump_selection(conn, case_id, block)
+            view = selection_rules.compute_view(
+                dict(row), design_found["row"], selection_found["row"]
+            )
+            sources = {"selection": selection_found["source"], "design": design_found["source"]}
         finally:
             conn.close()
-        self._json({"ok": True, "block": block, "saved": saved or {}, **view})
+        self._json(
+            {
+                "ok": True,
+                "block": block,
+                "saved": selection_found["row"] or {},
+                **view,
+                "sources": sources,
+            }
+        )
 
     def _set_pump_selection(self, raw_id: str, block: str) -> None:
         """POST …/pumps/{位号}/selection —— 整份提交人工决定的字段。
@@ -475,7 +491,9 @@ class PumpRoutes:
             self._error(f"没有 id={case_id} 的工况", 404)
             return
         if result["source_case_id"] is None:
-            self._error("没有可沿用的工况:需要同一模型、且更早的工况里填过 p_v", 404)
+            self._error(
+                "没有可沿用的工况:需要同一个模型文件(同文件路径)、且更早的工况里填过 p_v", 404
+            )
             return
         payload = {"ok": True, "case_id": case_id, **result}
         self._json(payload)

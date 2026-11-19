@@ -9,11 +9,11 @@ family / tab / flow.caseId / report.picked）。setPage() 是唯一的页面切�
 
 依赖由 import 明说；本文件不含内联脚本与全局隐式耦合。
 */
-
+import { quitShell } from "../download.js";
 import { renderFlow } from "./flow.js";
 import { closeDataDrawers } from "./pump.js";
 import { fillCompareSelects, renderTable, resetTableScroll, setTab } from "./table.js";
-import { api, apiDelete, esc, writeInit } from "../lib/core.js";
+import { api, apiDelete, apiPost, esc, writeInit } from "../lib/core.js";
 import { renderPipes } from "../pipe.js";
 import { state } from "../lib/store.js";
 import { SEVERITY, badge, clearNotice, renderBanner, showNotice, withBusy } from "../lib/ui.js";
@@ -493,12 +493,13 @@ export async function checkForUpdate() {
   }
 }
 
-/* 退出:停服务并关掉窗口(应用窗口模式下 window.close() 生效) */
+/* 退出:壳里由主进程关窗(页面不用变白);浏览器里停服务 + 关标签页,关不掉就留一张"已退出"页 */
 export async function quitApp() {
   if (!confirm("确定退出 Casebook 吗?\n后台服务会一起停止。")) return;
   const btn = document.getElementById("quitBtn");
   btn.disabled = true;
   btn.textContent = "正在退出…";
+  if (quitShell()) return;   // 桌面壳:主进程销毁窗口,进程随之退出
   try {
     await fetch("/api/shutdown", writeInit({ method: "POST" }));
   } catch (err) {
@@ -509,4 +510,33 @@ export async function quitApp() {
   setTimeout(() => {
     document.body.innerHTML = '<div class="exit-screen">已退出</div>';
   }, 500);
+}
+/* 首页空态的「载入示例工况」:把内置示例库装进当前库(等价于 --sample,先备份原库)。
+   放在 shell.js 里而不是 app.js —— 空态是这里渲染的,按钮回调也该归这里,
+   否则跨模块引用会变成未定义的裸标识符(空库首屏会直接抛 ReferenceError)。 */
+export async function installSampleData() {
+  const ok = confirm(
+    "载入内置示例工况?\n\n"
+    + "会先用示例数据覆盖当前工况库,原库自动备份成 cases.db.bak。\n"
+    + "如果你已经读过自己的模型,点「取消」即可。"
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById("loadSampleBtn");
+  const label = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "正在载入…"; }
+  try {
+    const res = await apiPost("/api/sample/install");
+    hideEmpty();
+    await refreshCases(res.case_id ?? null);
+    if (state.cases.length) {
+      await loadCase(res.case_id ?? state.cases[0].id);
+    } else {
+      showEmpty("示例库装好了,但没读到工况。刷新一下页面试试。");
+    }
+  } catch (err) {
+    alert(`载入示例失败:${err.message}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label || "载入示例工况(无需 Aspen)"; }
+  }
 }

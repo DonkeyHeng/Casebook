@@ -40,5 +40,20 @@ def app_root() -> Path:
 
 
 def data_dir(*parts: str) -> Path:
-    """`data/` 下的某个位置(exe 模式下就是 exe 旁边的 `data/`)。"""
-    return app_root().joinpath("data", *parts)
+    """`data/` 下的某个位置(exe 模式下就是 exe 旁边的 `data/`)。
+
+    `set_data_dir()` 可以把它整体指到别处 —— 桌面壳的 `--data-dir` 用这个,
+    这样打包版也能复用仓库里的标准表(`data/preview/std/`)与工况库,
+    不必再复制一份数据。
+    """
+    root = _data_override if _data_override is not None else app_root().joinpath("data")
+    return root.joinpath(*parts)
+
+
+_data_override: Path | None = None
+
+
+def set_data_dir(path: str | Path | None) -> None:
+    """把 data/ 指到指定目录;传 None 恢复默认(exe/仓库旁)。"""
+    global _data_override
+    _data_override = Path(path).resolve() if path else None

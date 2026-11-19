@@ -409,6 +409,20 @@ def _stop_after_window_closed(httpd) -> None:
     threading.Thread(target=httpd.shutdown, daemon=True).start()
 
 
+def build_server(
+    db_path: str = DEFAULT_DB, host: str = "127.0.0.1", port: int = 0
+) -> ThreadingHTTPServer:
+    """建一个 HTTP 服务但**不启动**:桌面壳要自己控制端口与生命周期。
+
+    端口传 0 表示让系统挑一个空闲端口(桌面壳用这个,避免和浏览器模式的 8000 撞车)。
+    绑定失败直接抛 OSError,由调用方决定怎么解释(见 `serve()` 的 10048 / 10013 分支)。
+    """
+    handler = type("BoundHandler", (Handler,), {"db_path": db_path})
+    # 关掉端口复用:否则同时开两个服务会都"成功"绑上同一端口,请求随机落到旧进程
+    ThreadingHTTPServer.allow_reuse_address = False
+    return ThreadingHTTPServer((host, port), handler)
+
+
 def serve(
     db_path: str = DEFAULT_DB,
     host: str = "127.0.0.1",
@@ -426,11 +440,8 @@ def serve(
             "  只有在你清楚后果时才这样用。"
         )
         _say(warn)
-    handler = type("BoundHandler", (Handler,), {"db_path": db_path})
-    # 关掉端口复用:否则同时开两个服务会都"成功"绑上同一端口,请求随机落到旧进程
-    ThreadingHTTPServer.allow_reuse_address = False
     try:
-        httpd = ThreadingHTTPServer((host, port), handler)
+        httpd = build_server(db_path, host, port)
     except OSError as exc:
         # 绑定失败有两种原因,处理方式完全不同,不能都当成"已经在运行":
         #   10048 = 端口确实被占(多半是服务已在跑)→ 聚焦已有窗口
