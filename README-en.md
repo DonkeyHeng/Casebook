@@ -9,7 +9,7 @@ With an active Aspen Plus simulation open, click **"Read Current Case"** to insp
 [简体中文](README.md) | **English**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.5.1](https://img.shields.io/badge/version-v1.5.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)
+[![Version: v1.6.0](https://img.shields.io/badge/version-v1.6.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.6.0)
 [![Install Guide](https://img.shields.io/badge/Install%20Guide-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **Disclaimer & Privacy Notice**
@@ -38,7 +38,7 @@ Casebook is built on four core principles:
 
 | Method | Steps |
 | :--- | :--- |
-| **Standalone Windows Bundle (Recommended)** | Download `Casebook-windows-x64.zip` (~30 MB) from [Releases](https://github.com/DonkeyHeng/Casebook/releases), extract it, and double-click `Casebook.exe`. |
+| **Standalone Windows Bundle (Recommended)** | Download `Casebook-windows-x64.zip` (~45 MB) from [Releases](https://github.com/DonkeyHeng/Casebook/releases), extract the `Casebook` folder, and double-click `Casebook-Desktop.exe`. It opens in its **own window (WebView2)** and does not rely on your browser. |
 | **Run from Source (Python 3.10+)** | Clone or download the repository and double-click **`start.cmd`** in the root folder (checks dependencies, starts the local server, opens the app window, and stops the server when the window closes). |
 | **Troubleshooting** | Refer to **[docs/install.md](docs/install.md)** (plain-text version in [`docs/install-text.txt`](docs/install-text.txt)). |
 
@@ -61,7 +61,7 @@ python -m app.api   # Automatically opens the app window (default: [http://127.0
 
 On first launch, the local database is empty and the home page displays an onboarding prompt. The repository bundles a sanitized real-world abnormal simulation snapshot (**121 streams, 77 blocks, 214 connections, 401 column stage rows, and 7 pumps**, featuring a dry tray in `T0202` and component non-convergence in `T0205`):
 
-- **Using `Casebook.exe`**: Click **"Load Sample Case"** directly on the home screen (or run `Casebook.exe --sample`). Any existing database is safely backed up to `cases.db.bak`.
+- **Using the desktop bundle**: Double-click `Casebook-Desktop.exe` and click **"Load Sample Case"** on the home screen (or run `Casebook-Desktop.exe --sample`). Any existing database is safely backed up to `cases.db.bak`.
 - **Using Source Code**:
   ```bash
   cp data/cases.db data/cases.local.db   # Back up existing local data if present
@@ -244,8 +244,9 @@ Casebook/
 
 ## Release History
 
-**Latest Release: [v1.5.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for binaries and full changelogs)
+**Latest Release: [v1.6.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.6.0)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for binaries and full changelogs)
 
+- **v1.6.0 (Native Desktop Window & Model-Identity Fix)**: Added a desktop shell `app/desktop.py` built on WebView2 — the app now opens in **its own window with no browser dependency and no console window**; startup/shutdown follows the window lifecycle, logs always go to `data/desktop.log`, geometry is stored in `data/window.json`, in-app exports are written by the host process to `data/exports/` (folder opened automatically) while external links are handed to the system browser, and the bottom-left "Quit" now closes the window right after confirmation. New `--data-dir` flag lets the bundled build and the source build share one `data/` folder (standard tables and case database); a missing standard table now reports "cannot compute ID" instead of silently leaving the pump ID blank. Model identity now falls back between **content hash and file name**, so hand-filled CAS numbers and pump selection records stay attached after the model file is modified. The bundled sample case was refreshed from the latest full-flowsheet read (121 streams / 77 blocks / 214 connections / 401 stage rows / 2178 compositions / 7 pumps with complete $p_v$, 18 component CAS entries) and its machine-specific model hash cleared so the sample stays portable; fixed the empty-state "Load Sample Case" button and the column-name bug in the sample builder.
 - **v1.5.1 (Repo-Wide Architecture Refactor & Test Infrastructure, behavior and verdict rules unchanged)**: API routes moved to declarative tables split by domain, export layer extracted to `app/export/`, ten-step pipe sizing split into `app/design/pipe/` submodules, frontend migrated to native ES Modules with six per-page view modules, and regression cases migrated to `tests/` under pytest; CI added `ruff check` / `ruff format` gates plus a frontend module-dependency static check. The standards import page gained "Copy fill-in prompt / Download template CSV" entries and rejects importing the template verbatim; allowed material grades now follow Table B.1 (no longer limited to 5 preset grades); added Aspen COM node-tree fixtures with offline regression so reader node-path drift is caught by tests; probe scripts' `--help` no longer requires pywin32.
 - **v1.5.0 (Third-Round Pipe Validation Revisions & Pump Selection Assistance)**: Switched vacuum detection to `< 95 kPa` absolute pressure, added long-cylinder external buckling screening, unified high-pressure/high-temperature stainless steel wall thickness under GB/T 20801.3 (eliminating temperature-thickness inversion), excluded pump discharge lines from cavitation velocity limits, and set thermal insulation threshold at `65 ℃` design temperature; added validation codes **`V10–V14`**, filtered non-material streams, and added a `5%` rounding tolerance at `DN1000`; expanded the Word Pipe Schedule to 10 columns with a dedicated `Verification Remarks` column. On the pump side, fixed bubble-point $p_v$ extraction under Aspen V11 node layouts (`PBUB\MIXED\LIQUID`), added a `Viscosity (cP)` column, and introduced the unified **AI Pump Selection Prompt**.
 - **v1.4.0 (Code-Aligned Pipe Sizing & Dual-Volume Balance Reports)**: Derived design pressure from gauge operating pressure, enforced process minimum wall thickness floors, added homogeneous dynamic head limits and upstream liquid ID constraints for two-phase lines, extended nominal diameters to `DN1000` (welded pipe above `DN600`), and appended `-C` suffixes for cryogenic lines. Separated the Pipe Schedule into a standalone 3-line Word appendix, split Material and Energy Balance reports into independent `.docx` volumes, elevated convergence judgment as the home screen's primary focus, added ARIA accessibility landmarks, and introduced manual update checks.

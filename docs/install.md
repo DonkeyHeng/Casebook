@@ -40,16 +40,21 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.1 Windows 包(给不装 Python 的同学,推荐)
 
 1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
-2. 下载 `Casebook-windows-x64.zip`(约 30 MB)
+2. 下载 `Casebook-windows-x64.zip`(约 45 MB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
-   - 解压后只有三个文件:`Casebook.exe`、`安装说明.txt`、`LICENSE`
-4. 双击 `Casebook.exe`:弹出一个黑色窗口(程序本体,别关),浏览器自动打开界面
+   - 解压后是一个 `Casebook` 文件夹:里面是 `Casebook-Desktop.exe`、`_internal\`、
+     `安装说明.txt`、`LICENSE` —— 整个文件夹一起留着,别只把 exe 拖出来
+4. 双击 `Casebook-Desktop.exe`:**自带窗口**(WebView2),不弹黑窗、不打开浏览器
    - 不用装 Python、不用 pip、不用改系统设置
-   - 没有 Aspen 想先看界面:**不用开命令行** —— 首页提示「还没有工况」时,
-     点卡片里的 **「载入示例工况」** 按钮(原库会先备份成 `cases.db.bak`)
-   - 命令行方式也可以:关掉窗口后执行 `.\Casebook.exe --sample`
+   - 依赖系统的 WebView2 运行时 —— Windows 10/11 装过 Edge 就自带;真缺时窗口会提示
+   - 首次启动若被杀软拦,选"允许";它只监听本机 `127.0.0.1`,不往外网发数据
+   - 没有 Aspen 想先看界面:首页提示「还没有工况」时点卡片里的 **「载入示例工况」**
+     (原库会先备份成 `cases.db.bak`)
+5. 怎么停:直接关窗口;或点左下角「退出」,确认后窗口直接关闭(后台服务跟着停)
 
-> exe 没有代码签名,个别杀毒软件会提示"未知程序";它只监听本机 `127.0.0.1`,不往外网发数据。
+> 数据都放在 `Casebook` 文件夹里的 `data\`:工况库 `data\cases.db`、日志 `data\desktop.log`、
+> 导出文件 `data\exports\`。想和源码版共用一份数据,启动时加
+> `--data-dir "D:\dsh-Projects\Casebook\data"`。
 
 ### 2.2 源码压缩包(有 Python 的同学)
 

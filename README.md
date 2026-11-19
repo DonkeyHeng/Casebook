@@ -9,7 +9,7 @@
 **简体中文** | [English](README-en.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.5.1](https://img.shields.io/badge/version-v1.5.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)
+[![Version: v1.6.0](https://img.shields.io/badge/version-v1.6.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.6.0)
 [![安装说明](https://img.shields.io/badge/安装说明-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **免责与隐私声明**
@@ -38,7 +38,7 @@ Casebook 的设计遵循四条原则：
 
 | 使用方式 | 操作步骤 |
 | :--- | :--- |
-| **免安装版（推荐）** | 前往 [Releases](https://github.com/DonkeyHeng/Casebook/releases) 下载 `Casebook-windows-x64.zip`（约 30 MB），解压后双击 `Casebook.exe` 即可运行（根目录附带 `安装说明.txt`）。 |
+| **免安装版（推荐）** | 前往 [Releases](https://github.com/DonkeyHeng/Casebook/releases) 下载 `Casebook-windows-x64.zip`（约 45 MB），解压出一个 `Casebook` 文件夹，双击其中的 `Casebook-Desktop.exe` 即可运行：**自带窗口，不依赖浏览器**（根目录附带 `安装说明.txt`）。 |
 | **源码运行（Python 3.10+）** | 克隆或下载源码后，双击根目录的 **`start.cmd`** 启动（自动检查依赖、拉起服务并打开应用窗口，关闭窗口即自动退出后台进程）。 |
 | **遇到安装或运行报错** | 请查阅详细排错文档 **[docs/install.md](docs/install.md)**（纯文本版见 [`docs/install-text.txt`](docs/install-text.txt)）。 |
 
@@ -61,7 +61,7 @@ python -m app.api   # 启动后自动打开应用窗口（默认 [http://127.0.0
 
 首次打开软件时本地数据库为空，首页会显示引导提示。仓库内置了一组包含 **121 条流股、77 个模块、214 条连接、401 条塔板记录与 7 台泵**的真实异常工况快照（含 `T0202` 塔干涸、`T0205` 组分不收敛），可用于完整体验界面与诊断逻辑：
 
-- **使用 `Casebook.exe`**：直接在首页点击 **「载入示例工况」** 按钮（或运行 `Casebook.exe --sample`），原库会自动备份为 `cases.db.bak`。
+- **使用免安装版**：双击 `Casebook-Desktop.exe`，在首页点击 **「载入示例工况」** 按钮（或运行 `Casebook-Desktop.exe --sample`），原库会自动备份为 `cases.db.bak`。
 - **使用源码**：
   ```bash
   cp data/cases.db data/cases.local.db   # 若已有本地数据请先备份
@@ -84,8 +84,8 @@ Casebook 围绕 **「读—存—看—算—报—出—跑—测」** 八个�
 | **4. 工程计算** | 泵参数与 $\text{NPSH}_a$、设计扬程与阻力、选型台账、十步管路选型、V1–V14 校核 | 将仿真读数转化为带口径说明的选型参数与风险校核 |
 | **5. 衡算与报告** | 工段（界区）边界确认、界区+逐设备两层物料衡算、能量汇总、Word 两册独立报告 | 面向课程设计与工程文档，生成可直接排版的物能衡算书 |
 | **6. 导出与外部集成** | 整本 7–8 表 Excel、按设备分类 Excel、AI 分析包（`.zip`）、十列管道一览表、CLI 入口 | 满足设计存档、报表粘贴与大模型辅助选型/分析需求 |
-| **7. 运行环境与安全** | 零构建 HTTP 服务、本地请求护栏、单点版本与手动检查更新、数据隔离、单文件打包 | 保障本地运行安全、数据不离机、升级不丢历史库 |
-| **8. 工具链与质量保障** | 825 条离线回归自测（含 COM 节点树夹具回放）、无头双主题界面巡检、敏感信息扫描、字段探针、塔异常诊断 | 确保判定与计算口径改动可验证、开源发布不泄密 |
+| **7. 运行环境与安全** | 零构建 HTTP 服务、自带窗口壳（WebView2，不依赖本机浏览器）、本地请求护栏、单点版本与手动检查更新、数据隔离 | 保障本地运行安全、数据不离机、升级不丢历史库 |
+| **8. 工具链与质量保障** | 876 条离线回归自测（含 COM 节点树夹具回放）、无头双主题界面巡检、敏感信息扫描、字段探针、塔异常诊断 | 确保判定与计算口径改动可验证、开源发布不泄密 |
 
 ### 核心功能详解
 
@@ -244,8 +244,9 @@ Casebook/
 
 ## 版本演进
 
-**当前最新版本：[v1.5.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.5.1)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+**当前最新版本：[v1.6.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.6.0)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
 
+- **v1.6.0（自带窗口的桌面版与身份识别修正）**：新增桌面窗口壳 `app/desktop.py`（内置 WebView2，**不再依赖本机浏览器**，也没有黑窗控制台）：起停由窗口生命周期管理，日志固定落 `data/desktop.log`，窗口大小记在 `data/window.json`；壳内导出一律由主进程写 `data/exports/` 并自动打开文件夹，外链交给系统浏览器；左下「退出」确认后直接关闭窗口。新增 `--data-dir` 参数，包版与源码版可共用同一份 `data/`（标准表、工况库不再各存一份）；标准表缺失时泵内径改为明示「无从算起」而不是静默留空。模型身份改为**内容哈希 + 文件名双键兜底**：模型改过之后手填 CAS、泵选型台账不再错位。内置示例工况刷新为最近一次读取的全流程快照（121 流股 / 77 模块 / 214 连接 / 401 塔板级 / 2178 组成 / 7 台泵，$p_v$ 齐全，组分字典带 18 条 CAS），并清空本机模型哈希，示例可移植；修掉空库首屏「载入示例工况」按钮失效与示例构建脚本的列名取值错误。
 - **v1.5.1（全仓架构重构与测试基建，行为与判定口径不变）**：API 层改声明式路由表并按域拆分、导出层独立为 `app/export/`、管路十步选型拆入 `app/design/pipe/` 子模块、前端改用原生 ES Module 并按页拆成六个视图模块、回归用例迁入 `tests/` 交 pytest 管理；CI 新增 `ruff check` / `ruff format` 与前端模块依赖静态检查闸门。标准表导入新增「复制填写提示词 / 下载模板 CSV」入口并拒绝原样导入模板，管材牌号范围随表 B.1 放开（不再限 5 个预置牌号）；新增 Aspen COM 节点树夹具与离线回归，reader 节点路径漂移可被自测拦截；探针脚本 `--help` 不再依赖 pywin32。
 - **v1.5.0（管道校核三次修订与泵选型辅助）**：真空改按绝压 `< 95 kPa` 判定，新增外压失稳长圆筒屈曲筛查、高压高温不锈钢按 GB/T 20801.3 计算（消除温度与壁厚倒挂）、汽蚀限速排除泵出口升压线、保温按设计温度 `65 ℃` 判定；新增 **V10–V14** 校验码，按流股类型剔除材质流与热流，`DN1000` 留 5% 圆整容差；《管道选型一览表》增设独立「校核备注」列并改为十列。泵侧修复 Aspen V11 布局下泡点压力 $p_v$ 读取（兼容 `PBUB\MIXED\LIQUID`），新增「粘度 cP」列与三出口同源的「AI 选泵提示词」。
 - **v1.4.0（管道选型规范修订与双册报告重构）**：管道设计压力改由表压换算，壁厚依 GB/T 20801.3 计算并叠加工艺最小壁厚下限；气液两相流增加均相动压头限速且内径不小于上游纯液相进料；管径序列扩展至 `DN1000`（超 `DN600` 改用焊接管），低温管线自动追加保冷后缀 `-C`。导出独立的《管道选型一览表》Word（三线表）；《物料衡算报告》与《能量衡算报告》拆分为两册独立成文；首屏把收敛判定提为唯一焦点，补齐无障碍语义并新增手动「检查更新」。
