@@ -13,8 +13,9 @@
 脱敏(见 AGENTS.md §4)
 ----------------------
 * `run_user` → `user`
-* `model_path` → 只留文件名,不带目录
-其余是真实读数,不改。
+* `model_path` / `model_name` → 只留文件名,不带目录
+* `model_hash` → 清空:示例是可移植快照,带上本机内容哈希会被认成"另一个模型"
+其余是真实读数,不改(含组分字典 `components` 里的 CAS)。
 
 只读:不调用 Run / Reinit / Save。
 """
@@ -81,23 +82,35 @@ def build_from_db(src_path: str, src_case: int, out: Path, new_id: int) -> dict:
         if case is None:
             raise SystemExit(f"{src_path} 里没有工况 #{src_case}")
 
-        cols = [c for c in case if c != "id"]
+        # sqlite3.Row 迭代给的是**值**,不是列名:先转成 dict,列名从 key 上取
         row = dict(case)
+        cols = [k for k in row if k != "id"]
         model = os.path.basename(str(row.get("model_path") or "").replace("/", "\\"))
         row["model_path"] = model
         row["model_name"] = model or row.get("model_name")
         if row.get("run_user"):
             row["run_user"] = "user"
+        # 示例库是**可移植快照**:别带走本机模型内容的哈希。否则同一份示例在别人机器上
+        # 会按哈希认成"另一个模型",手填 CAS / 选型台账全都对不上(退回文件名身份才是原意)。
+        if "model_hash" in row:
+            row["model_hash"] = None
         dst.execute(
             f"INSERT INTO cases (id, {', '.join(cols)}) VALUES (?, {', '.join('?' * len(cols))})",
             [new_id] + [row[c] for c in cols],
         )
 
-        for table in ("streams", "blocks", "connections", "stream_components", "column_stages"):
+        for table in (
+            "components",
+            "streams",
+            "blocks",
+            "connections",
+            "stream_components",
+            "column_stages",
+        ):
             rows = src.execute(f"SELECT * FROM {table} WHERE case_id=?", (src_case,)).fetchall()
             if not rows:
                 continue
-            fields = [c for c in rows[0] if c != "case_id"]
+            fields = [k for k in dict(rows[0]) if k != "case_id"]
             dst.executemany(
                 f"INSERT INTO {table} (case_id, {', '.join(fields)}) "
                 f"VALUES (?, {', '.join('?' * len(fields))})",

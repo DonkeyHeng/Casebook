@@ -660,6 +660,9 @@ def test_component_dict() -> None:
     conn = db.open_db(str(tmp / "c.db"))
     try:
         case_id = db.list_cases(conn)[0]["id"]
+        # 示例库现在带真实组分(CAS 是读到的),先清空,测的才是「老库刚建表、还没写过」
+        conn.execute("DELETE FROM components WHERE case_id=?", (case_id,))
+        conn.commit()
         check_eq("组分字典: 老库建表后默认是空的", db.read_components(conn, case_id), [])
         db.save_components(
             conn,
