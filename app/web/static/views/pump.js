@@ -336,12 +336,18 @@ export function renderPumpDesign(row) {
   const brief = total === null
     ? '<span class="muted">待填 ΔZ / Σhf</span>'
     : `<span class="muted">${fmt(total, 2)} m → 选型 ${padded} m</span>`;
+  // 参数借自同模型旧版本时标出来源(模型保存一次哈希就变,不能让人以为是本版填的)
+  const designSrc = state.pumpDesign.source;
+  const designSrcNote = designSrc
+    ? `<p class="pump-design-note">ΔZ / Σhf / 管长等来自同模型旧版本 #${designSrc.case_id}（${esc(String(designSrc.read_at || "").slice(0, 16))}）；再次保存后写入当前工况。</p>`
+    : "";
   box.innerHTML = `
     <summary class="pump-fold-summary" title="ΔZ / L / Σζ 由你填,工具不估算">
       <span class="pump-fold-title">设计扬程</span>
       ${brief}
       <span class="pump-fold-mark" aria-hidden="true"></span>
     </summary>
+    ${designSrcNote}
     <div class="pump-design-inputs">
       <label>ΔZ m ${val("dz", "如 9.45")}</label>
       <label>Σhf m ${val("hf", "如 5.93")}</label>
@@ -470,7 +476,7 @@ export async function computeHeadLoss(row) {
 export async function loadPumpDesign(row) {
   state.pumpDesign = {
     dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
-    idNote: "", fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
+    idNote: "", source: null, fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
     manual: { idMm: null, muCp: null, epsMm: null },
     lambdaMethod: "colebrook", lambdaManual: null,
   };
@@ -479,6 +485,7 @@ export async function loadPumpDesign(row) {
   const name = encodeURIComponent(row.name);
   try {
     const saved = await api(`/api/cases/${cid}/pumps/${name}/design-head`);
+    state.pumpDesign.source = saved.source || null;
     state.pumpDesign.dz = pumpDesignNum(saved.dz_m);
     state.pumpDesign.hf = pumpDesignNum(saved.hf_m);
     state.pumpDesign.l = pumpDesignNum(saved.l_m);
@@ -572,6 +579,13 @@ export function renderPumpSelection(row, data) {
   const box = document.getElementById("pumpSelection");
   if (!box) return;
   const s = data.saved || {};
+  // 台账可能来自同模型旧版本(模型保存一次哈希就变):必须标出来源,
+  // 不能让人以为是自己这一版填的。保存后即写入当前工况。
+  const selSrc = data.sources && data.sources.selection;
+  const srcTime = selSrc ? String(selSrc.read_at || "").slice(0, 16) : "";
+  const srcNote = selSrc
+    ? `<p class="pump-design-note">台账来自同模型旧版本 #${selSrc.case_id}（${esc(srcTime)}）；保存后写入当前工况。</p>`
+    : "";
   const input = (key, ph = "") =>
     `<input class="pump-design-input pump-sel-input" data-sel="${key}" placeholder="${ph}"
             value="${s[key] === null || s[key] === undefined ? "" : esc(String(s[key]))}"
@@ -592,6 +606,7 @@ export function renderPumpSelection(row, data) {
       <span class="pump-sel-state-mini" data-state="${esc(data.npsh_state)}">${stateText}</span>
       <span class="pump-fold-mark" aria-hidden="true"></span>
     </summary>
+    ${srcNote}
     <div class="pump-sel-live">
       ${kv("流量", fmt(data.flow_m3h, 2), " m³/h")}
       ${kv("设计扬程", fmt(data.design_head_m, 2), " m")}

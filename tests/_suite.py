@@ -64,6 +64,8 @@ CASES: list[tuple[str, object]] = [
     ("HTTP 入口 body / 静态路径", test_api.test_http_entry),
     ("路由表与分发", test_api.test_routes),
     ("模型身份与选型台账", test_store.test_model_identity_and_selection),
+    ("同模型旧版本兜底", test_store.test_model_identity_fallback),
+    ("设计参数来源透传", test_store.test_pump_design_source_passthrough),
     ("λ 口径持久化与校验", test_store.test_lambda_method),
 ]
 

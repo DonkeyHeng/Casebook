@@ -61,12 +61,13 @@ class CaseRoutes:
             if conn.execute("SELECT 1 FROM cases WHERE id = ?", (case_id,)).fetchone() is None:
                 self._error(f"没有 id={case_id} 的工况", 404)
                 return
-            prev = db.previous_case_same_model(conn, case_id)
+            prev_case = db.previous_model_case(conn, case_id)
         finally:
             conn.close()
-        if prev is None:
+        if prev_case is None:
             self._error("同一模型没有更早的工况可以沿用", 404)
             return
+        prev = prev_case["case_id"]
         parts, overrides, _deleted, err = sections_config.load(prev)
         if err:
             self._error(err, 500)
@@ -79,6 +80,7 @@ class CaseRoutes:
             {
                 "ok": ok,
                 "from_case": prev,
+                "match": prev_case["match"],
                 "errors": save_errors,
                 "zones": sorted(parts.keys()),
                 "config": sections_config.status(),

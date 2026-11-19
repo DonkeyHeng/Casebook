@@ -546,42 +546,37 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
 def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
     """把**同一模型**更早工况里填过的 p_v 按位号搬到当前工况。
 
-    只填空着的行(用户已经手填的不覆盖),只认同一个模型身份键
-    (内容哈希优先、老工况退回文件名) —— 不同模型里同一个位号未必是
-    同一种液体,不能瞎搬。
-    返回 {source_case_id, source_read_at, copied, skipped};没有可沿用的返回 source_case_id=None。
+    只填空着的行(用户已经手填的不覆盖)。同模型按「同内容哈希 → 同文件路径」逐档
+    找(见 `model_case_candidates`),找到第一份**确实填过 p_v** 的工况就停 ——
+    模型每保存一版哈希就变,只认同哈希会让「改完再读」沿用不到。
+    不跨模型搬:不同模型里同一个位号未必是同一种液体(同名但不同路径也不搬)。
+    返回 {source_case_id, source_read_at, match, copied, skipped};
+    没有可沿用的返回 source_case_id=None。
     """
-    from app.design import model_identity
-
-    target = conn.execute(
-        "SELECT id, model_hash, model_name FROM cases WHERE id=?", (case_id,)
-    ).fetchone()
-    if target is None:
+    exists = conn.execute("SELECT id FROM cases WHERE id=?", (case_id,)).fetchone()
+    if exists is None:
         return None
-    key = model_identity.key_of(target["model_hash"], target["model_name"])
-    if not key:
-        return {"source_case_id": None, "source_read_at": None, "copied": 0, "skipped": 0}
-    source = conn.execute(
-        """
-        SELECT c.id AS id, c.read_at AS read_at, COUNT(*) AS n
-          FROM cases c JOIN blocks b ON b.case_id = c.id
-         WHERE c.id != ?
-           AND b.pv_bar IS NOT NULL
-           AND (CASE WHEN c.model_hash IS NOT NULL AND c.model_hash <> ''
-                     THEN 'sha256:' || c.model_hash
-                     ELSE COALESCE(c.model_name, '') END) = ?
-         GROUP BY c.id
-         ORDER BY c.id DESC
-         LIMIT 1
-        """,
-        (case_id, key),
-    ).fetchone()
+    source = None
+    for candidate in model_case_candidates(conn, case_id):
+        filled = conn.execute(
+            "SELECT COUNT(*) AS n FROM blocks WHERE case_id=? AND pv_bar IS NOT NULL",
+            (candidate["case_id"],),
+        ).fetchone()["n"]
+        if filled:
+            source = candidate
+            break
     if source is None:
-        return {"source_case_id": None, "source_read_at": None, "copied": 0, "skipped": 0}
+        return {
+            "source_case_id": None,
+            "source_read_at": None,
+            "match": None,
+            "copied": 0,
+            "skipped": 0,
+        }
 
     rows = conn.execute(
         "SELECT name, pv_bar, pv_source FROM blocks WHERE case_id=? AND pv_bar IS NOT NULL",
-        (source["id"],),
+        (source["case_id"],),
     ).fetchall()
     copied = skipped = 0
     for row in rows:
@@ -595,8 +590,9 @@ def inherit_pump_pv(conn: sqlite3.Connection, case_id: int) -> dict | None:
             skipped += 1
     conn.commit()
     return {
-        "source_case_id": source["id"],
+        "source_case_id": source["case_id"],
         "source_read_at": source["read_at"],
+        "match": source["match"],
         "copied": copied,
         "skipped": skipped,
     }
@@ -1051,3 +1047,128 @@ def delete_case(conn: sqlite3.Connection, case_id: int) -> dict:
     conn.execute("DELETE FROM cases WHERE id = ?", (case_id,))
     conn.commit()
     return counts
+
+
+# ------------------------------------------------ 同模型旧版本兜底(2026-11-19)
+#
+# 身份键 = 模型文件内容 sha256。模型每保存一次内容就换一版,哈希随之改变,
+# 于是「改完再读」会被当成另一个模型:pump_selection / pump_design /
+# component_cas 全部查不到(行还在库里),p_v 与工段边界也沿用不到。
+# 下面只提供**候选**,由调用方决定是否采用,并在界面上标出来源 ——
+# 不悄悄换键,也不跨模型搬数值(不同模型里同一个位号未必是同一种液体)。
+
+
+def model_case_candidates(conn: sqlite3.Connection, case_id: int) -> list[dict]:
+    """比当前工况更早的**同一份模型文件**的工况,按可信度分两档排序。
+
+    档位(`match`):
+      * `same-version` —— 身份键完全相同(同一内容哈希 / 都退回文件名);
+      * `same-path`    —— 同一份模型文件(路径相同)、内容已变(保存过)。
+
+    **不按文件名匹配**:同名不同路径可能是别人发来的另一份模型,拿它的手填值
+    会串库 —— 这正是当初把身份从文件名升级成内容哈希要解决的问题。模型只是
+    被移动 / 改名而内容没动时,哈希不变,仍会落在 `same-version` 档。
+
+    档内按工况 id 倒序(最近的在前)。返回 [{case_id, read_at, match}]。
+    """
+    from app.design import model_identity
+
+    target = conn.execute(
+        "SELECT id, model_path, model_name, model_hash FROM cases WHERE id = ?", (case_id,)
+    ).fetchone()
+    if target is None:
+        return []
+    target_key = model_identity.key_of(target["model_hash"], target["model_name"])
+    path = str(target["model_path"] or "").strip()
+
+    tiers: dict[str, list[dict]] = {"same-version": [], "same-path": []}
+    for row in conn.execute(
+        "SELECT id, model_path, model_name, model_hash, read_at FROM cases WHERE id < ?",
+        (case_id,),
+    ):
+        if target_key and model_identity.key_of(row["model_hash"], row["model_name"]) == target_key:
+            tier = "same-version"
+        elif path and str(row["model_path"] or "").strip() == path:
+            tier = "same-path"
+        else:
+            continue
+        tiers[tier].append({"case_id": int(row["id"]), "read_at": row["read_at"], "match": tier})
+
+    out: list[dict] = []
+    for tier in ("same-version", "same-path"):
+        out.extend(sorted(tiers[tier], key=lambda entry: entry["case_id"], reverse=True))
+    return out
+
+
+def previous_model_case(conn: sqlite3.Connection, case_id: int) -> dict | None:
+    """同模型更早的一个工况(宽松:哈希变了也认,只要路径 / 名字对得上)。
+
+    返回 {case_id, read_at, match};没有返回 None。只给「沿用」类操作做候选,
+    真正写不写由用户点按钮决定。
+    """
+    candidates = model_case_candidates(conn, case_id)
+    return candidates[0] if candidates else None
+
+
+def find_pump_selection(conn: sqlite3.Connection, case_id: int, block: str) -> dict:
+    """读一台泵的选型台账:当前身份键优先,没有就借同模型旧版本。
+
+    返回 `{"row", "key", "via", "source"}`,其中
+      * `via="current"`    —— 当前键下就有,`source=None`;
+      * `via="same-model"` —— 借的同模型旧版本,`source={case_id, read_at, match}`;
+      * `via="none"`       —— 哪里都没有,`row=None`(界面显示空表,不编值)。
+    """
+    key = model_key(conn, case_id)
+    row = read_pump_selection(conn, key, block)
+    if row is not None:
+        return {"row": row, "key": key, "via": "current", "source": None}
+    for candidate in model_case_candidates(conn, case_id):
+        sibling_key = model_key(conn, candidate["case_id"])
+        if not sibling_key or sibling_key == key:
+            continue
+        row = read_pump_selection(conn, sibling_key, block)
+        if row is not None:
+            return {"row": row, "key": sibling_key, "via": "same-model", "source": candidate}
+    return {"row": None, "key": key, "via": "none", "source": None}
+
+
+def find_pump_design(conn: sqlite3.Connection, case_id: int, block: str) -> dict:
+    """读一台泵的设计扬程参数;兜底口径与 `find_pump_selection` 相同。"""
+    key = model_key(conn, case_id)
+    row = read_pump_design(conn, key, block)
+    if row is not None:
+        return {"row": row, "key": key, "via": "current", "source": None}
+    for candidate in model_case_candidates(conn, case_id):
+        sibling_key = model_key(conn, candidate["case_id"])
+        if not sibling_key or sibling_key == key:
+            continue
+        row = read_pump_design(conn, sibling_key, block)
+        if row is not None:
+            return {"row": row, "key": sibling_key, "via": "same-model", "source": candidate}
+    return {"row": None, "key": key, "via": "none", "source": None}
+
+
+def find_component_cas(conn: sqlite3.Connection, case_id: int) -> dict:
+    """手填组分 CAS:当前键优先,缺的组分再从同模型旧版本补。
+
+    多个旧版本各填过几组分时会合并(就近优先),**已有值不覆盖**。
+    返回 `{"rows", "via", "source", "sources"}`;`sources` 列出实际借到的工况。
+    """
+    key = model_key(conn, case_id)
+    rows = dict(read_component_cas(conn, key))
+    sources: list[dict] = []
+    seen = {key} if key else set()
+    for candidate in model_case_candidates(conn, case_id):
+        sibling_key = model_key(conn, candidate["case_id"])
+        if not sibling_key or sibling_key in seen:
+            continue
+        seen.add(sibling_key)
+        borrowed = 0
+        for comp, cas in read_component_cas(conn, sibling_key).items():
+            if comp not in rows:
+                rows[comp] = cas
+                borrowed += 1
+        if borrowed:
+            sources.append({**candidate, "borrowed": borrowed})
+    via = "same-model" if sources else ("current" if rows else "none")
+    return {"rows": rows, "via": via, "source": sources[0] if sources else None, "sources": sources}

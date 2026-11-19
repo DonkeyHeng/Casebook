@@ -292,7 +292,8 @@ export async function inheritPv() {
     state.blocks = await api(`/api/cases/${state.current.id}/blocks`);
     renderTable();
     if (msg) {
-      msg.textContent = `已从 #${data.source_case_id}(${data.source_read_at})沿用 ${data.copied} 台,跳过 ${data.skipped} 台已填/不存在`;
+      const how = data.match ? "(同模型旧版本)" : "";
+      msg.textContent = `已从 #${data.source_case_id}(${data.source_read_at})${how}沿用 ${data.copied} 台,跳过 ${data.skipped} 台已填/不存在`;
     }
   } catch (err) {
     if (msg) msg.textContent = `沿用失败:${err.message}`;

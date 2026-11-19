@@ -20,13 +20,13 @@
 | POST | `/api/sample/install` | 把内置示例工况装进当前库(**先备份原库为 `cases.db.bak`**);首页「载入示例工况」按钮用它,效果同 `--sample` |
 | DELETE | `/api/cases/{id}` | 删除工况及其全部明细(流股 / 设备 / 连接 / 塔剖面 / 组成) |
 | GET | `/api/cases/{id}/streams/{流股}/composition` | 单条流股的组成(含 CAS / 中文名);没存过就现从 Aspen 读一条并缓存,读不了时返回 409 + 原因 |
-| POST | `/api/cases/{id}/sections/inherit` | **沿用上一工况**的工段(界区)边界:取同一模型(内容哈希优先、老工况按文件名)更早的工况已保存的结果,写进当前工况;同模型没有更早工况或那边没保存过 → 404 |
+| POST | `/api/cases/{id}/sections/inherit` | **沿用上一工况**的工段(界区)边界:取同一模型(见下「模型身份」,内容哈希变了也算同一份文件)更早的工况已保存的结果,写进当前工况;响应带 `match`(`same-version` / `same-path`)说明是从哪一档找的;没有更早工况或那边没保存过 → 404 |
 | POST | `/api/cases/{id}/components/cas` | **手填组分 CAS**(body `{component, cas}`,`cas` 为空表示清除);按**模型**保存,重读工况不丢 |
 | GET | `/api/cases/{id}/pumps/{位号}/hydraulics` | 算 Σhf 需要的默认输入:进口流股、流量、密度、粘度、管道选型 DN 与内径、默认粗糙度 |
 | POST | `/api/cases/{id}/pumps/{位号}/head-loss` | 按管路参数算 Σhf(body `{l_m, zeta_sum, d_mm?, eps_mm?, mu_cp?, method?, lam?}`);`method` 为 `colebrook` / `gu` / `manual`,选 `manual` 时 `lam` 必填;返回 u / Re / λ / 口径 / Σhf 与缺失项,**只算不存** |
-| GET | `/api/cases/{id}/pumps/{位号}/design-head` | 该泵手填的 ΔZ / Σhf / 管长 L / Σζ / 管件数量 / 覆盖值 / λ 口径;没填过都是 `null` |
+| GET | `/api/cases/{id}/pumps/{位号}/design-head` | 该泵手填的 ΔZ / Σhf / 管长 L / Σζ / 管件数量 / 覆盖值 / λ 口径;没填过都是 `null`。借自同模型旧版本时带 `source`(`{case_id, read_at, match}`) |
 | POST | `/api/cases/{id}/pumps/{位号}/design-head` | 存上述项(body `{dz_m, hf_m, l_m, zeta_json}`,后者含 `zeta_sum` / `fittings` / `overrides` / `lambda`;全空表示清除);按模型身份键+位号保存 |
-| GET | `/api/cases/{id}/pumps/{位号}/selection` | 选型台账:手填结果 `saved` + 按当前工况实时算出的设计点与三态(数值不落库) |
+| GET | `/api/cases/{id}/pumps/{位号}/selection` | 选型台账:手填结果 `saved` + 按当前工况实时算出的设计点与三态(数值不落库);借自同模型旧版本时 `sources` 里给 `{selection, design}` 各自的来源 |
 | POST | `/api/cases/{id}/pumps/{位号}/selection` | 整份保存人工决定的台账字段(型号/名称/台数/材质/配套电机/NPSHᵣ/余量/备注);不收计算值,全空即清除 |
 | GET | `/api/cases/{id}/export.xlsx` | 导出 Excel(给人看);标准表录入后多出「管道计算书」「未选型流股」两张审计表(管道选型表本身走下面的 `.docx`,版面表不进工作簿) |
 | GET | `/api/cases/{id}/export-family.xlsx?family=pump` | 设备页右上角「导出 Excel」:只导**当前分类**的设备明细;分类键见 `/api/block-families`,泵分类含 p_v / NPSHₐ / 建议电机 |
@@ -48,8 +48,11 @@
 | `cas_found` / `cas_total` | 本条流股"认出几个 CAS"(含手填) / 组分总数,页面底部直接显示 |
 
 **模型身份键**:`cases.model_hash`(模型文件内容 sha256)优先,老工况没有该列时
-退回 `cases.model_name`(文件名)。手填 CAS、设计扬程修正项、选型台账、p_v 沿用、
-工段沿用都按这一个键匹配,同名不同内容的两份模型不会被当成同一个。
+退回 `cases.model_name`(文件名)。**写入**一律用当前键,同名不同内容的两份模型不会被当成同一个。
+
+**读手填数据的兜底(2026-11-19)**:内容哈希只说明"这一版内容",模型每保存一次就变一版。
+当前键查不到时,按 `same-version`(同哈希)→ `same-path`(同文件路径)的顺序找同一份模型的旧版本;**借来的值必须带 `source` / `sources`**,页面标出"来自 #N"再由用户决定,
+不静默换键,也不跨模型搬数值(只有文件名相同、路径不同的一律不借)。手填 CAS 会按组分合并旧版本,已有值不覆盖。
 
 **手填 CAS 的规则**:存在 `component_cas` 表里,键 = (模型身份键, 组分),只能**补空缺** ——
 该组分从 Aspen / 模型文件读得到 CAS 时以读数为准,手填不覆盖。显示上:"读不到 CAS"的组分

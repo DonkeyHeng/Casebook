@@ -213,6 +213,120 @@ def test_model_identity_and_selection() -> None:
     check("接口: 非法输入不回成功", not replies)
 
 
+def test_model_identity_fallback() -> None:
+    """模型保存后哈希变:手填数据要能从同模型旧版本借到,且必须标明来源。
+
+    2026-11-19 实测的问题:身份键 = 文件内容 sha256,保存一次就换一版,
+    于是「改完再读」被当成另一个模型 —— 台账 / 设计参数 / 手填 CAS 全部
+    查不到(行还在库里)。这里钉住三件事:
+      ① 兜底能借到,并且 source 指出工况 id 与档位;
+      ② 精确匹配 `previous_case_same_model` 的口径没被偷偷改掉;
+      ③ 不同模型(不同路径;哪怕文件名相同)绝不跨模型搬。
+    """
+    from app.store import db
+
+    conn = db.open_db(":memory:")
+    try:
+        cases = [
+            (1, "D:/a/m.bkp", "m.bkp", "aaa", "t1"),
+            (2, "D:/a/m.bkp", "m.bkp", "bbb", "t2"),  # 同一份文件,保存后换哈希
+            (3, "D:/b/m.bkp", "m.bkp", "ccc", "t3"),  # 同名、不同路径
+            (4, "D:/c/n.bkp", "n.bkp", "ddd", "t4"),  # 另一个模型
+        ]
+        for case in cases:
+            conn.execute(
+                "INSERT INTO cases (id, model_path, model_name, model_hash, read_at) "
+                "VALUES (?,?,?,?,?)",
+                case,
+            )
+        old_key = db.model_key(conn, 1)
+        check_eq("兜底: 旧版本键是内容哈希", old_key, "sha256:aaa")
+        db.save_pump_selection(conn, old_key, "P1", {"model_no": "IS65-50-160", "qty": 2})
+        db.save_pump_design(conn, old_key, "P1", 3.5, 1.2, 40.0, '{"zeta_sum": 17.4}')
+        db.save_component_cas(conn, old_key, "H2O", "7732-18-5")
+        conn.execute("INSERT INTO blocks (case_id, name, pv_bar) VALUES (1, 'P1', 0.5)")
+        conn.execute("INSERT INTO blocks (case_id, name, pv_bar) VALUES (2, 'P1', NULL)")
+        conn.commit()
+
+        found = db.find_pump_selection(conn, 2, "P1")
+        check_eq("兜底: 同路径新版本借到台账", found["via"], "same-model")
+        check_eq("兜底: 台账数值原样", found["row"]["model_no"], "IS65-50-160")
+        check_eq("兜底: 来源工况 id", found["source"]["case_id"], 1)
+        check_eq("兜底: 来源档位 same-path", found["source"]["match"], "same-path")
+
+        found = db.find_pump_design(conn, 2, "P1")
+        check_eq("兜底: 设计参数借到", found["row"]["dz_m"], 3.5)
+        cas = db.find_component_cas(conn, 2)
+        check_eq("兜底: 手填 CAS 借到", cas["rows"].get("H2O"), "7732-18-5")
+
+        check_eq("兜底: 精确同键口径未改", db.previous_case_same_model(conn, 2), None)
+        prev = db.previous_model_case(conn, 2)
+        check_eq("兜底: 宽松沿用找到 #1", prev["case_id"], 1)
+
+        result = db.inherit_pump_pv(conn, 2)
+        check_eq("兜底: p_v 从旧版本沿用", result["source_case_id"], 1)
+        check_eq("兜底: p_v 沿用档位", result["match"], "same-path")
+        check_eq("兜底: p_v 只填空行", result["copied"], 1)
+
+        # 同名不同路径 = 可能是别人发来的另一份模型:只能自己重填,不许借
+        found = db.find_pump_selection(conn, 3, "P1")
+        check_eq("兜底: 同名不同路径不借", found["via"], "none")
+        check("兜底: 同名不同路径拿不到台账", found["row"] is None)
+        check_eq("兜底: 同名也不进候选", db.model_case_candidates(conn, 3), [])
+
+        found = db.find_pump_selection(conn, 4, "P1")
+        check_eq("兜底: 另一个模型不搬", found["via"], "none")
+        check("兜底: 另一个模型拿不到台账", found["row"] is None)
+
+        check_eq(
+            "兜底: 旧键数据仍在库里(孤儿行未被删)",
+            db.read_pump_selection(conn, old_key, "P1")["model_no"],
+            "IS65-50-160",
+        )
+    finally:
+        conn.close()
+
+
+def test_pump_design_source_passthrough() -> None:
+    """接口层:设计参数借自同模型旧版本时,响应必须带 source(界面据此标来源)。"""
+    import os
+    import tempfile
+
+    from app.api.server import Handler
+    from app.store import db
+
+    fd, path = tempfile.mkstemp(prefix="cb_source_", suffix=".db")
+    os.close(fd)
+    try:
+        conn = db.open_db(path)
+        conn.execute(
+            "INSERT INTO cases (id, model_path, model_name, model_hash, read_at) "
+            "VALUES (1,'D:/a/m.bkp','m.bkp','aaa','t1')"
+        )
+        conn.execute(
+            "INSERT INTO cases (id, model_path, model_name, model_hash, read_at) "
+            "VALUES (2,'D:/a/m.bkp','m.bkp','bbb','t2')"
+        )
+        db.save_pump_design(conn, db.model_key(conn, 1), "P1", 3.5, 1.2, 40.0, '{"zeta_sum": 17.4}')
+        conn.commit()
+        conn.close()
+
+        handler = object.__new__(Handler)
+        handler.db_path = path
+        replies: list = []
+        handler._error = lambda msg, code=400: None
+        handler._json = lambda payload, code=200: replies.append(payload)
+        handler._pump_design("2", "P1")
+        check_eq("接口: 借旧版本时带 source", replies[-1]["source"]["case_id"], 1)
+        check_eq("接口: 借来的 ΔZ 可读", replies[-1]["dz_m"], 3.5)
+        check_eq("接口: zeta_json 解析成对象", replies[-1]["zeta_json"]["zeta_sum"], 17.4)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 def test_lambda_method() -> None:
     """λ 口径:前端三法可选,后端只认白名单,默认口径不落空挂账。
 
