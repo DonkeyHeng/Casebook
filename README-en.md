@@ -9,7 +9,7 @@ With an active Aspen Plus simulation open, click **"Read Current Case"** to insp
 [简体中文](README.md) | **English**
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.7.0](https://img.shields.io/badge/version-v1.7.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.0)
+[![Version: v1.7.1](https://img.shields.io/badge/version-v1.7.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.1)
 [![Install Guide](https://img.shields.io/badge/Install%20Guide-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **Disclaimer & Privacy Notice**
@@ -244,8 +244,9 @@ Casebook/
 
 ## Release History
 
-**Latest Release: [v1.7.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.0)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for binaries and full changelogs)
+**Latest Release: [v1.7.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.1)** (See [Releases](https://github.com/DonkeyHeng/Casebook/releases) for binaries and full changelogs)
 
+- **v1.7.1 (Molar-Flow Self-Check)**: Added a molar-flow conservation check for non-reactive blocks, catching a class of reading problems that mass conservation cannot see — mass matches exactly while molar flow is on a different basis — and reports the apparent molecular weight at both ends. Reactors and columns are excluded; heat and utility streams are labeled separately. Covered by the offline test suite, no Aspen required.
 - **v1.7.0 (Pump Line Sync & Floating Parameter Window)**: Reworked the pump panel into a centered floating window with a pump switcher; detailed parameters and the design-head / selection ledger now sit side by side with aligned table tops. The design head links directly to the suction and discharge streams' sizing results on the Pipes page, keeping DN, velocity, Re, λ and Σhf in sync, while a manual DN stays frozen per line. Panels no longer collapse, the active stream's detail opens by default with its stream number labeled, and measured viscosity renders as a normal black value (only missing readings show "auto"). Saved line inputs remain visible for later editing; stale-version echo and repeated 409s on save are fixed.
 - **v1.6.0 (Native Desktop Window & Model-Identity Fix)**: Added a desktop shell `app/desktop.py` built on WebView2 — the app now opens in **its own window with no browser dependency and no console window**; startup/shutdown follows the window lifecycle, logs always go to `data/desktop.log`, geometry is stored in `data/window.json`, in-app exports are written by the host process to `data/exports/` (folder opened automatically) while external links are handed to the system browser, and the bottom-left "Quit" now closes the window right after confirmation. New `--data-dir` flag lets the bundled build and the source build share one `data/` folder (standard tables and case database); a missing standard table now reports "cannot compute ID" instead of silently leaving the pump ID blank. Model identity now falls back between **content hash and file name**, so hand-filled CAS numbers and pump selection records stay attached after the model file is modified. The bundled sample case was refreshed from the latest full-flowsheet read (121 streams / 77 blocks / 214 connections / 401 stage rows / 2178 compositions / 7 pumps with complete $p_v$, 18 component CAS entries) and its machine-specific model hash cleared so the sample stays portable; fixed the empty-state "Load Sample Case" button and the column-name bug in the sample builder.
 - **v1.5.1 (Repo-Wide Architecture Refactor & Test Infrastructure, behavior and verdict rules unchanged)**: API routes moved to declarative tables split by domain, export layer extracted to `app/export/`, ten-step pipe sizing split into `app/design/pipe/` submodules, frontend migrated to native ES Modules with six per-page view modules, and regression cases migrated to `tests/` under pytest; CI added `ruff check` / `ruff format` gates plus a frontend module-dependency static check. The standards import page gained "Copy fill-in prompt / Download template CSV" entries and rejects importing the template verbatim; allowed material grades now follow Table B.1 (no longer limited to 5 preset grades); added Aspen COM node-tree fixtures with offline regression so reader node-path drift is caught by tests; probe scripts' `--help` no longer requires pywin32.
@@ -284,3 +285,11 @@ Issues and Pull Requests are welcome:
 
 - **Contact**: QQ `2655972249` / WeChat `User_DonkeyHeng` (GitHub Issues are preferred for technical discussions).
 - **License**: Distributed under the [Apache License 2.0](LICENSE).
+
+---
+
+## Acknowledgements
+
+The criterion behind the molar-flow self-check (v1.7.1) comes from [kingsAir/cad-pfd-drafting](https://github.com/kingsAir/cad-pfd-drafting), which cross-checks readings with the invariant "mass flow ÷ molar flow = average molecular weight" while parsing Aspen backup files, and uses it to verify heater and splitter conservation. Only the criterion is borrowed — no code was copied. Thanks to the author for sharing it.
+
+Thanks as well to the developers and users who publish their experience with Aspen automation and node-path troubleshooting.
