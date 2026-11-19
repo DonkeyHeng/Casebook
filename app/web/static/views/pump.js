@@ -390,7 +390,7 @@ function lineInput(side, key, value, ph, label) {
 function renderLineRow(side, label) {
   const line = lineOf(side);
   if (!line) {
-    return `<tr><td>${label}</td><td colspan="7" class="muted">管路记录载入中…</td></tr>`;
+    return `<tr><td>${label}</td><td colspan="9" class="muted">管路记录载入中…</td></tr>`;
   }
   if (line.status === "missing") {
     return `<tr><td>${label}</td><td colspan="7" class="muted">${esc(line.reason || "泵没有这一侧流股")}</td></tr>`;
@@ -398,7 +398,7 @@ function renderLineRow(side, label) {
   if (line.status === "ambiguous") {
     const opts = (line.streams || []).map((s) =>
       `<option value="${esc(s)}">${esc(s)}</option>`).join("");
-    return `<tr><td>${label}</td><td colspan="7">
+    return `<tr><td>${label}</td><td colspan="9">
       <span class="muted">${esc(line.reason)}</span>
       <select class="pump-design-select pump-pick" data-side="${side}" aria-label="指定${label}流股">
         <option value="">请选择</option>${opts}
@@ -414,6 +414,8 @@ function renderLineRow(side, label) {
     <td class="num">${dn}${manual ? ' <span class="badge warn">人工</span>' : ""}</td>
     <td class="num">${lineInput(side, "l_m", e.l_m, "未填", "管长 L")}</td>
     <td class="num">${lineInput(side, "zeta_sum", e.zeta_sum, "未填", "Σζ")}</td>
+    <td class="num" title="${esc(line.mu_source === "manual" ? "手填覆盖值" : "进口流股 MUMX(混合物粘度),自动取值")}">${
+      fmtVisc(line.mu_cp)}</td>
     <td class="num">${lineInput(side, "dz_m", e.dz_m, "如 −1.5", "ΔZ")}</td>
     <td class="num">${line.hf_m == null
       ? `<span class="muted" title="${esc((line.missing || []).join("、"))}">缺 ${
@@ -449,7 +451,15 @@ function renderLineDetail(side, label) {
         <label>外径 mm ${lineInput(side, "od_override_mm", e.od_override_mm, "如 168.3", "外径")}</label>
         <label>壁厚 mm ${lineInput(side, "wall_override_mm", e.wall_override_mm, "如 7.1", "壁厚")}</label>`
       : ""}
-      <label>粘度 cP ${lineInput(side, "mu_cp", e.mu_cp, "自动", "粘度")}</label>
+      <label>粘度 cP ${lineInput(
+        side,
+        "mu_cp",
+        e.mu_cp,
+        line.mu_cp == null
+          ? "自动(缺读数)"
+          : `自动 ${fmtVisc(line.mu_cp)}${line.mu_source === "aspen" ? " · Aspen" : ""}`,
+        "粘度",
+      )}</label>
       <label>λ 口径
         <select class="pump-design-select pump-line-lambda" data-side="${side}" aria-label="λ 口径">
           <option value="colebrook"${e.lambda_method === "colebrook" ? " selected" : ""}>Colebrook</option>
@@ -509,7 +519,7 @@ export function renderPumpDesign(row) {
     ${src}${legacyNote}${tablesError}
     <table class="pump-line-table">
       <thead><tr><th scope="col">侧</th><th scope="col">流股</th><th scope="col">DN</th>
-        <th scope="col">L m</th><th scope="col">Σζ</th><th scope="col">ΔZ m</th>
+        <th scope="col">L m</th><th scope="col">Σζ</th><th scope="col">μ cP</th><th scope="col">ΔZ m</th>
         <th scope="col">Σhf m</th><th scope="col">状态</th></tr></thead>
       <tbody>${renderLineRow("suction", "吸入")}${renderLineRow("discharge", "排出")}</tbody>
     </table>

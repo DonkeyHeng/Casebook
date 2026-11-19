@@ -859,6 +859,10 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   to { transform: none; }
 }
 
+/* 泵参数抽屉比塔剖面宽:两侧管段表有 9 列(DN/L/Σζ/μ/ΔZ/Σhf/状态),
+   620px 会逼出横向滚动条。仍留出右侧工作区,不做全屏。 */
+#pumpPanel { width: min(1000px, 96vw); }
+
 .panel-head {
   display: flex;
   align-items: center;

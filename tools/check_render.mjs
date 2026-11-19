@@ -617,6 +617,8 @@ vm.runInContext(`
 vm.runInContext("renderPumpDesign(__row)", ctx);
 const lineHtml = box.innerHTML;
 has("⑩ 渲染出两侧小表", lineHtml, "pump-line-table");
+has("⑩ 表内直接显示自动粘度", lineHtml, "μ cP");
+has("⑩ 粘度回填 Aspen 值", lineHtml, "0.6000");
 has("⑩ 吸入那一行", lineHtml, ">吸入<");
 has("⑩ 排出那一行", lineHtml, ">排出<");
 has("⑩ DN 可跳转", lineHtml, 'class="pump-line-jump"');
