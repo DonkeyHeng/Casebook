@@ -284,6 +284,22 @@ def compute_line(
     out["lambda_method"] = method
     fittings = run.get("fittings")
     out["fittings"] = dict(fittings) if isinstance(fittings, dict) else {}
+    # 前端保存后要能回填并再次编辑,所以把入库的原始输入(含 version)一并回显。
+    # 只回参数,不把 run 的 updated_at / fittings_json 这类内部字段塞给界面。
+    out["run"] = {
+        "l_m": run.get("l_m"),
+        "zeta_sum": run.get("zeta_sum"),
+        "dz_m": run.get("dz_m"),
+        "mu_cp": run.get("mu_cp"),
+        "fittings": out["fittings"],
+        "lambda_method": run.get("lambda_method"),
+        "lambda_manual": run.get("lambda_manual"),
+        "dn_override": run.get("dn_override"),
+        "od_override_mm": run.get("od_override_mm"),
+        "wall_override_mm": run.get("wall_override_mm"),
+        "version": int(run.get("version") or 0),
+    }
+    out["version"] = out["run"]["version"]
 
     # 管道页给不出规格:位置已经认出来,但管径没有着落。
     # 若人工填了外径/壁厚或 DN,仍继续算;否则明确说明原因。

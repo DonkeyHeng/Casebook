@@ -119,6 +119,14 @@ def lines_for(
     view["run_sources"] = run_sources
     view["tables_error"] = tables_error
     view["has_runs"] = bool(runs)
+    # 借来的旧版本只用于回显,不能把它的 version 带进保存:
+    # 写入目标是当前工况(可能还没有这条记录,version=0),否则每次保存都 409。
+    for side in ("suction", "discharge"):
+        line = view.get(side)
+        if line and line.get("stream") in run_sources:
+            line["version"] = 0
+            if isinstance(line.get("run"), dict):
+                line["run"]["version"] = 0
     return view
 
 

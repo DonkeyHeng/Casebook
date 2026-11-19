@@ -66,7 +66,7 @@ def _conns():
 def test_pump_line_formula():
     """H = 压升 + 两侧 ΔZ + 两侧 Σhf;修正 NPSH 只扣吸入段。"""
     runs = {
-        "S1": {"l_m": 10.0, "zeta_sum": 5.0, "dz_m": 2.0, "version": 0},
+        "S1": {"l_m": 10.0, "zeta_sum": 5.0, "dz_m": 2.0, "version": 3},
         "S2": {"l_m": 20.0, "zeta_sum": 10.0, "dz_m": 3.0, "version": 0},
     }
     view = pump_line.compute(
@@ -89,6 +89,11 @@ def test_pump_line_formula():
     corrected = device - 2.0 - s["hf_m"]
     check(abs(view["npsh"]["corrected_m"] - corrected) < 1e-6, "修正 NPSHₐ 只扣吸入段")
     check_eq("3.0+0.5 ≤ 修正值时应判满足", view["npsh"]["state"], "ok")
+
+    # 保存后回显:前端要拿 run.* 回填输入框,拿 version 做下一次乐观锁。
+    check_eq("吸入段 l_m 回显", s["run"]["l_m"], 10.0)
+    check_eq("吸入段 Σζ 回显", s["run"]["zeta_sum"], 5.0)
+    check_eq("吸入段 version 回显", s["version"], 3)
 
     # 手算复核吸入段:u = Q/A,Σhf = (λL/D + Σζ)u²/(2g)
     q = 100.0 / 3600.0

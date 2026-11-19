@@ -628,20 +628,19 @@
              参数表不再被另两块一起挤成一条横线。 -->
         <div class="pump-panel-scroll">
           <div class="pump-modal-col pump-modal-left">
-            <details id="pumpParams" class="pump-params pump-fold" open>
-              <summary class="pump-fold-summary" title="Aspen 读到的泵详细读数">
-                <span class="pump-fold-title">详细参数</span>
+            <section id="pumpParams" class="pump-params pump-block">
+              <div class="pump-block-head" title="Aspen 读到的泵详细读数">
+                <span class="pump-block-title">详细参数</span>
                 <span class="muted" id="pumpParamsBrief"></span>
-                <span class="pump-fold-mark" aria-hidden="true"></span>
-              </summary>
+              </div>
               <div class="table-wrap small">
                 <table id="pumpTable"><thead></thead><tbody></tbody></table>
               </div>
-            </details>
+            </section>
           </div>
           <div class="pump-modal-col pump-modal-right">
-            <details id="pumpDesign" class="pump-design pump-fold"></details>
-            <details id="pumpSelection" class="pump-selection pump-fold"></details>
+            <section id="pumpDesign" class="pump-design pump-block"></section>
+            <section id="pumpSelection" class="pump-selection pump-block"></section>
           </div>
         </div>
       </section>

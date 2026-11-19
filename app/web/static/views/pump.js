@@ -229,7 +229,6 @@ export function openPump(block) {
     '<tr><th scope="col">参数</th><th scope="col" class="num">值</th><th scope="col">来源</th></tr>';
   document.querySelector("#pumpTable tbody").innerHTML = rows.join("");
   fillPumpParamsBrief(row);
-  bindPumpFold(document.getElementById("pumpParams"), "params");
 
   const copyBtn = document.getElementById("copyPumpSpec");
   if (copyBtn) {
@@ -468,6 +467,7 @@ function renderLineDetail(side, label) {
     ? (line.mu_cp == null ? "" : fmtVisc(line.mu_cp))
     : e.mu_cp;
   return `<div class="pump-line-detail" data-detail="${side}">
+    <p class="pump-line-current">当前修改:<b>${label}段</b> · 流股 ${esc(line.stream)}</p>
     <div class="pump-design-inputs">
       <label>管径
         <select class="pump-design-select pump-line-dn" data-side="${side}" aria-label="管径">
@@ -534,13 +534,12 @@ export function renderPumpDesign(row) {
   const tablesError = state.pumpDesign.view && state.pumpDesign.view.tables_error
     ? `<p class="pump-design-note">管道选型未完成:${esc(state.pumpDesign.view.tables_error)}</p>`
     : "";
-  const open = state.pumpDesign.openSide;
+  const open = state.pumpDesign.openSide || "suction";
   box.innerHTML = `
-    <summary class="pump-fold-summary" title="两侧管段共用「管道」页的选型结果">
-      <span class="pump-fold-title">设计扬程 / 管路阻力</span>
+    <div class="pump-block-head" title="两侧管段共用「管道」页的选型结果">
+      <span class="pump-block-title">设计扬程 / 管路阻力</span>
       ${brief}
-      <span class="pump-fold-mark" aria-hidden="true"></span>
-    </summary>
+    </div>
     ${src}${legacyNote}${tablesError}
     <table class="pump-line-table">
       <thead><tr><th scope="col">侧</th><th scope="col">流股</th><th scope="col">DN</th>
@@ -567,8 +566,7 @@ export function renderPumpDesign(row) {
   });
   box.querySelectorAll(".pump-line-more").forEach((btn) => {
     btn.addEventListener("click", () => {
-      state.pumpDesign.openSide = state.pumpDesign.openSide === btn.dataset.side
-        ? null : btn.dataset.side;
+      state.pumpDesign.openSide = btn.dataset.side;
       renderPumpDesign(row);
     });
   });
@@ -629,7 +627,6 @@ export function renderPumpDesign(row) {
   if (saveBtn) saveBtn.onclick = () => savePumpDesign(row);
   const legacyBtn = box.querySelector(".pump-legacy-open");
   if (legacyBtn) legacyBtn.onclick = () => migrateLegacy(row);
-  bindPumpFold(box, "design");
   refreshPumpDesignSum(row);
 }
 
@@ -696,11 +693,12 @@ export async function savePumpDesign(row) {
 }
 
 export async function loadPumpDesign(row) {
+  const keepSide = (state.pumpDesign && state.pumpDesign.openSide) || "suction";
   state.pumpDesign = {
     view: null,
     versions: {},
     edits: {},
-    openSide: null,
+    openSide: keepSide,
     legacy: null,
     source: null,
   };
@@ -746,12 +744,11 @@ export function renderPumpSelection(row, data) {
     ? `<span class="muted">${esc(String(s.model_no))}</span>`
     : '<span class="muted">未填型号</span>';
   box.innerHTML = `
-    <summary class="pump-fold-summary" title="只记「选了什么」,数值以当前工况为准">
-      <span class="pump-fold-title">选型台账</span>
+    <div class="pump-block-head" title="只记「选了什么」,数值以当前工况为准">
+      <span class="pump-block-title">选型台账</span>
       ${modelBrief}
       <span class="pump-sel-state-mini" data-state="${esc(data.npsh_state)}">${stateText}</span>
-      <span class="pump-fold-mark" aria-hidden="true"></span>
-    </summary>
+    </div>
     ${srcNote}
     <div class="pump-sel-live">
       ${kv("流量", fmt(data.flow_m3h, 2), " m³/h")}
@@ -786,7 +783,6 @@ export function renderPumpSelection(row, data) {
     </div>`;
   const btn = document.getElementById("pumpSelSave");
   if (btn) btn.onclick = () => savePumpSelection(row);
-  bindPumpFold(box, "selection");
 }
 
 export async function loadPumpSelection(row) {

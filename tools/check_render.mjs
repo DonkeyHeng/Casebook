@@ -528,8 +528,8 @@ has("⑧ 缺字段时仍渲染出 data-family", sparseFam, 'data-family="pump"')
 ok("⑧ 缺字段时不出现 undefined", !sparseFam.includes("undefined"));
 ok("⑧ 缺字段时不出现 NaN", !sparseFam.includes("NaN"));
 
-// ⑨ 两个可折叠区:收起时只留 summary 标题 + 结论摘要,展开状态在同会话内记忆
-console.log("\n[新增组 ⑨] 折叠面板 —— 设计扬程 / 选型台账(details + summary)");
+// ⑨ 设计扬程 / 选型台账:悬浮窗里不再折叠,标题常驻、内容直接可见
+console.log("\n[新增组 ⑨] 常驻区块 —— 设计扬程 / 选型台账");
 vm.runInContext(`
   state.pumpFold = { design: false, selection: false };
   state.pumpDesign = {
@@ -542,16 +542,11 @@ vm.runInContext(`
 vm.runInContext("renderPumpDesign(__row)", ctx);
 const designFold = byId("pumpDesign");
 const foldHtml = designFold.innerHTML;
-has("⑨ 设计扬程有 summary 折叠头", foldHtml, '<summary class="pump-fold-summary"');
-has("⑨ 折叠头保留标题", foldHtml, "pump-fold-title");
-has("⑨ 折叠头有展开箭头", foldHtml, "pump-fold-mark");
-has("⑨ 收起时仍显示扬程摘要", foldHtml, "选型");
-ok("⑨ 设计扬程默认收起", designFold.open === false);
-ok("⑨ 设计扬程折叠头不含 undefined", !foldHtml.includes("undefined"));
-vm.runInContext("state.pumpFold.design = true;", ctx);
-vm.runInContext("renderPumpDesign(__row)", ctx);
-ok("⑨ 展开状态被记住", designFold.open === true);
-vm.runInContext("state.pumpFold.design = false;", ctx);
+has("⑨ 设计扬程有常驻标题", foldHtml, '<div class="pump-block-head"');
+has("⑨ 标题文字保留", foldHtml, "设计扬程 / 管路阻力");
+ok("⑨ 不再出现折叠箭头", !foldHtml.includes("pump-fold-mark"));
+has("⑨ 标题行仍显示扬程摘要", foldHtml, "选型");
+ok("⑨ 设计扬程内容不含 undefined", !foldHtml.includes("undefined"));
 
 vm.runInContext(`
   renderPumpSelection(__row, {
@@ -563,11 +558,11 @@ vm.runInContext(`
 `, ctx);
 const selFold = byId("pumpSelection");
 const selFoldHtml = selFold.innerHTML;
-has("⑨ 台账有 summary 折叠头", selFoldHtml, '<summary class="pump-fold-summary"');
-has("⑨ 台账收起时显示型号", selFoldHtml, "IS65-50-160");
-has("⑨ 台账收起时显示三态", selFoldHtml, "pump-sel-state-mini");
-ok("⑨ 台账默认收起", selFold.open === false);
-ok("⑨ 台账折叠头不含 undefined", !selFoldHtml.includes("undefined"));
+has("⑨ 台账有常驻标题", selFoldHtml, '<div class="pump-block-head"');
+has("⑨ 台账打开时显示型号", selFoldHtml, "IS65-50-160");
+has("⑨ 台账标题行显示三态", selFoldHtml, "pump-sel-state-mini");
+has("⑨ 台账内容直接可见", selFoldHtml, "pump-sel-live");
+ok("⑨ 台账内容不含 undefined", !selFoldHtml.includes("undefined"));
 ok("⑨ 本版自己填的台账不出现来源提示", !selFoldHtml.includes("pump-design-note"));
 
 vm.runInContext(`
@@ -619,6 +614,8 @@ const lineHtml = box.innerHTML;
 has("⑩ 渲染出两侧小表", lineHtml, "pump-line-table");
 has("⑩ 表内直接显示自动粘度", lineHtml, "μ cP");
 has("⑩ 粘度回填 Aspen 值", lineHtml, "0.6000");
+has("⑩ 默认打开吸入段详情", lineHtml, 'data-detail="suction"');
+has("⑩ 详情标注当前修改流股", lineHtml, "当前修改");
 has("⑩ 吸入那一行", lineHtml, ">吸入<");
 has("⑩ 排出那一行", lineHtml, ">排出<");
 has("⑩ DN 可跳转", lineHtml, 'class="pump-line-jump"');
@@ -642,6 +639,8 @@ has("⑩ 管径含 DN100", detailHtml, "DN100");
 has("⑩ 管径含自定义", detailHtml, "自定义外径 / 壁厚");
 ok("⑩ 读到的粘度直接进输入框", detailHtml.includes('data-key="mu_cp"')
   && detailHtml.includes('value="0.6000"'));
+ok("⑩ 保存过的 L/Σζ 从 run 回填", detailHtml.includes('data-key="l_m"')
+  && detailHtml.includes('value="10"') && detailHtml.includes('value="5"'));
 ok("⑩ 读到粘度不再用自动占位", !detailHtml.includes("自动 0.6"));
 
 // 手填 λ:出现 λ 值输入框并回填(0.0314 为渲染桩值,非实测读数)
@@ -945,7 +944,7 @@ has("⑮ 顶部有切泵下拉", indexHtml, 'id="pumpSwitch"');
 has("⑮ 左列放详细参数", indexHtml, "pump-modal-left");
 has("⑮ 右列放设计扬程与台账", indexHtml, "pump-modal-right");
 
-console.log(`\n新增覆盖:${passed - basePassed} 条断言(⑥ 流股表 / ⑦ 首页 / ⑧ 家族页签 / ⑨ 折叠面板 / ⑩ λ 口径 / ⑪ 对比页 / ⑫ 报告勾选 / ⑬ 缺字段兜底 / ⑭ 详细参数折叠 / ⑮ 泵面板结构)`);
+console.log(`\n新增覆盖:${passed - basePassed} 条断言(⑥ 流股表 / ⑦ 首页 / ⑧ 家族页签 / ⑨ 常驻区块 / ⑩ λ 口径 / ⑪ 对比页 / ⑫ 报告勾选 / ⑬ 缺字段兜底 / ⑭ 详细参数折叠 / ⑮ 泵面板结构)`);
 console.log(`本轮新增:${passed - roundBase} 条断言(⑩ / ⑪ / ⑫ / ⑬ / ⑭ / ⑮)`);
 console.log(`前端渲染最小回归:${passed} 条通过`);
 if (failures.length) {
