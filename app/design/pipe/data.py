@@ -7,7 +7,7 @@
 | `WALL_TOLERANCE_T8` / `WALL_TOLERANCE_T9` / `negative_deviation()` | GB/T 17395-2024 表 8 / 表 9(PDF 第 49 页) | ✅ 300 dpi 渲染逐格录入,已一次人工核对 |
 | `Y_VALUE` / `Y_MAX_TEMP_C` | GB/T 20801.1-2025 表 27 | ✅ 条文已确认(≤482 ℃ 取 0.4) |
 | `PN_CODES` / `MATERIAL_CODES` / `INSULATION_CODES` | HG/T 20519.6 | ✅ 见 `docs/pipe-class-codes.md` |
-| T1 DN→公称外径、T2 外径×标准壁厚、T3 许用应力 | GB/T 17395 表 1/表 4、GB/T 20801.1 表 B.1 | ⬜ **未落地**,等外部录入(见文件末尾 TODO) |
+| T1 DN→公称外径、T2 外径×标准壁厚、T3 许用应力 | GB/T 17395 表 1/表 4、GB/T 20801.1 表 B.1 | ✅ 已接入导入流程;原始 CSV 不入库,由用户在「管道」页导入(见 §4) |
 
 页码与分页结构见 `docs/pipe-standards-index.md`。
 """

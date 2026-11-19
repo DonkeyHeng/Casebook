@@ -9,7 +9,7 @@
 **简体中文** | [English](README-en.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.6.0](https://img.shields.io/badge/version-v1.6.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.6.0)
+[![Version: v1.7.0](https://img.shields.io/badge/version-v1.7.0-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.0)
 [![安装说明](https://img.shields.io/badge/安装说明-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **免责与隐私声明**
@@ -244,8 +244,9 @@ Casebook/
 
 ## 版本演进
 
-**当前最新版本：[v1.6.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.6.0)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+**当前最新版本：[v1.7.0](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.0)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
 
+- **v1.7.0（泵两侧管段联动与悬浮参数窗）**：泵参数改为页面居中的悬浮窗，顶部可直接切换泵；左侧详细参数、右侧设计扬程 / 管路阻力与选型台账并排，表头顶端对齐。设计扬程可直接关联吸入 / 排出流股在「管道」页的选型结果，管径、流速、Re、λ 与 Σhf 双向同步，人工 DN 则按管段冻结。三个区块不再折叠，默认打开当前流股详情并标明流股号；粘度读到即用黑色数值显示，只有缺读数时才标「自动」。保存两侧管段后输入值常驻页面，可继续二次修改；同时修复旧版本记录回显和重复保存 409。
 - **v1.6.0（自带窗口的桌面版与身份识别修正）**：新增桌面窗口壳 `app/desktop.py`（内置 WebView2，**不再依赖本机浏览器**，也没有黑窗控制台）：起停由窗口生命周期管理，日志固定落 `data/desktop.log`，窗口大小记在 `data/window.json`；壳内导出一律由主进程写 `data/exports/` 并自动打开文件夹，外链交给系统浏览器；左下「退出」确认后直接关闭窗口。新增 `--data-dir` 参数，包版与源码版可共用同一份 `data/`（标准表、工况库不再各存一份）；标准表缺失时泵内径改为明示「无从算起」而不是静默留空。模型身份改为**内容哈希 + 文件名双键兜底**：模型改过之后手填 CAS、泵选型台账不再错位。内置示例工况刷新为最近一次读取的全流程快照（121 流股 / 77 模块 / 214 连接 / 401 塔板级 / 2178 组成 / 7 台泵，$p_v$ 齐全，组分字典带 18 条 CAS），并清空本机模型哈希，示例可移植；修掉空库首屏「载入示例工况」按钮失效与示例构建脚本的列名取值错误。
 - **v1.5.1（全仓架构重构与测试基建，行为与判定口径不变）**：API 层改声明式路由表并按域拆分、导出层独立为 `app/export/`、管路十步选型拆入 `app/design/pipe/` 子模块、前端改用原生 ES Module 并按页拆成六个视图模块、回归用例迁入 `tests/` 交 pytest 管理；CI 新增 `ruff check` / `ruff format` 与前端模块依赖静态检查闸门。标准表导入新增「复制填写提示词 / 下载模板 CSV」入口并拒绝原样导入模板，管材牌号范围随表 B.1 放开（不再限 5 个预置牌号）；新增 Aspen COM 节点树夹具与离线回归，reader 节点路径漂移可被自测拦截；探针脚本 `--help` 不再依赖 pywin32。
 - **v1.5.0（管道校核三次修订与泵选型辅助）**：真空改按绝压 `< 95 kPa` 判定，新增外压失稳长圆筒屈曲筛查、高压高温不锈钢按 GB/T 20801.3 计算（消除温度与壁厚倒挂）、汽蚀限速排除泵出口升压线、保温按设计温度 `65 ℃` 判定；新增 **V10–V14** 校验码，按流股类型剔除材质流与热流，`DN1000` 留 5% 圆整容差；《管道选型一览表》增设独立「校核备注」列并改为十列。泵侧修复 Aspen V11 布局下泡点压力 $p_v$ 读取（兼容 `PBUB\MIXED\LIQUID`），新增「粘度 cP」列与三出口同源的「AI 选泵提示词」。
