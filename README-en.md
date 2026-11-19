@@ -38,7 +38,7 @@ Casebook is built on four core principles:
 
 | Method | Steps |
 | :--- | :--- |
-| **Standalone Windows Bundle (Recommended)** | Download `Casebook-windows-x64.zip` (~45 MB) from [Releases](https://github.com/DonkeyHeng/Casebook/releases), extract the `Casebook` folder, and double-click `Casebook-Desktop.exe`. It opens in its **own window (WebView2)** and does not rely on your browser. |
+| **Standalone Windows Bundle (Recommended)** | Download `Casebook-windows-x64.zip` (~40 MB) from [Releases](https://github.com/DonkeyHeng/Casebook/releases), extract the `Casebook` folder, and double-click `Casebook-Desktop.exe`. It opens in its **own window (WebView2)** and does not rely on your browser. |
 | **Run from Source (Python 3.10+)** | Clone or download the repository and double-click **`start.cmd`** in the root folder (checks dependencies, starts the local server, opens the app window, and stops the server when the window closes). |
 | **Troubleshooting** | Refer to **[docs/install.md](docs/install.md)** (plain-text version in [`docs/install-text.txt`](docs/install-text.txt)). |
 

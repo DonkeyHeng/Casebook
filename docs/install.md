@@ -40,7 +40,7 @@ python -m app.api          # 浏览器会自动打开 http://127.0.0.1:8000
 ### 2.1 Windows 包(给不装 Python 的同学,推荐)
 
 1. 打开 <https://github.com/DonkeyHeng/Casebook/releases>
-2. 下载 `Casebook-windows-x64.zip`(约 45 MB)
+2. 下载 `Casebook-windows-x64.zip`(约 40 MB)
 3. 解压到一个**路径里没有空格、不要放 OneDrive 同步盘**的地方,比如 `D:\Casebook`
    - 解压后是一个 `Casebook` 文件夹:里面是 `Casebook-Desktop.exe`、`_internal\`、
      `安装说明.txt`、`LICENSE` —— 整个文件夹一起留着,别只把 exe 拖出来

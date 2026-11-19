@@ -38,7 +38,7 @@ Casebook 的设计遵循四条原则：
 
 | 使用方式 | 操作步骤 |
 | :--- | :--- |
-| **免安装版（推荐）** | 前往 [Releases](https://github.com/DonkeyHeng/Casebook/releases) 下载 `Casebook-windows-x64.zip`（约 45 MB），解压出一个 `Casebook` 文件夹，双击其中的 `Casebook-Desktop.exe` 即可运行：**自带窗口，不依赖浏览器**（根目录附带 `安装说明.txt`）。 |
+| **免安装版（推荐）** | 前往 [Releases](https://github.com/DonkeyHeng/Casebook/releases) 下载 `Casebook-windows-x64.zip`（约 40 MB），解压出一个 `Casebook` 文件夹，双击其中的 `Casebook-Desktop.exe` 即可运行：**自带窗口，不依赖浏览器**（根目录附带 `安装说明.txt`）。 |
 | **源码运行（Python 3.10+）** | 克隆或下载源码后，双击根目录的 **`start.cmd`** 启动（自动检查依赖、拉起服务并打开应用窗口，关闭窗口即自动退出后台进程）。 |
 | **遇到安装或运行报错** | 请查阅详细排错文档 **[docs/install.md](docs/install.md)**（纯文本版见 [`docs/install-text.txt`](docs/install-text.txt)）。 |
 
