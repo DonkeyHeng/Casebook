@@ -859,9 +859,98 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   to { transform: none; }
 }
 
-/* 泵参数抽屉比塔剖面宽:两侧管段表有 9 列(DN/L/Σζ/μ/ΔZ/Σhf/状态),
-   620px 会逼出横向滚动条。仍留出右侧工作区,不做全屏。 */
-#pumpPanel { width: min(1000px, 96vw); }
+/* 泵参数改为页面居中的悬浮窗。原来从右侧滑出的 620px 抽屉,详细参数、
+   设计扬程、选型台账三块全挤在同一列,表格只能被拉窄或逼出横向滚动条;
+   现在左列专放详细参数,右列叠设计扬程与选型台账,窗口本身不再贴边。 */
+#pumpPanel.pump-modal {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(1180px, 95vw);
+  height: min(780px, 88vh);
+  max-height: calc(100vh - 32px);
+  border: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px 20px 18px;
+  box-shadow: 0 0 0 100vmax rgba(15, 23, 42, .20),
+              0 24px 70px rgba(15, 23, 42, .30);
+  z-index: 60;
+  animation: pump-modal-in var(--dur-base) var(--ease-out);
+}
+@keyframes pump-modal-in {
+  from { opacity: 0; transform: scale(.985); }
+  to { opacity: 1; transform: none; }
+}
+.pump-modal-head { align-items: flex-start; margin-bottom: 6px; }
+.pump-modal-title { min-width: 0; }
+.pump-modal-sub { display: block; margin-top: 3px; font-size: var(--fs-xs); }
+.pump-modal-actions { display: flex; align-items: center; gap: 12px; flex: 0 0 auto; }
+.pump-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pump-switch select {
+  max-width: 190px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+#pumpPanel.pump-modal .pump-panel-scroll {
+  display: grid;
+  grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
+  gap: 20px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  scrollbar-gutter: stable;
+}
+#pumpPanel.pump-modal .pump-modal-col {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
+}
+#pumpPanel.pump-modal .pump-modal-left { padding-left: 2px; }
+/* 右列只有 600px 左右,9 列按固定百分比分,输入框吃满本列;
+   状态只留「缺 N 项 / 已关联 + 编辑」,缺什么放 title,避免把表撑出窗口。 */
+#pumpPanel.pump-modal .pump-line-table { table-layout: fixed; }
+#pumpPanel.pump-modal .pump-line-table th,
+#pumpPanel.pump-modal .pump-line-table td { padding: 4px 3px; overflow: hidden; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(1) { width: 8%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(2) { width: 11%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(3) { width: 10%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(4) { width: 11%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(5) { width: 9%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(6) { width: 8%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(7) { width: 10%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(8) { width: 8%; }
+#pumpPanel.pump-modal .pump-line-table th:nth-child(9) { width: 24%; }
+#pumpPanel.pump-modal .pump-line-input { width: 100%; }
+#pumpPanel.pump-modal .pump-line-state { white-space: normal; }
+#pumpPanel.pump-modal .pump-line-state .badge { margin-right: 2px; }
+@media (max-width: 980px) {
+  #pumpPanel.pump-modal {
+    width: 96vw;
+    height: 92vh;
+    padding: 14px 16px 16px;
+  }
+  #pumpPanel.pump-modal .pump-panel-scroll {
+    grid-template-columns: minmax(0, 1fr);
+    overflow-y: auto;
+    gap: 14px;
+  }
+  #pumpPanel.pump-modal .pump-modal-col { overflow: visible; padding-right: 0; }
+}
 
 .panel-head {
   display: flex;

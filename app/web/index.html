@@ -606,32 +606,43 @@
         </div>
       </section>
 
-      <section id="pumpPanel" class="column-panel hidden" role="region"
-               aria-labelledby="pumpTitle" tabindex="-1">
-        <header class="panel-head">
-          <h3 id="pumpTitle">泵参数</h3>
-          <button id="closePump" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+      <section id="pumpPanel" class="column-panel pump-modal hidden" role="dialog"
+               aria-modal="true" aria-labelledby="pumpTitle" tabindex="-1">
+        <header class="panel-head pump-modal-head">
+          <div class="pump-modal-title">
+            <h3 id="pumpTitle">泵参数</h3>
+            <span class="muted pump-modal-sub">详细参数与设计扬程并排,切泵不用先关窗</span>
+          </div>
+          <div class="pump-modal-actions">
+            <label class="pump-switch" for="pumpSwitch">切换泵
+              <select id="pumpSwitch" aria-label="切换泵"></select>
+            </label>
+            <button id="closePump" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+          </div>
         </header>
         <div class="pump-panel-tools">
           <p class="muted pump-panel-hint">中联表单:分类 · 型号 · 流量 · 扬程 · 配套功率</p>
           <button id="copyPumpSpec" class="link-btn" title="把流量/扬程/配套功率合成一行,粘进中联表单,不用手敲">复制选型参数</button>
         </div>
-        <!-- 三块折叠区共用这一条滚动容器。抽屉本身 overflow:hidden 是塔剖面
-             抽屉刻意保留的(防 scrollIntoView 把图表顶走),不能全局改;参数表
-             也不再自己滚,所以无论同时展开几块,整个抽屉始终只有一条滚动条。 -->
+        <!-- 左列只放详细参数,右列叠设计扬程与选型台账。两列各自滚动,
+             参数表不再被另两块一起挤成一条横线。 -->
         <div class="pump-panel-scroll">
-          <details id="pumpParams" class="pump-params pump-fold" open>
-            <summary class="pump-fold-summary" title="Aspen 读到的泵详细读数">
-              <span class="pump-fold-title">详细参数</span>
-              <span class="muted" id="pumpParamsBrief"></span>
-              <span class="pump-fold-mark" aria-hidden="true"></span>
-            </summary>
-            <div class="table-wrap small">
-              <table id="pumpTable"><thead></thead><tbody></tbody></table>
-            </div>
-          </details>
-          <details id="pumpDesign" class="pump-design pump-fold"></details>
-          <details id="pumpSelection" class="pump-selection pump-fold"></details>
+          <div class="pump-modal-col pump-modal-left">
+            <details id="pumpParams" class="pump-params pump-fold" open>
+              <summary class="pump-fold-summary" title="Aspen 读到的泵详细读数">
+                <span class="pump-fold-title">详细参数</span>
+                <span class="muted" id="pumpParamsBrief"></span>
+                <span class="pump-fold-mark" aria-hidden="true"></span>
+              </summary>
+              <div class="table-wrap small">
+                <table id="pumpTable"><thead></thead><tbody></tbody></table>
+              </div>
+            </details>
+          </div>
+          <div class="pump-modal-col pump-modal-right">
+            <details id="pumpDesign" class="pump-design pump-fold"></details>
+            <details id="pumpSelection" class="pump-selection pump-fold"></details>
+          </div>
         </div>
       </section>
 

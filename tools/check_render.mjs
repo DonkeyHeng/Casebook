@@ -640,6 +640,9 @@ has("⑩ 管径下拉", detailHtml, 'class="pump-design-select pump-line-dn"');
 has("⑩ 管径含自动", detailHtml, "自动(跟随管道页)");
 has("⑩ 管径含 DN100", detailHtml, "DN100");
 has("⑩ 管径含自定义", detailHtml, "自定义外径 / 壁厚");
+ok("⑩ 读到的粘度直接进输入框", detailHtml.includes('data-key="mu_cp"')
+  && detailHtml.includes('value="0.6000"'));
+ok("⑩ 读到粘度不再用自动占位", !detailHtml.includes("自动 0.6"));
 
 // 手填 λ:出现 λ 值输入框并回填(0.0314 为渲染桩值,非实测读数)
 vm.runInContext(`
@@ -935,8 +938,15 @@ vm.runInContext(
 ok("⑭ 收起状态被记住", byId("pumpParams").open === false);
 vm.runInContext("state.pumpFold.params = true;", ctx);
 
-console.log(`\n新增覆盖:${passed - basePassed} 条断言(⑥ 流股表 / ⑦ 首页 / ⑧ 家族页签 / ⑨ 折叠面板 / ⑩ λ 口径 / ⑪ 对比页 / ⑫ 报告勾选 / ⑬ 缺字段兜底 / ⑭ 详细参数折叠)`);
-console.log(`本轮新增:${passed - roundBase} 条断言(⑩ / ⑪ / ⑫ / ⑬ / ⑭)`);
+console.log("\n[新增组 ⑮] 泵面板结构 —— 居中悬浮窗 / 双列 / 切泵");
+const indexHtml = fs.readFileSync(path.join(ROOT, "app", "web", "index.html"), "utf8");
+has("⑮ 泵面板用悬浮窗类", indexHtml, "pump-modal");
+has("⑮ 顶部有切泵下拉", indexHtml, 'id="pumpSwitch"');
+has("⑮ 左列放详细参数", indexHtml, "pump-modal-left");
+has("⑮ 右列放设计扬程与台账", indexHtml, "pump-modal-right");
+
+console.log(`\n新增覆盖:${passed - basePassed} 条断言(⑥ 流股表 / ⑦ 首页 / ⑧ 家族页签 / ⑨ 折叠面板 / ⑩ λ 口径 / ⑪ 对比页 / ⑫ 报告勾选 / ⑬ 缺字段兜底 / ⑭ 详细参数折叠 / ⑮ 泵面板结构)`);
+console.log(`本轮新增:${passed - roundBase} 条断言(⑩ / ⑪ / ⑫ / ⑬ / ⑭ / ⑮)`);
 console.log(`前端渲染最小回归:${passed} 条通过`);
 if (failures.length) {
   for (const item of failures) console.error(`  ✗ ${item}`);

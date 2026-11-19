@@ -54,7 +54,7 @@ export const state = {
   pumpSelection: null,
   // 泵参数卡三个折叠区的展开状态(同一会话内切设备回来保持);
   // 详细参数是主读数,默认展开;两块人填区默认收起
-  pumpFold: { params: true, design: false, selection: false },
+  pumpFold: { params: true, design: true, selection: true },
   bannerCollapsed: false,
   compare: { baseId: null, otherId: null, data: null, scope: "streams" },
   impact: null,            // 报错波及范围(/api/cases/{id}/impact):哪些流股不能用

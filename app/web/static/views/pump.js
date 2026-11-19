@@ -153,6 +153,26 @@ export function fillPumpParamsBrief(row) {
   if (brief) brief.textContent = pumpParamsBrief(row);
 }
 
+/* 悬浮窗顶部的切泵下拉。只列泵,不把塔/换热器混进来;切换时走同一个 openPump,
+   这样表格、设计扬程、选型台账都按新泵重读,而不是在旧状态上改个标题。 */
+function fillPumpSwitch(current) {
+  const sel = document.getElementById("pumpSwitch");
+  if (!sel) return;
+  const pumps = state.blocks
+    .filter((b) => (b.family ? b.family === "pump" : b.type === "Pump"))
+    .map((b) => b.name)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "zh-CN"));
+  if (!pumps.includes(current)) pumps.unshift(current);
+  sel.innerHTML = pumps.map((name) =>
+    `<option value="${esc(name)}"${name === current ? " selected" : ""}>${esc(name)}</option>`).join("");
+  sel.value = current;
+  sel.disabled = pumps.length < 2;
+  sel.onchange = () => {
+    if (sel.value && sel.value !== current) openPump(sel.value);
+  };
+}
+
 export function openPump(block) {
   const row = state.blocks.find((b) => b.name === block);
   if (!row) return;
@@ -160,12 +180,12 @@ export function openPump(block) {
     document.getElementById(id).classList.add("hidden"));
   const panel = document.getElementById("pumpPanel");
   document.getElementById("pumpTitle").textContent = `泵参数 · ${block}`;
+  fillPumpSwitch(block);
   panel.classList.remove("hidden");
   markDrawerOpened();
   focusIntoDrawer(panel);
-  // 抽屉本身不滚,滚的是里面那条唯一的滚动容器
-  const scroll = panel.querySelector(".pump-panel-scroll");
-  if (scroll) scroll.scrollTop = 0;
+  // 悬浮窗左右两列各自滚动,回到顶部而不是找已经不存在的整条滚动容器
+  panel.querySelectorAll(".pump-modal-col").forEach((col) => { col.scrollTop = 0; });
 
   const margin = state.pump.margin || 1;
   const spec = state.pumpSpec;
@@ -249,8 +269,8 @@ export function bindPumpFold(box, key) {
   // 逐项补默认,兼容只有 design/selection 两个 key 的旧 state
   if (!state.pumpFold) state.pumpFold = {};
   if (state.pumpFold.params === undefined) state.pumpFold.params = true;
-  if (state.pumpFold.design === undefined) state.pumpFold.design = false;
-  if (state.pumpFold.selection === undefined) state.pumpFold.selection = false;
+  if (state.pumpFold.design === undefined) state.pumpFold.design = true;
+  if (state.pumpFold.selection === undefined) state.pumpFold.selection = true;
   if (!box.dataset.foldBound) {
     box.dataset.foldBound = "1";
     box.addEventListener("toggle", () => {
@@ -393,7 +413,7 @@ function renderLineRow(side, label) {
     return `<tr><td>${label}</td><td colspan="9" class="muted">管路记录载入中…</td></tr>`;
   }
   if (line.status === "missing") {
-    return `<tr><td>${label}</td><td colspan="7" class="muted">${esc(line.reason || "泵没有这一侧流股")}</td></tr>`;
+    return `<tr><td>${label}</td><td colspan="9" class="muted">${esc(line.reason || "泵没有这一侧流股")}</td></tr>`;
   }
   if (line.status === "ambiguous") {
     const opts = (line.streams || []).map((s) =>
@@ -415,16 +435,20 @@ function renderLineRow(side, label) {
     <td class="num">${lineInput(side, "l_m", e.l_m, "未填", "管长 L")}</td>
     <td class="num">${lineInput(side, "zeta_sum", e.zeta_sum, "未填", "Σζ")}</td>
     <td class="num" title="${esc(line.mu_source === "manual" ? "手填覆盖值" : "进口流股 MUMX(混合物粘度),自动取值")}">${
-      fmtVisc(line.mu_cp)}</td>
-    <td class="num">${lineInput(side, "dz_m", e.dz_m, "如 −1.5", "ΔZ")}</td>
+      fmtVisc(line.mu_cp)}</td>    <td class="num">${lineInput(side, "dz_m", e.dz_m, "如 −1.5", "ΔZ")}</td>
     <td class="num">${line.hf_m == null
-      ? `<span class="muted" title="${esc((line.missing || []).join("、"))}">缺 ${
-        esc((line.missing || []).slice(0, 2).join("、"))}</span>`
+      ? `<span class="muted" title="缺 ${esc((line.missing || []).join("、"))}">—</span>`
       : `<span title="u=${fmt(line.u_ms, 2)} m/s · Re=${fmt(line.re, 0)} · λ=${fmt(line.lam, 4)}">${
         fmt(line.hf_m, 3)}</span>`}</td>
-    <td><span class="badge ${line.status === "linked" ? "ok" : "warn"}">${
-      esc(lineStatusText(line))}</span>
-      <button class="link-btn pump-line-more" data-side="${side}">管件 / 管径</button></td>
+    <td class="pump-line-state">
+      <span class="badge ${line.status === "linked" ? "ok" : "warn"}"
+            title="${esc((line.reason || (line.missing || []).join("、")))}">${
+        line.status === "linked"
+          ? "已关联"
+          : ((line.missing || []).length ? `缺 ${(line.missing || []).length} 项` : lineStatusText(line))
+      }</span>
+      <button class="link-btn pump-line-more" data-side="${side}"
+              title="设置常用管件与管径">编辑</button></td>
   </tr>`;
 }
 
@@ -440,6 +464,9 @@ function renderLineDetail(side, label) {
     return `<option value="${v}"${sel}>${dn === "" ? "自动(跟随管道页)" : `DN${dn}`}</option>`;
   }).join("");
   const customOpt = `<option value="custom"${e.custom ? " selected" : ""}>自定义外径 / 壁厚</option>`;
+  const muShown = e.mu_cp === null || e.mu_cp === undefined
+    ? (line.mu_cp == null ? "" : fmtVisc(line.mu_cp))
+    : e.mu_cp;
   return `<div class="pump-line-detail" data-detail="${side}">
     <div class="pump-design-inputs">
       <label>管径
@@ -454,10 +481,8 @@ function renderLineDetail(side, label) {
       <label>粘度 cP ${lineInput(
         side,
         "mu_cp",
-        e.mu_cp,
-        line.mu_cp == null
-          ? "自动(缺读数)"
-          : `自动 ${fmtVisc(line.mu_cp)}${line.mu_source === "aspen" ? " · Aspen" : ""}`,
+        muShown,
+        line.mu_cp == null ? "自动" : "",
         "粘度",
       )}</label>
       <label>λ 口径
