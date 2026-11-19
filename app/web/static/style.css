@@ -896,6 +896,7 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: 34px;
   margin: 0 2px 8px;
   padding-bottom: 7px;
   border-bottom: 1px solid var(--line);
@@ -1192,15 +1193,17 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
 }
 .pump-panel-tools .pump-panel-hint { margin: 0; }
 
-/* 设计扬程辅助:ΔZ / Σhf 两个输入 + 一行结果,放在参数表下面 */
+/* 设计扬程辅助:ΔZ / Σhf 两个输入 + 一行结果,放在参数表下面。
+   悬浮窗里它已经是一张 pump-block 卡片,不能再带旧的 margin-top / 顶边线,
+   否则右列会比左列详细参数整体低 10px,两张表头对不齐。 */
 .pump-design {
   flex: none;
+  margin-top: 0;
   border-top: 1px solid var(--line);
   padding-top: 10px;
-  margin-top: 10px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 .pump-design-head {
   display: flex;
