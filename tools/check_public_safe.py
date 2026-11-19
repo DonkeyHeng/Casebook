@@ -299,6 +299,17 @@ def check_repo_level(hits):
     for p in tracked:
         if not p:
             continue
+        if re.fullmatch(r".github/readme\.md", p, flags=re.IGNORECASE):
+            hits.append(
+                (
+                    "高",
+                    "渲染",
+                    ".github 下放了 README",
+                    p,
+                    0,
+                    "GitHub 取首页 README 的顺序是 .github/README.md → README.md → docs/README.md",
+                )
+            )
         fp = Path(p)
         if fp.is_file() and fp.stat().st_size > 1_500_000:
             mb = fp.stat().st_size / 1024 / 1024
