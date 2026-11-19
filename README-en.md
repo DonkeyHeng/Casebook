@@ -84,8 +84,8 @@ Casebook spans an end-to-end **Read → Store → View → Compute → Report �
 | **4. Engineering Calculations** | Pump parameters & $\text{NPSH}_a$, design head & line friction, pump selection ledger, 10-step pipe sizing, `V1–V14` code checks | Converts raw simulation outputs into transparent sizing parameters and code validation findings |
 | **5. Balances & Reports** | Process section (battery-limit) confirmation, two-tier mass balance checks, energy summary, dual-volume Word reports | Produces print-ready Material & Energy Balance reports aligned with engineering documentation standards |
 | **6. Exports & Integration** | 7/8-sheet Excel workbook, family-specific Excel export, AI analysis pack (`.zip`), 10-column pipe schedule Word, CLI interface | Supports archival deliverables, spreadsheet workflows, and LLM-assisted pump selection/analysis |
-| **7. Runtime & Security** | Zero-build HTTP server, localhost request guards, single-source versioning & manual update check, path isolation, single-file packaging | Ensures safe local execution, zero cloud leakage, and lossless upgrades |
-| **8. Tooling & Quality Assurance** | 825 offline regression self-tests (including COM node-tree fixture replay), headless dual-theme UI sweep, pre-release secret scanner, Aspen COM probes, column diagnostics | Verifies calculation/judgment changes offline and prevents accidental data leaks before release |
+| **7. Runtime & Security** | Zero-build HTTP server, localhost request guards, single-source versioning & manual update check, path isolation, browser single-file and desktop onedir packaging | Ensures safe local execution, zero cloud leakage, and lossless upgrades |
+| **8. Tooling & Quality Assurance** | 910 offline regression self-tests (including COM node-tree fixture replay), headless dual-theme UI sweep, pre-release secret scanner, Aspen COM probes, column diagnostics | Verifies calculation/judgment changes offline and prevents accidental data leaks before release |
 
 ### Key Capabilities in Detail
 
@@ -225,14 +225,14 @@ Casebook/
 | Command | Description |
 | :--- | :--- |
 | `python -m app.cli --list` / `--read` / `--cases` / `--show N` | Headless CLI to list open Aspen models, capture the active case, or inspect saved cases (supports `--composition`) |
-| `python -m tools.selftest [--db data/cases.db]` | Runs **848** standalone offline regression tests (**855** with `--db` database consistency checks), no Aspen or internet required |
+| `python -m tools.selftest [--db data/cases.db]` | Runs **910** standalone offline regression tests (**917** with `--db` database consistency checks), no Aspen or internet required |
 | `python -m pytest tests/ -q` | The same suite under pytest (cases live in `tests/`: run one domain at a time, filter with `-k`) |
 | `python -m tools.repair_cases [--apply]` | Recomputes verdicts, enthalpy checks, and derived parameters offline after rule updates (dry-run by default) |
 | `python -m tools.balance_report --case N` | Batch-generates Material & Energy Balance Word reports for case `N` from the command line |
 | `python -m tools.make_pipe_schedule --case N [--audit]` | Exports the 10-column Pipe Selection Schedule `.docx` (`--audit` prints itemized engineering checks) |
 | `python tools/fill_composition.py` / `python -m tools.column_diag` | Batch-fills stream compositions while Aspen stays open / diagnoses column temperature jumps, flow oscillations, and dry trays |
 | `python -m tools.ui_sweep` / `python -m tools.check_public_safe` | Headless Chromium Light/Dark UI sweep across all tabs / pre-release secret and internal-path scanner |
-| `python -m tools.build_exe` / `python -m tools.make_release` | Packages standalone `Casebook.exe` and generates source + Windows release archives with SHA-256 hashes |
+| `python -m tools.build_exe` / `python -m tools.make_release` | Packages a browser single-file build or a desktop onedir build, then generates source + Windows release archives with SHA-256 hashes |
 
 ### Documentation Index
 - **Getting Started**: [`docs/install.md`](docs/install.md) (Installation & Troubleshooting) · [`docs/README.md`](docs/README.md) (Documentation Index)

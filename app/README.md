@@ -15,20 +15,25 @@ app/
     units.py      单位归一(℃ / bar / kg·h⁻¹ / kW);不认识的单位留空并计数
     balance.py    焓平衡自检 ΔH vs 热负荷 / 轴功率(纯函数,可回算)
   store/   只碰本地数据,不连 Aspen
-    db.py         SQLite 工况库:cases / streams / stream_components / blocks / column_stages / connections
+    db.py         SQLite 工况库:cases / streams / stream_components / blocks / column_stages / connections,
+                  以及管路与泵的持久化记录 pipe_run / pipe_setting / pump_selection / pump_design
     flowsheet.py  连接关系 → 流程图数据(纯函数)
     impact.py     报错设备 → 受影响流股(纯函数,分「不可用 / 仅告警」)
     sections_config.py 工段(界区)边界配置读写 data/config/sections.json + 结构校验
-  design/  纯计算:不碰 Aspen、不读写库
+  design/  计算与取数适配:纯计算不碰 Aspen;只有 pump_line_context 按需读库,不写库
     sections.py    工段(界区)判定:设备名段号推草稿、配置归一化、草稿与确认结果合并
     stream_table.py 物料平衡宽表:流股做列、属性与组分做行(工段级 + 全流程 + 年量)
     mass_balance.py 物料衡算:界区 Σ进界=Σ出界 + 逐设备 Σ进口=Σ出口(纯函数)
     energy_report.py 能量衡算表与全流程汇总(ΔH 由调用方注入 compute() 的结果)
-    block_family.py 设备家族:把 Aspen 几十种块类型收敛成 8 个页签
+    block_family.py 设备家族:把 Aspen 几十种块类型收敛成 9 个页签
     model_identity.py 模型身份:内容哈希优先,文件名兜底(选型台账按模型去重靠它)
     hydraulics.py  管路阻力:流速 / Re / λ / Σhf(供选泵的设计扬程用)
     pump.py        泵的派生量:密度、自算扬程、NPSHₐ、建议电机功率
     pump_selection.py 选型台账的实时计算层:只算不存,台账只放人工决定
+    pump_line.py   泵两侧管段的水力计算:管径 / 管长 / Σζ → u、Re、λ、Σhf,
+                   缺项返回 None;两侧分别算,修正 NPSHₐ 只扣吸入段
+    pump_line_context.py 把 pipe_run、管道页选型结果和泵读数拼成同一份泵管路视图,
+                   页面、Excel、AI 包与自测共用,避免同一根管子两个数
     pump_prompt.py 选泵提示词正文(唯一来源,三个出口都读它)
     pipe/         管路选型(改一处要一起看的三块,放在一个包里)
       calc.py     十步选型:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → [σ] → 壁厚 →
@@ -49,6 +54,7 @@ app/
     routes/        按域拆开的处理逻辑,一个域一个文件
       __init__.py  两张路由表:ROUTES / CASE_ROUTES —— 接口清单的唯一来源
       cases.py     工况:列表、明细、流股 / 设备 / 拓扑、工段、组成、删除
+      lines.py     两侧管段:按流股读写 pipe_run,保存时带版本号防覆盖
       pumps.py     泵:设计扬程、水力、p_v、选型台账
       pipes.py     管路:一览表、标准表导入、管道等级表、模板下载
       exports.py   Excel / AI 包 / 管道 Word / 衡算报告
@@ -66,7 +72,7 @@ app/
     lib/store.js 共享页面状态(state 是唯一数据源,字段归属表见文件头)
     lib/ui.js    界面外壳公用件:主题、提示条、徽章、判定条
     views/table.js       数据页表格:流股 / 设备 / 对比 / 家族页签 / 泵列
-    views/pump.js        泵参数抽屉:参数卡、设计扬程、电机选型
+    views/pump.js        泵参数悬浮窗:详细参数、设计扬程 / 两侧管段、选型台账
     views/composition.js 塔剖面详情与流股组成 / CAS 编辑
     views/column.js      塔剖面图(曲线)
     views/report.js      衡算报告页
@@ -83,10 +89,11 @@ app/
 (`tools/balance_report.py`、`tools/make_pipe_schedule.py`):放在 `api/` 里会让
 命令行为了生成一份 Word 把整个 HTTP 服务拖进来。
 
-`design/` 不依赖 `aspen/` 与 `store/`:它只接收「流股数值 + 配置」并算出一张表。
-衡算相关的纯函数连 `from app.aspen import balance` 都不写 —— `app/aspen/__init__.py`
-会把 `connect.py` 的 `import pythoncom` 拖进来,那样 `design/` 就不再能离线跑了;
-所以 `compute()` 的结果由调用方(api 层 / 工具)当参数传进来。
+`design/` 的纯计算模块不依赖 `aspen/` 与 `store/`:它们只接收「流股数值 + 配置」并算出一张表。
+例外是 `design/pump_line_context.py`:它在函数内按需 import `store.db`,把 `pipe_run` 与泵读数拼成
+视图,但不写库、不碰 Aspen。衡算相关的纯函数连 `from app.aspen import balance` 都不写 ——
+`app/aspen/__init__.py` 会把 `connect.py` 的 `import pythoncom` 拖进来,那样 `design/` 就不再能
+离线跑了;所以 `compute()` 的结果由调用方(api 层 / 工具)当参数传进来。
 
 反过来 `aspen/` 也不依赖 `design/`:读取层要用的那几条数值口径(p_v 有效性、
 摩尔密度→质量密度、电机档位)放在与层无关的 `app/values.py`,两边都只依赖它。

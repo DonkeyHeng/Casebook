@@ -70,7 +70,7 @@
 ```bash
 python tools\dump_fixture.py --case v15-typical --streams 8 --blocks 6 --aspen-version V15
 
-python -m tools.selftest                      # 825 条,必须全绿
+python -m tools.selftest                      # 910 条,必须全绿
 python -m tools.check_public_safe --all       # 脱敏门禁,必须 0 命中
 ```
 

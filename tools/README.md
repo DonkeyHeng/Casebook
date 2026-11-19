@@ -24,14 +24,14 @@
 | `balance_report.py` | 批量生成《物料与能量衡算报告》.docx:`python -m tools.balance_report --case 40 [--blocks …] [--families …]`;与网页「衡算报告」页同一套代码 | ❌ | 写 `data/preview/`(或 `--out`) |
 | `selftest.py` | 回归自测的**薄入口**,用例正文在 `tests/`(pytest);判定 / 单位 / 焓平衡 / 管路选型 / 泵 / HTTP,拿真实工况当固定样本;含 `test_reader_fixture()` 用 `fixtures/` 回放整棵 COM 节点树 | ❌ | 只读库 |
 | `make_pipe_schedule.py` | 命令行生成《管道选型一览表》.docx(与网页导出同一套代码):`python -m tools.make_pipe_schedule --case 55 [--audit] [--out …]` | ❌ | 写 `data/preview/`(或 `--out`) |
-| `check_render.mjs` | 前端渲染回归(180 条)+ 模块依赖静态检查(import 可达、无漏 import):Node + DOM 桩跑真实前端模块的泵设计块 / 流股表 / 首页 / 家族页签 / 折叠面板 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底 / 详细参数折叠,挡住「模板读 state 缺字段 → 整块静默空白」;`node --check` 查不出这类问题 | ❌ | 只打印 |
+| `check_render.mjs` | 前端渲染回归（193 条）+ 模块依赖静态检查（import 可达、无漏 import）：Node + DOM 桩跑真实前端模块的泵悬浮窗 / 两侧管段 / 流股表 / 首页 / 家族页签 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底，挡住「模板读 state 缺字段 → 整块静默空白」；`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
 | `ui_sweep.py` | 界面回归自检:无头浏览器过 7 个页签(浅色 + 深色),截图并收集 JS 异常 / `console.error` / 失败请求;需服务已启动 + 本机 Chrome/Edge | ❌ | 写 `data/preview/ui-check/`(不入库) |
 | `make_icon.py` | 源图 → `.ico`(圆形抠底 + 6 个尺寸) | ❌ | 写 `assets/` |
 | `check_public_safe.py` | 提交 / 发布前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
-| `build_exe.py` | 用 PyInstaller 打单文件 `Casebook.exe`(需要 `pip install pyinstaller`) | ❌ | 写 `data/preview/{dist,build}` |
-| `make_release.py` | 打源码 zip 与 Windows zip 两个发布包,打印大小与 SHA-256 | ❌ | 写 `data/preview/dist` |
+| `build_exe.py` | 用 PyInstaller 打包：默认单文件浏览器版，`--desktop --onedir` 出桌面壳目录版（需要 `pip install pyinstaller`） | ❌ | 写 `data/preview/{dist,build}` |
+| `make_release.py` | 打源码 zip 与 Windows 桌面 zip 两个发布包，打印大小与 SHA-256 | ❌ | 写 `data/preview/dist` |
 
 ## 常见用途
 
@@ -47,7 +47,7 @@
 - 读完工况、想给整份工况补组成(导出样本 / 离线分析)→ `fill_composition.py --case N`,要趁 Aspen 还开着
 - 读得太慢 → `bench.py`
 - 提交前 / 发布前 → `check_public_safe.py --all`
-- 要发版 → `build_exe.py`(先出 exe)→ `make_release.py`(两个 zip)
+- 要发版 → `build_exe.py --desktop --onedir`（先出桌面版）→ `make_release.py`（两个 zip）
 
 ## 注意
 

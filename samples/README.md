@@ -5,7 +5,7 @@
 
 | 文件 | 内容 |
 | --- | --- |
-| `case-23-error.db` | 一份异常工况快照:121 流股 / 77 模块 / 214 条连接 / 401 条塔板级记录 / 2178 条组成(18 组分 × 121 流股,组分字典带 CAS)/ 7 台泵;判定为 `error`、未收敛 |
+| `case-23-error.db` | 一份异常工况快照:121 流股 / 77 模块 / 214 条连接 / 401 条塔板级记录 / 2178 条组成(18 组分 × 121 流股,组分字典带 CAS)/ 7 台泵;判定为 `error`、未收敛。库内也带 `pipe_run` / `pipe_setting` / `pump_selection` 表,可离线试两侧管段与选型台账 |
 | `piping-classes.example.json` | 管路选型的**管道等级表示例**(流股名前缀 + 介质代号 → 材质 / 腐蚀裕量)。复制到 `data/config/piping-classes.json` 生效 |
 | `sections.example.json` | 衡算报告的**工段(界区)边界示例**(按工况 id:进界流股 / 出界流股 / 设备归堆)。复制到 `data/config/sections.json` 生效;不填则按设备名自动推草稿 |
 | `pipe-standards-template/` | 标准表 CSV 的**格式模板**:三份文件各只有表头与 2 行虚构数值,不含任何真实国标数据。用来对照列名填写,导入时会被校验识别并拒绝。详见该目录的 `README.md` |
@@ -23,16 +23,15 @@
 
 ## 怎么用
 
-**exe 版最简单**:双击 `Casebook.exe` 打开界面,首页提示「还没有工况」时点
+**桌面版最简单**:双击 `Casebook-Desktop.exe` 打开界面,首页提示「还没有工况」时点
 **「载入示例工况」** 按钮,示例会装进本地库(原库先备份成 `cases.db.bak`),不用复制任何文件。
-命令行方式 `Casebook.exe --sample` 效果相同。
+命令行方式 `Casebook-Desktop.exe --sample` 效果相同。
 
 **源码版**(示例库就在本目录):
 
-```bash
-# 想直接看界面(不需要 Aspen)。先备份原来的库!
-cp data/cases.db data/cases.local.db
-cp samples/case-23-error.db data/cases.db
+```bat
+copy data\cases.db data\cases.local.db
+copy samples\case-23-error.db data\cases.db
 python -m app.api          # 打开 http://127.0.0.1:8000
 ```
 
