@@ -186,10 +186,27 @@ def build_workbook(conn, case_id: int) -> bytes:
     pumps = [b for b in blocks if _bf.family_of_block(b) == "pump"]
     if pumps:
         from app.design import pump as pump_rules
+        from app.design import pump_line_context
+
+        lines_by_block = {
+            b["name"]: pump_line_context.lines_for(
+                conn,
+                case_id,
+                b,
+                blocks=blocks,
+                streams=streams,
+                connections=connections,
+            )
+            for b in pumps
+        }
 
         def pump_npsh(row):
             # 口径与页面一致:p_v 只认用户填的值,程序不估算
             return pump_rules.npsh_available_m(row["p_in_bar"], row["pv_bar"], row["rho_kgm3"])
+
+        def line_cells(b, side):
+            line = (lines_by_block.get(b["name"]) or {}).get(side) or {}
+            return line.get("dn"), line.get("hf_m")
 
         ws = wb.create_sheet("泵")
         fill_sheet(
@@ -210,6 +227,12 @@ def build_workbook(conn, case_id: int) -> bytes:
                 "进口汽化率",
                 "p_v bar",
                 "NPSHₐ m",
+                "NPSHₐ(修正) m",
+                "吸入 DN",
+                "吸入 Σhf m",
+                "排出 DN",
+                "排出 Σhf m",
+                "Σhf 合计 m",
                 "提示",
             ],
             [
@@ -229,11 +252,17 @@ def build_workbook(conn, case_id: int) -> bytes:
                     b["pump_vap_frac"],
                     b["pv_bar"],
                     pump_npsh(b),
+                    (lines_by_block.get(b["name"]) or {}).get("npsh", {}).get("corrected_m"),
+                    line_cells(b, "suction")[0],
+                    line_cells(b, "suction")[1],
+                    line_cells(b, "discharge")[0],
+                    line_cells(b, "discharge")[1],
+                    (lines_by_block.get(b["name"]) or {}).get("totals", {}).get("hf_m"),
                     b["message"],
                 )
                 for b in pumps
             ],
-            [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 50],
+            [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 14, 10, 10, 10, 10, 12, 50],
         )
 
     # --- 连接关系 ---

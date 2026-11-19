@@ -61,7 +61,7 @@ UNITS = {
     "vap_frac": "无量纲 0–1",
 }
 
-PACK_VERSION = 2  # 2:新增 pumps.csv(泵参数);读包的脚本按 pack_version 判文件是否存在
+PACK_VERSION = 3  # 3:泵两侧管段(NPSHa修正 / 吸入排出 DN 与 Σhf);读包脚本按版本判列
 
 
 # ---------------------------------------------------------------- 小工具
@@ -415,23 +415,42 @@ PUMP_HEADERS = [
     "进口汽化率",
     "p_v bar",
     "NPSHa m",
+    "NPSHa修正 m",
+    "吸入DN",
+    "吸入Σhf m",
+    "排出DN",
+    "排出Σhf m",
+    "Σhf合计 m",
     "提示原文",
 ]
 
 
-def _pumps_csv(pumps) -> bytes:
+def _line_cells(lines: dict | None, side: str) -> tuple:
+    line = (lines or {}).get(side) or {}
+    return (line.get("dn"), _num(line.get("hf_m")))
+
+
+def _pumps_csv(pumps, lines_by_block: dict | None = None) -> bytes:
     """泵参数(只有 Pump 块)。
 
     两个值必须标清楚是**算的**,不能让读包的 AI 当成 Aspen 实测:
       * 建议电机kW = 轴功率 ÷ 0.95 × 1.10 后取标准档位;
-      * NPSHa m  = (进口压力 − p_v)×10⁵ ÷ (ρ·g),**只在有 p_v 时才有值**。
+      * NPSHa m  = (进口压力 − p_v)×10⁵ ÷ (ρ·g),**只在有 p_v 时才有值**;
+      * NPSHa修正 m = 装置值 − ΔZ_吸 − Σhf_吸,三态判据用它;
+      * 吸入/排出 DN 与 Σhf 来自与管道页共享的管段记录。
     空 = 没算,不是"不会汽蚀"。
     """
     from app.design import pump as pump_rules
 
+    lines_by_block = lines_by_block or {}
     rows = []
     for b in pumps:
         npsh = pump_rules.npsh_available_m(b["p_in_bar"], b["pv_bar"], b["rho_kgm3"])
+        lines = lines_by_block.get(b["name"]) or {}
+        npsh_corrected = (lines.get("npsh") or {}).get("corrected_m")
+        hf_total = (lines.get("totals") or {}).get("hf_m")
+        suction = _line_cells(lines, "suction")
+        discharge = _line_cells(lines, "discharge")
         rows.append(
             [
                 b["name"],
@@ -449,6 +468,12 @@ def _pumps_csv(pumps) -> bytes:
                 _num(b["pump_vap_frac"]),
                 _num(b["pv_bar"]),
                 _num(npsh),
+                _num(npsh_corrected),
+                suction[0],
+                suction[1],
+                discharge[0],
+                discharge[1],
+                _num(hf_total),
                 b["message"] or "",
             ]
         )
@@ -1024,7 +1049,20 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
         files.append(("connections.csv", _connections_csv(connections)))
     pumps = _pump_blocks(blocks)
     if pumps:
-        files.append(("pumps.csv", _pumps_csv(pumps)))
+        from app.design import pump_line_context
+
+        lines_by_block = {
+            b["name"]: pump_line_context.lines_for(
+                conn,
+                case_id,
+                b,
+                blocks=blocks,
+                streams=streams,
+                connections=connections,
+            )
+            for b in pumps
+        }
+        files.append(("pumps.csv", _pumps_csv(pumps, lines_by_block)))
         # 选型提示词与工具里「复制选泵提示词」按钮、分类 Excel 的「选泵提示词」
         # 工作表同一份(app/design/pump_prompt.py)
         from app.design import pump_prompt

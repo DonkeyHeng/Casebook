@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 
-from app.design import hydraulics
+from app.design import hydraulics, pump_line_context
 from app.design import pipe as pipe_calc
 from app.design import pump_selection as selection_rules
 from app.design.pipe.constants import TablesNotReady
@@ -17,6 +17,59 @@ from app.store import db
 
 class PumpRoutes:
     """泵域的路由与处理。"""
+
+    def _set_pump_stream_pick(self, raw_id: str, block: str) -> None:
+        """POST …/pumps/{位号}/streams —— 拓扑认不出唯一流股时人工指定。
+
+        只在候选里选:不是这台泵的进出口流股一律拒,避免把别人的管子挂上来。
+        空值 = 取消指定,回到自动认唯一流股。
+        """
+        try:
+            case_id = int(raw_id)
+        except ValueError:
+            self._error("工况 id 必须是整数")
+            return
+        body = self._read_json_body()
+        conn = db.open_db(self.db_path)
+        try:
+            blocks = [dict(b) for b in db.read_blocks(conn, case_id)]
+            if not any(b.get("name") == block for b in blocks):
+                self._error(f"没有设备 {block}(工况 {case_id})", 404)
+                return
+            conns = [dict(c) for c in db.read_connections(conn, case_id)]
+            allowed = {
+                "suction": {
+                    str(c.get("stream"))
+                    for c in conns
+                    if str(c.get("block")) == block and str(c.get("direction")) == "in"
+                },
+                "discharge": {
+                    str(c.get("stream"))
+                    for c in conns
+                    if str(c.get("block")) == block and str(c.get("direction")) == "out"
+                },
+            }
+            picked = {}
+            for side, key in (("suction", "suction"), ("discharge", "discharge")):
+                raw = body.get(key)
+                name = str(raw).strip() if raw not in (None, "") else None
+                if name is not None and name not in allowed[side]:
+                    self._error(
+                        f"{name} 不是这台泵的{'进口' if side == 'suction' else '出口'}流股;"
+                        f"可选 {', '.join(sorted(allowed[side])) or '(无)'}"
+                    )
+                    return
+                picked[side] = name
+            db.save_pump_stream_pick(
+                conn,
+                db.model_key(conn, case_id),
+                block,
+                picked["suction"],
+                picked["discharge"],
+            )
+        finally:
+            conn.close()
+        self._json({"ok": True, "block": block, **picked})
 
     def _set_pump_pv(self, raw_id: str, block: str) -> None:
         """保存一台泵的饱和蒸气压(bar);body 里 pv_bar 为 null 表示清空。
@@ -80,6 +133,23 @@ class PumpRoutes:
                 found["row"] or {"dz_m": None, "hf_m": None, "l_m": None, "zeta_json": None}
             )
             source = found["source"]
+            block_row = next(
+                (dict(b) for b in db.read_blocks(conn, case_id) if b["name"] == block), None
+            )
+            selection = db.find_pump_selection(conn, case_id, block)
+            lines = None
+            legacy = None
+            if block_row is not None:
+                lines = pump_line_context.lines_for(
+                    conn,
+                    case_id,
+                    block_row,
+                    blocks=[dict(b) for b in db.read_blocks(conn, case_id)],
+                    streams=[dict(r) for r in db.read_streams(conn, case_id)],
+                    connections=[dict(c) for c in db.read_connections(conn, case_id)],
+                    saved=selection["row"],
+                )
+                legacy = pump_line_context.legacy_of(conn, case_id, block)
         finally:
             conn.close()
         raw = data.get("zeta_json")
@@ -87,7 +157,17 @@ class PumpRoutes:
             data["zeta_json"] = json.loads(raw) if raw else None
         except (TypeError, ValueError):
             data["zeta_json"] = None
-        self._json({"ok": True, "block": block, **data, "source": source})
+        self._json(
+            {
+                "ok": True,
+                "block": block,
+                **data,
+                "source": source,
+                "lines": lines,
+                "legacy": legacy,
+                "saved": selection["row"] or {},
+            }
+        )
 
     def _pump_hydraulics(self, raw_id: str, block_name: str) -> None:
         """GET …/pumps/{位号}/hydraulics —— 手算 Σhf 需要的输入(含管道选型内径)。
@@ -214,22 +294,45 @@ class PumpRoutes:
         ):
             self._error("method 只能是 colebrook / gu / manual")
             return
+        side = str(body.get("side") or "").strip().lower() or None
+        if side not in (None, "suction", "discharge"):
+            self._error("side 只能是 suction / discharge")
+            return
 
         conn = db.open_db(self.db_path)
         try:
             block = next(
                 (dict(b) for b in db.read_blocks(conn, case_id) if b["name"] == block_name), None
             )
+            if block is None:
+                self._error(f"没有设备 {block_name}(工况 {case_id})", 404)
+                return
+            flow = block.get("flow_m3h")
+            rho = block.get("rho_kgm3")
+            mu_default = block.get("mu_cp")
+            if side:
+                lines = pump_line_context.lines_for(
+                    conn,
+                    case_id,
+                    block,
+                    streams=[dict(r) for r in db.read_streams(conn, case_id)],
+                    connections=[dict(c) for c in db.read_connections(conn, case_id)],
+                )
+                line = lines.get(side) or {}
+                flow = line.get("flow_m3h")
+                rho = line.get("rho_kgm3")
+                mu_default = line.get("mu_cp")
+                d_mm = d_mm or line.get("id_mm")
+                if d_mm is None:
+                    self._error(f"{side} 侧没有可用内径:先在「管道」页选型,或手填 d_mm", 409)
+                    return
         finally:
             conn.close()
-        if block is None:
-            self._error(f"没有设备 {block_name}(工况 {case_id})", 404)
-            return
 
         result = hydraulics.solve(
-            vol_m3h=block.get("flow_m3h"),
-            rho_kgm3=block.get("rho_kgm3"),
-            mu_cp=mu if mu is not None else block.get("mu_cp"),
+            vol_m3h=flow,
+            rho_kgm3=rho,
+            mu_cp=mu if mu is not None else mu_default,
             id_mm=d_mm,
             l_m=l_m,
             zeta_sum=zeta,
@@ -239,7 +342,7 @@ class PumpRoutes:
         )
         # 缺项由 hydraulics.solve 统一报(它同时知道流量/密度/粘度/内径缺不缺),
         # 这里不再重复 append,否则同一个缺失项会出现两次
-        self._json({"ok": True, "block": block_name, **result})
+        self._json({"ok": True, "block": block_name, "side": side, **result})
 
     def _set_pump_design(self, raw_id: str, block: str) -> None:
         """POST …/pumps/{位号}/design-head —— 存 ΔZ、Σhf 与算 Σhf 的人填输入。
@@ -398,8 +501,18 @@ class PumpRoutes:
                 return
             design_found = db.find_pump_design(conn, case_id, block)
             selection_found = db.find_pump_selection(conn, case_id, block)
+            blocks = [dict(b) for b in db.read_blocks(conn, case_id)]
+            lines = pump_line_context.lines_for(
+                conn,
+                case_id,
+                dict(row),
+                blocks=blocks,
+                streams=[dict(r) for r in db.read_streams(conn, case_id)],
+                connections=[dict(c) for c in db.read_connections(conn, case_id)],
+                saved=selection_found["row"],
+            )
             view = selection_rules.compute_view(
-                dict(row), design_found["row"], selection_found["row"]
+                dict(row), design_found["row"], selection_found["row"], lines=lines
             )
             sources = {"selection": selection_found["source"], "design": design_found["source"]}
         finally:
@@ -531,6 +644,10 @@ class PumpRoutes:
     def post_pump_design(self, m, query):
         """POST /api/cases/{id}/pumps/{块名}/design-head —— 保存设计扬程参数。"""
         self._set_pump_design(m["case_id"], m["block"])
+
+    def post_pump_streams(self, m, query):
+        """POST /api/cases/{id}/pumps/{块名}/streams —— 人工指定两侧流股。"""
+        self._set_pump_stream_pick(m["case_id"], m["block"])
 
     def post_pump_selection(self, m, query):
         """POST /api/cases/{id}/pumps/{块名}/selection —— 保存选型台账。"""

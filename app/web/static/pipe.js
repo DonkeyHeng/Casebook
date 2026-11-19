@@ -66,6 +66,11 @@ const PIPE_COLUMNS = [
   { key: "vol_flow", label: "体积流量 m³/h", num: true, digits: 4 },
   { key: "velocity", label: "流速 m/s", num: true, digits: 2 },
   { key: "dn", label: "公称直径", num: true, cls: "pipe-answer" },
+  { key: "pump_side", label: "泵段", group: "calc" },
+  { key: "line_l", label: "管长 L m", num: true, group: "calc" },
+  { key: "line_zeta", label: "Σζ", num: true, group: "calc" },
+  { key: "line_mu", label: "μ cP", num: true, digits: 4, group: "calc" },
+  { key: "line_hf", label: "Σhf m", num: true, digits: 3, group: "calc" },
   { key: "wall_mm", label: "壁厚 mm", num: true, digits: 1 },
   { key: "material", label: "管材" },
   { key: "type", label: "类型" },
@@ -87,7 +92,9 @@ const PIPE_DEBOUNCE_MS = 350;
 
 const pipeState = {
   caseId: null,          // 这份结果是哪份工况算的
+  settingsCaseId: null,  // 参数已经从库里按模型取过了吗
   params: { ...PIPE_DEFAULT_PARAMS },
+  savedParams: { ...PIPE_DEFAULT_PARAMS },
   view: { unit: "kpa", showCalc: false, onlyBad: false, filter: "" },
   data: null,            // 接口返回体
   status: "idle",        // idle / loading / ok / invalid / not-ready / error
@@ -253,7 +260,7 @@ function bindPipeEvents() {
   if (reset) reset.addEventListener("click", () => {
     pipeState.params = { ...PIPE_DEFAULT_PARAMS };
     applyPipeParamsToDom();
-    runPipeCalc({ force: true });
+    savePipeParamsWithPreview();
   });
   const recalc = document.getElementById("pipeRecalc");
   if (recalc) recalc.addEventListener("click", () => {
@@ -741,8 +748,104 @@ function onPipeParamInput(evt) {
   }
   clearTimeout(pipeState.timer);
   const immediate = evt && (evt.type === "change" || evt.type === "submit");
-  if (immediate) runPipeCalc();
-  else pipeState.timer = setTimeout(runPipeCalc, PIPE_DEBOUNCE_MS);
+  if (immediate) {
+    savePipeParamsWithPreview();
+    return;
+  }
+  pipeState.timer = setTimeout(() => runPipeCalc({ force: true }), PIPE_DEBOUNCE_MS);
+}
+
+/* 管道页参数按模型存一套(D19);改之前先算影响(D20),确认后才落库。
+   取消 = 回到库里那套参数,而不是让界面停在"看起来改了、其实没存"的状态。 */
+async function savePipeParamsWithPreview() {
+  const c = state.current;
+  if (!c) return;
+  const body = {
+    options: {
+      velocity: {
+        liquid: pipeState.params.liquid,
+        gas: pipeState.params.gas,
+        two: pipeState.params.two,
+        pump_inlet: pipeState.params.pump_inlet,
+      },
+      pressure_factor: pipeState.params.factor,
+      pressure_add_mpa: 0.15,
+      pressure_floor_mpa: pipeState.params.floor,
+      max_dn: pipeState.params.max_dn,
+      material: pipeState.params.material,
+    },
+  };
+  try {
+    const res = await fetch(`/api/cases/${c.id}/pipe-settings`, {
+      method: "POST",
+      headers: { "X-Casebook-Client": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, dry_run: true }),
+    });
+    const preview = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      pipeState.error = preview.error || `参数预演失败:HTTP ${res.status}`;
+      pipeState.status = "invalid";
+      renderPipeNotice();
+      return;
+    }
+    const impact = preview.impact || {};
+    const freeze = preview.freeze || {};
+    let text = `将影响 ${impact.pumps_changed || 0} / ${impact.pumps_total || 0} 台泵`;
+    if (impact.max_delta_head_m) text += `,设计扬程最大变化 ${impact.max_delta_head_m} m`;
+    if (freeze.count) text += `\n${freeze.count} 条管段已人工选 DN,不会跟着变`;
+    text += "\n\n保存这套参数并重算?";
+    if (!window.confirm(text)) {
+      await restorePipeParams(c.id);
+      return;
+    }
+    const save = await fetch(`/api/cases/${c.id}/pipe-settings`, {
+      method: "POST",
+      headers: { "X-Casebook-Client": "1", "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, dry_run: false }),
+    });
+    const saved = await save.json().catch(() => ({}));
+    if (!save.ok) {
+      pipeState.error = saved.error || `保存参数失败:HTTP ${save.status}`;
+      pipeState.status = "invalid";
+      renderPipeNotice();
+      return;
+    }
+    pipeState.savedParams = { ...pipeState.params };
+    runPipeCalc({ force: true });
+  } catch (err) {
+    pipeState.error = `保存参数失败:${err.message}`;
+    pipeState.status = "invalid";
+    renderPipeNotice();
+  }
+}
+
+async function loadPipeSettings(caseId) {
+  try {
+    const got = await api(`/api/cases/${caseId}/pipe-settings`);
+    const opt = (got && got.options) || {};
+    const v = opt.velocity || {};
+    pipeState.params = {
+      liquid: Number.isFinite(v.liquid) ? v.liquid : PIPE_DEFAULT_PARAMS.liquid,
+      gas: Number.isFinite(v.gas) ? v.gas : PIPE_DEFAULT_PARAMS.gas,
+      two: Number.isFinite(v.two) ? v.two : PIPE_DEFAULT_PARAMS.two,
+      pump_inlet: Number.isFinite(v.pump_inlet) ? v.pump_inlet : PIPE_DEFAULT_PARAMS.pump_inlet,
+      factor: Number.isFinite(opt.pressure_factor) ? opt.pressure_factor : PIPE_DEFAULT_PARAMS.factor,
+      floor: Number.isFinite(opt.pressure_floor_mpa)
+        ? opt.pressure_floor_mpa : PIPE_DEFAULT_PARAMS.floor,
+      max_dn: Number.isFinite(opt.max_dn) ? opt.max_dn : PIPE_DEFAULT_PARAMS.max_dn,
+      material: opt.material || PIPE_DEFAULT_PARAMS.material,
+    };
+    pipeState.savedParams = { ...pipeState.params };
+  } catch (err) {
+    pipeState.params = { ...PIPE_DEFAULT_PARAMS };
+    pipeState.savedParams = { ...PIPE_DEFAULT_PARAMS };
+  }
+  applyPipeParamsToDom();
+}
+
+async function restorePipeParams(caseId) {
+  await loadPipeSettings(caseId);
+  runPipeCalc({ force: true });
 }
 
 /* ------------------------------------------------------------ 计算 */
@@ -872,8 +975,22 @@ function pipeFindingChips(list) {
     + `>${esc(f.code)}</span>`).join(" ");
 }
 
+function pipeLine(row) {
+  return (pipeState.data && pipeState.data.pump_lines
+    && pipeState.data.pump_lines[row.stream]) || null;
+}
+
+function pipeLineInput(row, field, value, placeholder = "") {
+  const shown = value === null || value === undefined ? "" : value;
+  return `<input class="pipe-line-input" type="number" step="any" inputmode="decimal"
+    data-stream="${esc(row.stream)}" data-field="${field}"
+    value="${esc(shown)}" placeholder="${esc(placeholder)}"
+    aria-label="${esc(field)}">`;
+}
+
 function pipeCellValue(row, col, ctx) {
   const s = ctx.streams.get(row.stream) || {};
+  const line = pipeLine(row);
   switch (col.key) {
     case "stream": return esc(row.stream);
     case "temperature": return fmt(s.temperature_c, 2);
@@ -885,7 +1002,37 @@ function pipeCellValue(row, col, ctx) {
     }
     case "vol_flow": return fmt(row.vol_flow_m3h, 2);
     case "velocity": return fmt(pipeVelocity(row), 2);
-    case "dn": return row.dn === null || row.dn === undefined ? "—" : `DN${row.dn}`;
+    case "dn": {
+      if (!line) return row.dn === null || row.dn === undefined ? "—" : `DN${row.dn}`;
+      const manual = line.dn_source === "manual" || line.dn_source === "custom";
+      const text = line.dn === null || line.dn === undefined ? "—" : `DN${line.dn}`;
+      return `${text}${manual ? ' <span class="badge warn" title="人工 DN,已冻结,不随管道页参数变">人工</span>' : ""}`;
+    }
+    case "pump_side": {
+      if (!line) return '<span class="muted">—</span>';
+      const side = line.role === "discharge" ? "排出" : "吸入";
+      return `<span title="${esc(line.pump || "")}">${side}<span class="muted"> · ${esc(line.pump || "")}</span></span>`;
+    }
+    case "line_l":
+      return line
+        ? pipeLineInput(row, "l_m", line.run && line.run.l_m, "未填")
+        : '<span class="muted">—</span>';
+    case "line_zeta":
+      return line
+        ? pipeLineInput(row, "zeta_sum", line.run && line.run.zeta_sum, "未填")
+        : '<span class="muted">—</span>';
+    case "line_mu":
+      return line
+        ? pipeLineInput(row, "mu_cp", line.run && line.run.mu_cp, fmt(line.mu_cp, 4))
+        : '<span class="muted">—</span>';
+    case "line_hf": {
+      if (!line) return '<span class="muted">—</span>';
+      if (line.hf_m === null || line.hf_m === undefined) {
+        return `<span class="muted" title="${esc((line.missing || []).join("、"))}">缺 ${
+          esc((line.missing || []).slice(0, 2).join("、"))}</span>`;
+      }
+      return `<span title="u=${fmt(line.u_ms, 2)} m/s · Re=${fmt(line.re, 0)} · λ=${fmt(line.lam, 4)}">${fmt(line.hf_m, 3)}</span>`;
+    }
     case "material": return esc(row.material || "—");
     case "type": return "无缝";        // 本期口径 Φw=1,焊管以后再加参数
     case "grade_code": return row.grade_code
@@ -933,6 +1080,55 @@ function pipeVisibleRows(hits) {
   });
 }
 
+/* 泵段那五列只有泵行能改;保存走 /lines/{stream},带 version 做乐观锁。
+   只提交这一行,不动管件 / λ 口径等别的字段 —— 页面不该因为改个 L 就把别的清掉。 */
+async function savePipeLineInput(inp) {
+  const data = pipeState.data;
+  const line = data && data.pump_lines && data.pump_lines[inp.dataset.stream];
+  if (!line) return;
+  const raw = inp.value.trim();
+  const value = raw === "" ? null : Number(raw);
+  if (raw !== "" && !Number.isFinite(value)) {
+    inp.classList.add("invalid");
+    return;
+  }
+  inp.classList.remove("invalid");
+  const run = line.run || {};
+  const body = {
+    l_m: run.l_m ?? null,
+    zeta_sum: run.zeta_sum ?? null,
+    fittings_json: run.fittings_json ?? null,
+    lambda_method: run.lambda_method ?? null,
+    lambda_manual: run.lambda_manual ?? null,
+    dz_m: run.dz_m ?? null,
+    dn_override: run.dn_override ?? null,
+    od_override_mm: run.od_override_mm ?? null,
+    wall_override_mm: run.wall_override_mm ?? null,
+    mu_cp: run.mu_cp ?? null,
+    note: run.note ?? null,
+    version: line.version || 0,
+  };
+  body[inp.dataset.field] = value;
+  try {
+    const res = await fetch(
+      `/api/cases/${state.current.id}/lines/${encodeURIComponent(inp.dataset.stream)}`,
+      {
+        method: "POST",
+        headers: { "X-Casebook-Client": "1", "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      window.alert(out.error || `保存失败:HTTP ${res.status}`);
+      return;
+    }
+    runPipeCalc({ force: true });
+  } catch (err) {
+    window.alert(`保存失败:${err.message}`);
+  }
+}
+
 /* 表体 + 汇总。返回显示的行数 */
 function drawPipeTable() {
   const data = pipeState.data;
@@ -968,6 +1164,12 @@ function drawPipeTable() {
   tbody.querySelectorAll(".pipe-chip").forEach((b) => {
     b.addEventListener("click", () => highlightPipeRow(b.dataset.stream));
   });
+  tbody.querySelectorAll(".pipe-line-input").forEach((inp) => {
+    inp.addEventListener("change", () => savePipeLineInput(inp));
+    inp.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); inp.blur(); }
+    });
+  });
 
   renderPipeCount(rows.length);
   return rows.length;
@@ -982,6 +1184,24 @@ function highlightPipeRow(stream) {
   tr.classList.add("pipe-row-hl");
   tr.scrollIntoView({ block: "center" });
 }
+
+/* 从泵面板跳到管道页并高亮这条流股(D9:DN 可跳转)。
+   换页由地址栏驱动;若本来就在管道页,直接高亮。
+   用自定义事件而不是互相 import:pump.js 依赖 pipe.js 的文案工具,
+   反向 import 会成环。 */
+export function gotoPipeStream(stream) {
+  const jump = () => highlightPipeRow(stream);
+  if (state.page === "pipes") {
+    jump();
+    return;
+  }
+  location.hash = "pipes";
+  setTimeout(jump, 600);
+}
+
+window.addEventListener("casebook:pipe-jump", (e) => {
+  if (e && e.detail) gotoPipeStream(String(e.detail));
+});
 
 function renderPipeCount(shown) {
   const el = document.getElementById("pipeCount");
@@ -1196,6 +1416,14 @@ export function renderPipes() {
   if (pipeState.caseId !== c.id) {
     pipeState.data = null; pipeState.lastQuery = null;
     if (pipeState.status === "ok") pipeState.status = "idle";
+  }
+  // 参数按模型存一套:换工况先把它取回来,别拿上一份模型的流速去算这一份
+  if (pipeState.settingsCaseId !== c.id) {
+    pipeState.settingsCaseId = c.id;
+    pipeState.status = "loading";
+    loadPipeSettings(c.id).finally(() => runPipeCalc({ force: true }));
+    renderPipeNotice();
+    return;
   }
   if (pipeState.status === "idle") { runPipeCalc(); return; }   // 算完会再回来渲染
 

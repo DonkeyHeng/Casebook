@@ -291,109 +291,70 @@ vm.runInContext(`
 
 const box = byId("pumpDesign");
 
-// ① 完整 state:渲染结果不能是空白,关键节点与回填值都要在
+// ① 完整视图:两张小表、输入、结论都要在;来源提示可辨
 vm.runInContext(`
+  const mk = (stream, dn, hf, dz, l, zeta, fittings) => ({
+    stream, status: "linked", dn, od_mm: dn === 100 ? 114.3 : 88.9, wall_mm: 4,
+    id_mm: dn === 100 ? 106.3 : 80.9, dn_source: "auto", missing: [], version: 0,
+    hf_m: hf, u_ms: 2.1, re: 12000, lam: 0.028,
+    run: { l_m: l, zeta_sum: zeta, dz_m: dz, fittings, lambda_method: "colebrook" },
+  });
   state.pumpDesign = {
-    dz: 9.45, hf: 5.93, l: 40, zeta: 17.43,
-    idMm: 52.5, muCp: 0.6, epsMm: 0.05, calc: null, idNote: "",
-    fittings: { el90: 3, gate: 1, globe: 0, check: 1, reducer: 0 },
+    view: {
+      suction: mk("S1", 100, 1.23, 9.45, 40, 17.43, { el90: 3, gate: 1 }),
+      discharge: mk("S2", 80, 0.77, 0, 20, 5, {}),
+      totals: { head_m: 20, dz_m: 9.45, hf_m: 2, design_head_m: 31.45,
+                selection_head_m: 35, partial_hf_m: 2, partial_dz_m: 9.45 },
+      npsh: { device_m: 15.29, corrected_m: 11.06, state: "ok", threshold_m: 3.5,
+              margin_used_m: 0.5, margin_is_default: true, reason: "渲染桩值" },
+      run_sources: {}, tables_error: "",
+    },
+    versions: {}, edits: {}, openSide: null, legacy: null, source: null,
   };
 `, ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
 const html = box.innerHTML;
 ok("完整 state 渲染结果非空", html.length > 0);
-has("渲染出设计扬程块", html, "设计扬程");
-has("渲染出管件数量区", html, "常用管件");
+has("渲染出两侧管段表", html, "pump-line-table");
 has("渲染出结果行容器", html, "pumpDesignSum");
-has("渲染出管长输入", html, 'data-key="l"');
-has("渲染出 Σζ 输入", html, 'data-key="zeta"');
-has("渲染出管件输入", html, 'data-fit="el90"');
-has("管件数量回填到输入框", html, 'value="3"');
+has("渲染出管长输入", html, 'data-key="l_m"');
+has("渲染出 Σζ 输入", html, 'data-key="zeta_sum"');
+has("渲染出 ΔZ 输入", html, 'data-key="dz_m"');
+has("渲染出 DN 跳转", html, "pump-line-jump");
 ok("渲染结果不含 undefined", !html.includes("undefined"));
 ok("渲染结果不含 NaN", !html.includes("NaN"));
-ok("结果行有内容", byId("pumpDesignSum").innerHTML.includes("m"));
+ok("结果行有内容", byId("pumpDesignSum").innerHTML.includes("31.45"));
+
+// 展开管件区:数量回填、输入都绑 change
+vm.runInContext("state.pumpDesign.openSide = 'suction'; renderPumpDesign(__row)", ctx);
+has("渲染出管件数量区", box.innerHTML, "常用管件");
+has("渲染出管件输入", box.innerHTML, 'data-fit="el90"');
+has("管件数量回填到输入框", box.innerHTML, 'value="3"');
+const fits = box._lastQueries[".pump-fit-input"] || [];
+ok("5 个管件输入都绑了 change", fits.length === 5
+  && fits.every((el) => (el.listeners.change || []).length), `实际 ${fits.length} 个`);
 
 // ①b 值借自同模型旧版本时:必须标出来源,不能让人以为是本版填的
 vm.runInContext(`
-  state.pumpDesign.source = { case_id: 66, read_at: "2026-11-19 10:30:00", match: "same-path" };
+  state.pumpDesign.view.run_sources = {
+    S1: { case_id: 66, read_at: "2026-11-19 10:30:00", match: "same-path" },
+  };
 `, ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
 ok("借来的参数渲染出来源提示", box.innerHTML.includes("来自同模型旧版本 #66"));
 has("来源提示带时间", box.innerHTML, "2026-11-19 10:30");
 has("来源提示用统一样式", box.innerHTML, "pump-design-note");
-ok("来源提示写明保存后写回当前工况", box.innerHTML.includes("再次保存后写入当前工况"));
-vm.runInContext("state.pumpDesign.source = null", ctx);
-vm.runInContext("renderPumpDesign(__row)", ctx);
+ok("来源提示写明保存后写回当前工况", box.innerHTML.includes("保存后写入当前工况"));
+vm.runInContext("state.pumpDesign.view.run_sources = {}; renderPumpDesign(__row)", ctx);
 ok("本版自己填的不出现来源提示", !box.innerHTML.includes("pump-design-note"));
-vm.runInContext(`
-  state.pumpDesign = {
-    dz: 9.45, hf: 5.93, l: 40, zeta: 17.43,
-    idMm: 52.5, muCp: 0.6, epsMm: 0.05, calc: null, idNote: "", source: null,
-    fittings: { el90: 3, gate: 1, globe: 0, check: 1, reducer: 0 },
-  };
-`, ctx);
-vm.runInContext("renderPumpDesign(__row)", ctx);
 
-const inputs = box._lastQueries[".pump-design-input"] || [];
-ok(
-  "7 个手填输入都绑了 input / change",
-  inputs.length === 7 && inputs.every(
-    (el) => (el.listeners.input || []).length && (el.listeners.change || []).length
-  ),
-  `实际 ${inputs.length} 个`,
-);
-const fits = box._lastQueries[".pump-fit-input"] || [];
-ok(
-  "5 个管件输入都绑了 change",
-  fits.length === 5 && fits.every((el) => (el.listeners.change || []).length),
-  `实际 ${fits.length} 个`,
-);
-
-// ② 缺字段的 state(老服务 / 半初始化):不能整块静默空白
-vm.runInContext("state.pumpDesign = { dz: null, hf: null };", ctx);
+// ② 没载入视图(老服务 / 半初始化):不能整块静默空白
+vm.runInContext("state.pumpDesign = { view: null, edits: {}, openSide: null };", ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
 const sparse = box.innerHTML;
-ok("缺字段时不静默空白", sparse.length > 0);
-ok("缺字段时不出现 undefined", !sparse.includes("undefined"));
-ok("缺字段时不出现 NaN", !sparse.includes("NaN"));
-
-// ③ 保存请求:管长 / Σζ / 管件数量都要带上
-vm.runInContext(`
-  state.pumpDesign = {
-    dz: 9.45, hf: 5.93, l: 40, zeta: 17.43,
-    idMm: 52.5, muCp: 0.6, epsMm: 0.05, calc: null, idNote: "",
-    fittings: { el90: 3, gate: 1, globe: 0, check: 1, reducer: 0 },
-  };
-`, ctx);
-capture.length = 0;
-await vm.runInContext("savePumpDesign(__row)", ctx);
-const post = capture[0];
-ok("保存请求发到 design-head", Boolean(post && post.url.includes("/design-head")));
-ok("请求体带管长 l_m", Boolean(post && post.body.l_m === 40));
-ok(
-  "请求体带管件数量",
-  Boolean(post && post.body.zeta_json && post.body.zeta_json.fittings
-    && post.body.zeta_json.fittings.el90 === 3),
-);
-ok("请求体带手填 Σζ", Boolean(post && post.body.zeta_json
-  && post.body.zeta_json.zeta_sum === 17.43));
-
-// ④ 全部清空:发清除请求,而不是留一条全 0 的空挂账
-vm.runInContext(`
-  state.pumpDesign = {
-    dz: null, hf: null, l: null, zeta: null,
-    idMm: null, muCp: null, epsMm: null, calc: null, idNote: "",
-    fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
-  };
-`, ctx);
-capture.length = 0;
-await vm.runInContext("savePumpDesign(__row)", ctx);
-const cleared = capture[0];
-ok(
-  "全空时发清除请求",
-  Boolean(cleared && cleared.body.dz_m === null && cleared.body.hf_m === null
-    && cleared.body.l_m === null && cleared.body.zeta_json === null),
-);
+ok("缺视图时不静默空白", sparse.length > 0);
+ok("缺视图时不出现 undefined", !sparse.includes("undefined"));
+ok("缺视图时不出现 NaN", !sparse.includes("NaN"));
 
 // ⑤ 缺数据一律 null,不拿 0 或常见值顶替
 const nums = vm.runInContext(
@@ -623,121 +584,137 @@ ok("⑨ 台账借自旧版本时标来源", selSrcHtml.includes("台账来自同
 has("⑨ 台账来源带时间", selSrcHtml, "2026-11-19 10:30");
 ok("⑨ 台账来源提示也写明保存写回", selSrcHtml.includes("保存后写入当前工况"));
 
-const roundBase = passed;   // 本轮新增(⑩/⑪/⑫)前的基线:原有 76 条
+const roundBase = passed;   // 本轮新增(⑩/⑪)前的基线
 
-// ⑩ λ 口径控件:renderPumpDesign 新增的 pump-design-lambda 区块 + 保存/计算请求体
-console.log("[新增组 ⑩] λ 口径控件 —— select / manual 输入框 / 保存与计算请求");
+// ⑩ 两侧管段小表:DN / L / Σζ / ΔZ / Σhf,保存走 /lines/{stream}
+console.log("[新增组 ⑩] 泵两侧管段 —— 两行小表 / 管件与管径 / 保存请求");
 vm.runInContext(`
   state.current = { id: 1 };
   state.pumpFold = { design: false, selection: false };
+  const line = (stream, dn, hf, role) => ({
+    stream, role, status: "linked", reason: "", dn, od_mm: dn === 100 ? 114.3 : 88.9,
+    wall_mm: 4, id_mm: dn === 100 ? 106.3 : 80.9, dn_source: "auto",
+    flow_m3h: 40, rho_kgm3: 1000, mu_cp: 0.6, mu_source: "aspen",
+    u_ms: 2.1, re: 12000, lam: 0.028, hf_m: hf, l_m: 10, zeta_sum: 5,
+    dz_m: 2, lambda_method: "colebrook", fittings: { el90: 3, gate: 1 },
+    missing: [], note: "", version: 0,
+    run: { l_m: 10, zeta_sum: 5, dz_m: 2, fittings: { el90: 3, gate: 1 },
+           lambda_method: "colebrook", version: 0 },
+  });
   state.pumpDesign = {
-    dz: 9.45, hf: 5.93, l: 40, zeta: 17.43,
-    idMm: 52.5, muCp: 0.6, epsMm: 0.05, calc: null, idNote: "",
-    fittings: { el90: 3, gate: 1, globe: 0, check: 1, reducer: 0 },
-    manual: { idMm: null, muCp: null, epsMm: null },
-    lambdaMethod: "colebrook", lambdaManual: null,
+    view: {
+      suction: line("S1", 100, 1.23, "suction"),
+      discharge: line("S2", 80, 0.77, "discharge"),
+      totals: { head_m: 20, dz_m: 4, hf_m: 2, design_head_m: 26,
+                selection_head_m: 29, partial_hf_m: 2, partial_dz_m: 4 },
+      npsh: { device_m: 15.29, corrected_m: 11.06, state: "ok", threshold_m: 3.5,
+              margin_used_m: 0.5, margin_is_default: true, reason: "渲染桩值" },
+      run_sources: {}, tables_error: "",
+    },
+    versions: {}, edits: {}, openSide: null, legacy: null, source: null,
   };
 `, ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
-const lamHtml0 = box.innerHTML;
-has("⑩ 渲染出 λ 口径区块", lamHtml0, "pump-design-lambda");
-has("⑩ 渲染出口径 select", lamHtml0, '<select class="pump-design-select" data-key="lambdaMethod"');
-has("⑩ 含 Colebrook option", lamHtml0, 'value="colebrook"');
-has("⑩ 含顾毓珍 option", lamHtml0, 'value="gu"');
-has("⑩ 含手填 option", lamHtml0, 'value="manual"');
-has("⑩ 默认 colebrook 选中", lamHtml0, 'value="colebrook" selected');
-ok("⑩ gu 未选中", lamHtml0.includes('<option value="gu">'));
-ok("⑩ manual 未选中", lamHtml0.includes('<option value="manual">'));
-ok("⑩ 非 manual 不渲染 λ 值输入框", !lamHtml0.includes('data-key="lambdaManual"'));
-has("⑩ 有 muted 口径说明", lamHtml0, "默认 Colebrook");
-ok("⑩ 默认渲染不含 undefined", !lamHtml0.includes("undefined"));
-ok("⑩ 默认渲染不含 NaN", !lamHtml0.includes("NaN"));
-const lamLabels = vm.runInContext("Object.keys(LAMBDA_LABELS).join(',')", ctx);
-ok("⑩ LAMBDA_LABELS 含三口径", lamLabels === "colebrook,gu,manual", lamLabels);
+const lineHtml = box.innerHTML;
+has("⑩ 渲染出两侧小表", lineHtml, "pump-line-table");
+has("⑩ 吸入那一行", lineHtml, ">吸入<");
+has("⑩ 排出那一行", lineHtml, ">排出<");
+has("⑩ DN 可跳转", lineHtml, 'class="pump-line-jump"');
+has("⑩ 管长输入", lineHtml, 'data-key="l_m"');
+has("⑩ Σζ 输入", lineHtml, 'data-key="zeta_sum"');
+has("⑩ ΔZ 输入", lineHtml, 'data-key="dz_m"');
+has("⑩ 状态徽标", lineHtml, "已关联");
+has("⑩ 设计扬程结论", lineHtml, "26.00");
+ok("⑩ 渲染不含 undefined", !lineHtml.includes("undefined"));
+ok("⑩ 渲染不含 NaN", !lineHtml.includes("NaN"));
 
-// gu:仍不出现 λ 值输入框
-vm.runInContext("state.pumpDesign.lambdaMethod = 'gu';", ctx);
+// 展开管件 / 管径:人工 DN 只从标准系列选,超出才自定义外径 + 壁厚
+vm.runInContext("state.pumpDesign.openSide = 'suction';", ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
-const lamHtmlGu = box.innerHTML;
-ok("⑩ gu 口径选中", lamHtmlGu.includes('value="gu" selected'));
-ok("⑩ gu 时仍不渲染 λ 值输入框", !lamHtmlGu.includes('data-key="lambdaManual"'));
-ok("⑩ gu 渲染不含 undefined", !lamHtmlGu.includes("undefined"));
-ok("⑩ gu 渲染不含 NaN", !lamHtmlGu.includes("NaN"));
+const detailHtml = box.innerHTML;
+has("⑩ 展开管件面板", detailHtml, 'data-detail="suction"');
+has("⑩ 管件数量输入", detailHtml, 'data-fit="el90"');
+has("⑩ 管径下拉", detailHtml, 'class="pump-design-select pump-line-dn"');
+has("⑩ 管径含自动", detailHtml, "自动(跟随管道页)");
+has("⑩ 管径含 DN100", detailHtml, "DN100");
+has("⑩ 管径含自定义", detailHtml, "自定义外径 / 壁厚");
 
-// manual:出现 λ 值输入框并回填(0.0314 为渲染桩值,非实测读数)
-vm.runInContext("state.pumpDesign.lambdaMethod = 'manual'; state.pumpDesign.lambdaManual = 0.0314;", ctx);
+// 手填 λ:出现 λ 值输入框并回填(0.0314 为渲染桩值,非实测读数)
+vm.runInContext(`
+  state.pumpDesign.edits.suction.lambda_method = "manual";
+  state.pumpDesign.edits.suction.lambda_manual = 0.0314;
+`, ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
 const lamHtmlMan = box.innerHTML;
-ok("⑩ manual 口径选中", lamHtmlMan.includes('value="manual" selected'));
-has("⑩ manual 出现 λ 值输入框", lamHtmlMan, 'data-key="lambdaManual"');
+has("⑩ manual 口径选中", lamHtmlMan, 'value="manual" selected');
+has("⑩ manual 出现 λ 值输入框", lamHtmlMan, 'data-key="lambda_manual"');
 has("⑩ λ 值回填(渲染桩值)", lamHtmlMan, 'value="0.0314"');
-ok("⑩ manual 渲染不含 undefined", !lamHtmlMan.includes("undefined"));
-ok("⑩ manual 渲染不含 NaN", !lamHtmlMan.includes("NaN"));
 
-// 保存请求体带 lambda { method, manual }
-capture.length = 0;
-await vm.runInContext("savePumpDesign(__row)", ctx);
-const lamPost = capture[0];
-ok("⑩ 保存请求体带 lambda.method", Boolean(lamPost && lamPost.body.zeta_json
-  && lamPost.body.zeta_json.lambda && lamPost.body.zeta_json.lambda.method === "manual"));
-ok("⑩ manual 时 lambda.manual 有值(渲染桩值)", Boolean(lamPost && lamPost.body.zeta_json
-  && lamPost.body.zeta_json.lambda && lamPost.body.zeta_json.lambda.manual === 0.0314));
-
-// hasLambda:非默认口径即使其它字段全空也不算「空挂账」
+// 保存:两侧各发一次 /lines/{stream},带 version
 vm.runInContext(`
-  state.pumpDesign.dz = null; state.pumpDesign.hf = null;
-  state.pumpDesign.l = null; state.pumpDesign.zeta = null;
-  state.pumpDesign.fittings = { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 };
-  state.pumpDesign.manual = { idMm: null, muCp: null, epsMm: null };
-  state.pumpDesign.lambdaMethod = "gu"; state.pumpDesign.lambdaManual = null;
+  state.pumpDesign.edits.suction.lambda_method = "colebrook";
+  state.pumpDesign.edits.suction.lambda_manual = null;
+  state.pumpDesign.edits.discharge = JSON.parse(JSON.stringify(state.pumpDesign.edits.suction));
 `, ctx);
 capture.length = 0;
 await vm.runInContext("savePumpDesign(__row)", ctx);
-const guOnlyPost = capture[0];
-ok("⑩ 仅 gu 口径也发非清空请求(hasLambda)", Boolean(guOnlyPost && guOnlyPost.body.zeta_json
-  && guOnlyPost.body.zeta_json.lambda.method === "gu"));
+const linePosts = capture.filter((c) => c.url.includes("/lines/"));
+ok("⑩ 两侧各发一次保存请求", linePosts.length === 2, `实际 ${linePosts.length}`);
+ok("⑩ 吸入保存到 /lines/S1", linePosts.some((c) => c.url.endsWith("/lines/S1")));
+ok("⑩ 排出保存到 /lines/S2", linePosts.some((c) => c.url.endsWith("/lines/S2")));
+ok("⑩ 请求体带版本次", Boolean(linePosts[0] && linePosts[0].body.version === 0));
+ok("⑩ 请求体带 Σζ", Boolean(linePosts[0] && linePosts[0].body.zeta_sum === 5));
 
-// 切换 option 的 change:写 state + 重渲染 + 触发保存
+// 保存后真实页面会重新拉 design-head;测试桩不返回数据,这里补回视图再继续
 vm.runInContext(`
-  state.pumpDesign.lambdaMethod = "colebrook"; state.pumpDesign.lambdaManual = 0.0314;
-  state.pumpDesign.dz = 9.45; state.pumpDesign.hf = 5.93;
-  state.pumpDesign.l = 40; state.pumpDesign.zeta = 17.43;
-  state.pumpDesign.fittings = { el90: 3, gate: 1, globe: 0, check: 1, reducer: 0 };
+  state.pumpDesign.view = {
+    suction: { stream: "S1", status: "linked", dn: 100, dn_source: "auto", hf_m: 1.23,
+               missing: [], version: 0, run: {} },
+    discharge: { stream: "S2", status: "linked", dn: 80, dn_source: "auto", hf_m: 0.77,
+                 missing: [], version: 0, run: {} },
+    totals: { head_m: 20, dz_m: 4, hf_m: 2, design_head_m: 26, selection_head_m: 29,
+              partial_hf_m: 2, partial_dz_m: 4 },
+    npsh: { device_m: 15.29, corrected_m: 11.06, state: "ok", threshold_m: 3.5,
+            margin_used_m: 0.5, margin_is_default: true, reason: "渲染桩值" },
+    run_sources: {}, tables_error: "",
+  };
 `, ctx);
-capture.length = 0;
+
+// 待指定流股:渲染下拉,不硬猜
+vm.runInContext(`
+  state.pumpDesign.view.suction = { status: "ambiguous", stream: null,
+    streams: ["S1", "S1b"], reason: "泵有 2 条进口流股,请指定", missing: [] };
+  state.pumpDesign.openSide = null;
+`, ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
-const lamSelects = box._lastQueries[".pump-design-select"] || [];
-ok("⑩ select 绑了 change 监听",
-  lamSelects.length === 1 && (lamSelects[0].listeners.change || []).length >= 1);
-if (lamSelects.length && (lamSelects[0].listeners.change || []).length) {
-  const lamSelect = lamSelects[0];
-  lamSelect.value = "manual";
-  lamSelect.listeners.change[0]({ target: lamSelect });
-}
-ok("⑩ change 写 state.lambdaMethod",
-  vm.runInContext("state.pumpDesign.lambdaMethod", ctx) === "manual");
-ok("⑩ change 触发重渲染出 λ 值输入框", box.innerHTML.includes('data-key="lambdaManual"'));
-ok("⑩ change 触发保存请求带 lambda.method", Boolean(capture[0] && capture[0].body.zeta_json
-  && capture[0].body.zeta_json.lambda.method === "manual"));
+has("⑩ 待指定渲染下拉", box.innerHTML, 'class="pump-design-select pump-pick"');
+has("⑩ 下拉列出候选", box.innerHTML, "S1b");
+ok("⑩ 待指定不渲染该侧输入", !box.innerHTML.includes('data-side="suction" data-key="l_m"'));
 
-// computeHeadLoss:manual 且 λ 为空 → 不发请求 + 提示
+// 缺一侧:只说缺,不给设计扬程
 vm.runInContext(`
-  state.pumpDesign.l = 40; state.pumpDesign.zeta = 17.43;
-  state.pumpDesign.lambdaMethod = "manual"; state.pumpDesign.lambdaManual = null;
+  state.pumpDesign.view.suction = { status: "missing", stream: null, streams: [],
+    reason: "泵缺进口流股,无法关联管路", missing: [] };
+  state.pumpDesign.view.totals.design_head_m = null;
+  state.pumpDesign.view.totals.selection_head_m = null;
 `, ctx);
-capture.length = 0;
-await vm.runInContext("computeHeadLoss(__row)", ctx);
-ok("⑩ manual 且 λ 为空时不发 head-loss 请求", capture.length === 0);
-has("⑩ manual 且 λ 为空时提示先填 λ 值", byId("pumpCalcLine").textContent, "先填 λ 值");
+vm.runInContext("renderPumpDesign(__row)", ctx);
+has("⑩ 缺一侧写明原因", box.innerHTML, "泵缺进口流股");
+has("⑩ 缺一侧只给已计阻力", box.innerHTML, "两侧未齐");
 
-// computeHeadLoss:manual 且 λ 有值 → 请求体带 method 与 lam(0.0314 为渲染桩值,非实测读数)
-vm.runInContext("state.pumpDesign.lambdaManual = 0.0314;", ctx);
-capture.length = 0;
-await vm.runInContext("computeHeadLoss(__row)", ctx);
-const lossPost = capture[0];
-ok("⑩ manual 有 λ 时发 head-loss 请求", Boolean(lossPost && lossPost.url.includes("head-loss")));
-ok("⑩ head-loss 请求体带 method", Boolean(lossPost && lossPost.body.method === "manual"));
-ok("⑩ head-loss 请求体带 lam(渲染桩值)", Boolean(lossPost && lossPost.body.lam === 0.0314));
+// 台账同时给装置值与修正值(判据用修正值)
+vm.runInContext(`
+  renderPumpSelection(__row, {
+    saved: { model_no: "IS65-50-160" },
+    npsh_state: "ok", npsh_reason: "渲染桩值", margin_is_default: true,
+    margin_used_m: 0.5, flow_m3h: 4.32, design_head_m: 26,
+    selection_head_m: 29, npsh_a_m: 15.29, npsh_a_corrected_m: 11.06,
+    motor_suggested_kw: 1.5,
+    sources: { selection: null, design: null },
+  });
+`, ctx);
+has("⑩ 台账保留装置 NPSHₐ", selFold.innerHTML, "NPSHₐ(装置)");
+has("⑩ 台账显示修正 NPSHₐ", selFold.innerHTML, "NPSHₐ(修正)");
 
 // ⑪ 对比页:state.compare / state.filter → #table thead/tbody/count(纯同步,不 await)
 // 数值均为渲染桩值(非实测读数),只为构造完整 data 触发模板分支
@@ -903,19 +880,26 @@ ok("⑬ 设备对比缺字段不出现 undefined/NaN",
 
 vm.runInContext(`
   state.pumpDesign = {
-    dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null,
-    idNote: "", calc: { u_ms: 1.2, re: 50000, lam: 0.023, missing: [], method: "colebrook" },
-    fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
-    manual: { idMm: null, muCp: null, epsMm: null },
-    lambdaMethod: "colebrook", lambdaManual: null,
-  };   // 计算结果里没有 eps_d
+    view: {
+      suction: { stream: "S1", status: "unset", dn: 100, dn_source: "auto",
+                 hf_m: null, missing: ["管长 L", "管件系数 Σζ"], version: 0, run: {} },
+      discharge: { stream: "S2", status: "linked", dn: 80, dn_source: "auto",
+                   hf_m: 0.8, missing: [], version: 0, run: {} },
+      totals: { head_m: 20, dz_m: null, hf_m: null, design_head_m: null,
+                selection_head_m: null, partial_hf_m: 0.8, partial_dz_m: 0 },
+      npsh: { device_m: null, corrected_m: null, state: "unknown", reason: "缺 p_v",
+              margin_used_m: 0.5, margin_is_default: true },
+      run_sources: {}, tables_error: "",
+    },
+    edits: {}, openSide: null, legacy: null,
+  };
 `, ctx);
 vm.runInContext("renderPumpDesign(__row)", ctx);
 const calcHtml = byId("pumpDesign").innerHTML;
-has("⑬ 缺 eps_d 时结果行仍渲染", calcHtml, "u = ");
-has("⑬ 缺 eps_d 时用 — 占位", calcHtml, "ε/d = —");
-ok("⑬ 缺 eps_d 不出现 NaN", !calcHtml.includes("NaN"));
-ok("⑬ 缺 eps_d 不出现 undefined", !calcHtml.includes("undefined"));
+has("⑬ 缺输入时写清缺什么", calcHtml, "缺 管长 L");
+has("⑬ 缺输入时仍渲染结果行", calcHtml, "两侧未齐");
+ok("⑬ 缺输入不出现 NaN", !calcHtml.includes("NaN"));
+ok("⑬ 缺输入不出现 undefined", !calcHtml.includes("undefined"));
 
 /* ⑭ 组:第三个折叠面板「详细参数」的摘要与展开状态。
    数值全是渲染桩值(非实测读数),只为触发模板分支。 */

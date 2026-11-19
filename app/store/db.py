@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS pump_design (
     hf_m       REAL,
     l_m        REAL,
     zeta_json  TEXT,
+    -- 拓扑认不出唯一流股时人工指定的那一条(空 = 仍按连接关系自动认)
+    suction_stream   TEXT,
+    discharge_stream TEXT,
     updated_at TEXT,
     PRIMARY KEY (model_name, block)
 );
@@ -149,6 +152,36 @@ CREATE TABLE IF NOT EXISTS pump_selection (
     note       TEXT,
     updated_at TEXT,
     PRIMARY KEY (model_key, block)
+);
+
+-- 管段记录(按模型 + 流股):泵两侧的吸入 / 排出管路与管道页共用这一份。
+-- 只存**输入**(管长 / Σζ / 管件 / λ 口径 / 标高差 / 人工管径 / 手填粘度),
+-- Σhf 与 NPSHₐ 每次按当前工况实时算,不落库(见 docs/_internal/pump-line-sync-plan-draft.md D5)。
+CREATE TABLE IF NOT EXISTS pipe_run (
+    model_key       TEXT    NOT NULL,
+    stream          TEXT    NOT NULL,
+    l_m             REAL,
+    zeta_sum        REAL,
+    fittings_json   TEXT,            -- {"el90":2,...}
+    lambda_method   TEXT,            -- colebrook / gu / manual
+    lambda_manual   REAL,
+    dz_m            REAL,            -- 沿流向的标高差(终点 − 起点)
+    dn_override     INTEGER,         -- 人工选定 DN;NULL = 跟随管道页自动选型
+    od_override_mm  REAL,            -- DN 不在标准系列时的自定义外径
+    wall_override_mm REAL,
+    mu_cp           REAL,            -- 手填粘度;工况有读数时以读数优先
+    note            TEXT,
+    version         INTEGER NOT NULL DEFAULT 0,  -- 乐观锁,每次写入 +1
+    updated_at      TEXT,
+    PRIMARY KEY (model_key, stream)
+);
+
+-- 管道页选型参数(按模型一套):泵面板与管道页读同一套,避免一处用默认值、
+-- 一处用界面参数,算出两个不同的 DN(旧实现就踩过这个坑)。
+CREATE TABLE IF NOT EXISTS pipe_setting (
+    model_key    TEXT PRIMARY KEY,
+    options_json TEXT NOT NULL,
+    updated_at   TEXT
 );
 
 CREATE TABLE IF NOT EXISTS blocks (
@@ -293,6 +326,12 @@ _BLOCK_ADDED_COLUMNS = (
 _PUMP_DESIGN_ADDED_COLUMNS = (
     ("l_m", "REAL"),
     ("zeta_json", "TEXT"),
+    # 旧单一 Σhf 拆分归属:suction / discharge / total。空 = 还没选过,
+    # 界面据此决定是否弹迁移向导(见 D7 / D14)。
+    ("legacy_split", "TEXT"),
+    ("legacy_total_hf", "REAL"),
+    ("suction_stream", "TEXT"),
+    ("discharge_stream", "TEXT"),
 )
 
 
@@ -1146,6 +1185,275 @@ def find_pump_design(conn: sqlite3.Connection, case_id: int, block: str) -> dict
         if row is not None:
             return {"row": row, "key": sibling_key, "via": "same-model", "source": candidate}
     return {"row": None, "key": key, "via": "none", "source": None}
+
+
+# ---------------------------------------------------------------- 管段记录(泵 ↔ 管道页共享)
+#
+# 一份记录 = 一条流股(一根管子),两侧泵引用同一行。只存输入,Σhf 实时算。
+# 字段与 `app/design/pump_line.py` 的 `run` 参数一一对应;API 层负责校验,
+# 这里只做持久化与乐观锁。
+
+
+class VersionConflict(RuntimeError):
+    """提交的版本号与库里的不一致(有人在别处改过)。"""
+
+    def __init__(self, current: int):
+        self.current_version = int(current)
+        super().__init__("pipe_run 版本冲突")
+
+
+RUN_NUM_FIELDS = (
+    "l_m",
+    "zeta_sum",
+    "lambda_manual",
+    "dz_m",
+    "dn_override",
+    "od_override_mm",
+    "wall_override_mm",
+    "mu_cp",
+)
+RUN_INPUT_FIELDS = (*RUN_NUM_FIELDS, "lambda_method", "fittings_json", "note")
+
+
+def _run_row(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    data = {k: row[k] for k in (*RUN_INPUT_FIELDS, "version", "updated_at")}
+    raw = data.get("fittings_json")
+    try:
+        data["fittings"] = json.loads(raw) if raw else {}
+    except (TypeError, ValueError):
+        data["fittings"] = {}  # 坏 JSON 只影响管件数量,不让整行读不出来
+    return data
+
+
+def read_pipe_run(conn: sqlite3.Connection, key: str, stream: str) -> dict | None:
+    """读一条管段记录(当前身份键);没有返回 None。"""
+    key = str(key or "").strip()
+    name = str(stream or "").strip()
+    if not key or not name:
+        return None
+    row = conn.execute(
+        f"SELECT {', '.join((*RUN_INPUT_FIELDS, 'version', 'updated_at'))} "
+        "FROM pipe_run WHERE model_key = ? AND stream = ?",
+        (key, name),
+    ).fetchone()
+    return _run_row(row)
+
+
+def save_pipe_run(
+    conn: sqlite3.Connection,
+    key: str,
+    stream: str,
+    values: dict,
+    expected_version: int = 0,
+) -> tuple[bool, int]:
+    """写一条管段记录,返回 `(是否写入, 新版本号)`;全空即删行。
+
+    `expected_version` 是客户端读到的版本:与库里不一致就抛 `VersionConflict`,
+    不静默覆盖(两个页面都能写同一行,这是唯一的冲突出口)。
+    """
+    key = str(key or "").strip()
+    name = str(stream or "").strip()
+    if not key or not name:
+        return False, 0
+
+    row = conn.execute(
+        "SELECT version FROM pipe_run WHERE model_key = ? AND stream = ?", (key, name)
+    ).fetchone()
+    current = int(row["version"]) if row is not None else 0
+    if int(expected_version or 0) != current:
+        raise VersionConflict(current)
+
+    vals = {k: values.get(k) for k in RUN_INPUT_FIELDS}
+    empty = (
+        not vals.get("fittings_json")
+        and not vals.get("note")
+        and all(vals.get(k) is None for k in RUN_NUM_FIELDS)
+        and not vals.get("lambda_method")
+    )
+    if empty:
+        if row is not None:
+            conn.execute("DELETE FROM pipe_run WHERE model_key = ? AND stream = ?", (key, name))
+            conn.commit()
+        return False, 0
+
+    next_version = current + 1
+    cols = ", ".join(("model_key", "stream", *RUN_INPUT_FIELDS, "version", "updated_at"))
+    marks = ", ".join("?" for _ in range(len(RUN_INPUT_FIELDS) + 4))
+    updates = ", ".join(f"{f} = excluded.{f}" for f in RUN_INPUT_FIELDS)
+    conn.execute(
+        f"""
+        INSERT INTO pipe_run ({cols}) VALUES ({marks})
+        ON CONFLICT(model_key, stream)
+        DO UPDATE SET {updates}, version = excluded.version, updated_at = excluded.updated_at
+        """,
+        (
+            key,
+            name,
+            *(vals.get(f) for f in RUN_INPUT_FIELDS),
+            next_version,
+            _now(),
+        ),
+    )
+    conn.commit()
+    return True, next_version
+
+
+def find_pipe_run(conn: sqlite3.Connection, case_id: int, stream: str) -> dict:
+    """读一条管段记录:当前身份键优先,没有就借同模型旧版本(口径同台账)。"""
+    key = model_key(conn, case_id)
+    row = read_pipe_run(conn, key, stream)
+    if row is not None:
+        return {"row": row, "key": key, "via": "current", "source": None}
+    for candidate in model_case_candidates(conn, case_id):
+        sibling_key = model_key(conn, candidate["case_id"])
+        if not sibling_key or sibling_key == key:
+            continue
+        row = read_pipe_run(conn, sibling_key, stream)
+        if row is not None:
+            return {"row": row, "key": sibling_key, "via": "same-model", "source": candidate}
+    return {"row": None, "key": key, "via": "none", "source": None}
+
+
+def pipe_runs_for(conn: sqlite3.Connection, case_id: int, streams) -> tuple[dict, dict]:
+    """一次取多条流股的管段记录(给泵两侧与导出用)。
+
+    返回 `({stream: 行}, {stream: 来源})`;来源与 `find_pipe_run` 同口径,
+    只在确实借了旧版本时才有值。
+    """
+    rows: dict[str, dict] = {}
+    sources: dict[str, dict] = {}
+    for stream in {str(s) for s in streams or [] if s}:
+        found = find_pipe_run(conn, case_id, stream)
+        if found["row"] is not None:
+            rows[stream] = found["row"]
+            if found["source"]:
+                sources[stream] = found["source"]
+    return rows, sources
+
+
+def read_pipe_options(conn: sqlite3.Connection, key: str) -> dict | None:
+    """该模型的管道页参数;没存过返回 None(调用方用内置默认值)。"""
+    key = str(key or "").strip()
+    if not key:
+        return None
+    row = conn.execute(
+        "SELECT options_json FROM pipe_setting WHERE model_key = ?", (key,)
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        data = json.loads(row["options_json"])
+    except (TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_pipe_options(conn: sqlite3.Connection, key: str, options: dict) -> bool:
+    """存该模型的管道页参数;整份替换(None / 空对象 = 删除,回到默认)。"""
+    key = str(key or "").strip()
+    if not key:
+        return False
+    if not options:
+        cur = conn.execute("DELETE FROM pipe_setting WHERE model_key = ?", (key,))
+        conn.commit()
+        return cur.rowcount > 0
+    conn.execute(
+        """
+        INSERT INTO pipe_setting (model_key, options_json, updated_at)
+        VALUES (?,?,?)
+        ON CONFLICT(model_key)
+        DO UPDATE SET options_json = excluded.options_json, updated_at = excluded.updated_at
+        """,
+        (key, json.dumps(options, ensure_ascii=False, separators=(",", ":")), _now()),
+    )
+    conn.commit()
+    return True
+
+
+def read_pump_stream_pick(conn: sqlite3.Connection, key: str, block: str) -> dict:
+    """这台泵人工指定的吸入 / 排出流股(空值 = 仍按拓扑自动认)。"""
+    key = str(key or "").strip()
+    name = str(block or "").strip()
+    if not key or not name:
+        return {"suction": None, "discharge": None}
+    row = conn.execute(
+        "SELECT suction_stream, discharge_stream FROM pump_design "
+        "WHERE model_name = ? AND block = ?",
+        (key, name),
+    ).fetchone()
+    if row is None:
+        return {"suction": None, "discharge": None}
+    return {"suction": row["suction_stream"], "discharge": row["discharge_stream"]}
+
+
+def save_pump_stream_pick(
+    conn: sqlite3.Connection,
+    key: str,
+    block: str,
+    suction=None,
+    discharge=None,
+) -> bool:
+    """存人工指定的流股;只写这一项,不动 L / Σζ / 台账。"""
+    key = str(key or "").strip()
+    name = str(block or "").strip()
+    if not key or not name:
+        return False
+    conn.execute(
+        """
+        INSERT INTO pump_design (model_name, block, suction_stream, discharge_stream, updated_at)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(model_name, block)
+        DO UPDATE SET suction_stream = excluded.suction_stream,
+                      discharge_stream = excluded.discharge_stream,
+                      updated_at = excluded.updated_at
+        """,
+        (key, name, suction, discharge, _now()),
+    )
+    conn.commit()
+    return True
+
+
+def read_pump_design_legacy(conn: sqlite3.Connection, key: str, block: str) -> dict | None:
+    """旧 `pump_design` 行(含迁移决策字段),只给迁移向导读。"""
+    key = str(key or "").strip()
+    name = str(block or "").strip()
+    if not key or not name:
+        return None
+    row = conn.execute(
+        "SELECT dz_m, hf_m, l_m, zeta_json, legacy_split, legacy_total_hf "
+        "FROM pump_design WHERE model_name = ? AND block = ?",
+        (key, name),
+    ).fetchone()
+    return dict(row) if row is not None else None
+
+
+def save_legacy_split(
+    conn: sqlite3.Connection,
+    key: str,
+    block: str,
+    split: str,
+    total_hf=None,
+) -> bool:
+    """记下旧 Σhf 的归属(suction / discharge / total),下次不再问。"""
+    key = str(key or "").strip()
+    name = str(block or "").strip()
+    if not key or not name or split not in ("suction", "discharge", "total"):
+        return False
+    conn.execute(
+        """
+        INSERT INTO pump_design (model_name, block, legacy_split, legacy_total_hf, updated_at)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(model_name, block)
+        DO UPDATE SET legacy_split = excluded.legacy_split,
+                      legacy_total_hf = excluded.legacy_total_hf,
+                      updated_at = excluded.updated_at
+        """,
+        (key, name, split, total_hf, _now()),
+    )
+    conn.commit()
+    return True
 
 
 def find_component_cas(conn: sqlite3.Connection, case_id: int) -> dict:

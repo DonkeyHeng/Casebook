@@ -1151,6 +1151,41 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   line-height: 1.6;
   font-variant-numeric: tabular-nums;
 }
+/* 泵两侧管段小表:两行、只读 DN + 三个输入,不把抽屉撑成第二张参数表 */
+.pump-line-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.pump-line-table th,
+.pump-line-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.pump-line-table th { color: var(--muted); font-weight: 500; }
+.pump-line-table td.num { text-align: right; }
+.pump-line-input { width: 62px; }
+.pump-line-jump { color: var(--accent); text-decoration: none; }
+.pump-line-jump:hover { text-decoration: underline; }
+.pump-line-detail {
+  margin: 6px 0 2px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--gap-fill);
+  display: grid;
+  gap: 8px;
+}
+/* 管道页「显示计算过程」里的泵段输入;只有泵行才有 */
+.pipe-line-input {
+  width: 72px;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.pipe-line-input.invalid { border-color: var(--err-mark); }
 
 /* 手填 CAS 的小清单:窄侧栏里一行一个组分 + 输入框 */
 .cas-edit-list {

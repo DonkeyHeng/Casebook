@@ -18,6 +18,7 @@ from app.api.router import Route, route
 
 from .cases import CaseRoutes
 from .exports import ExportRoutes
+from .lines import LineRoutes
 from .meta import MetaRoutes
 from .pipes import PipeRoutes
 from .pumps import PumpRoutes
@@ -27,6 +28,7 @@ __all__ = [
     "ROUTES",
     "CaseRoutes",
     "ExportRoutes",
+    "LineRoutes",
     "MetaRoutes",
     "PipeRoutes",
     "PumpRoutes",
@@ -76,6 +78,7 @@ ROUTES: list[Route] = [
     route("POST", _PUMP + r"/design-head", "post_pump_design", "保存设计扬程参数"),
     route("POST", _PUMP + r"/selection", "post_pump_selection", "保存选型台账"),
     route("POST", _PUMP + r"/head-loss", "post_pump_head_loss", "保存管路阻力"),
+    route("POST", _PUMP + r"/streams", "post_pump_streams", "指定泵两侧流股"),
     route(
         "POST",
         _CASE + r"/pumps/inherit-pv",
@@ -88,6 +91,14 @@ ROUTES: list[Route] = [
         _CASE + r"/sections/inherit",
         "post_case_sections_inherit",
         "沿用同模型更早工况的工段边界",
+    ),
+    route("POST", _CASE + r"/lines/(?P<stream>[^/]+)", "post_line", "保存单条管段输入"),
+    route("POST", _CASE + r"/pipe-settings", "post_pipe_settings", "保存管道页参数"),
+    route(
+        "POST",
+        _CASE + r"/pump-lines/migrate",
+        "post_pump_lines_migrate",
+        "旧单一 Σhf 归属迁移",
     ),
     route("POST", _CASE + r"/components/cas", "post_case_component_cas", "手填组分 CAS"),
 ]
@@ -106,6 +117,14 @@ CASE_ROUTES: list[Route] = [
     route("GET", _CASE + r"/flowsheet", "get_case_flowsheet", "流程图数据"),
     route("GET", _CASE + r"/impact", "get_case_impact", "报错设备的波及范围"),
     route("GET", _CASE + r"/pipes", "get_pipes", "管路选型一览表"),
+    route("GET", _CASE + r"/pipe-settings", "get_pipe_settings", "管道页参数"),
+    route("GET", _CASE + r"/lines/(?P<stream>[^/]+)", "get_line", "单条管段"),
+    route(
+        "GET",
+        _CASE + r"/pump-lines/migration",
+        "get_pump_lines_migration",
+        "旧 Σhf 迁移清单",
+    ),
     route("GET", _CASE + r"/columns", "get_case_columns", "塔列表"),
     route(
         "GET",

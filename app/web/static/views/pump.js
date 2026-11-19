@@ -270,303 +270,414 @@ export const PUMP_FITTINGS = [
   { key: "reducer", label: "变径管", zeta: 0.04 },
 ];
 
-export function fittingsZeta() {
-  const picks = state.pumpDesign.fittings || {};
+export function fittingsZeta(side) {
+  const key = side || state.pumpDesign.openSide || "suction";
+  const picks = (state.pumpDesign.edits && state.pumpDesign.edits[key]
+    && state.pumpDesign.edits[key].fittings) || {};
   return PUMP_FITTINGS.reduce((sum, f) => sum + (picks[f.key] || 0) * f.zeta, 0);
 }
 
-/* 把勾出来的管件合计算进 Σζ。手改 Σζ 之后不会被覆盖,除非再动一次管件数量。 */
-export function applyFittings() {
-  const total = fittingsZeta();
-  state.pumpDesign.zeta = total > 0 ? Math.round(total * 100) / 100 : null;
-  const zetaInput = document.querySelector('[data-key="zeta"]');
-  if (zetaInput) zetaInput.value = state.pumpDesign.zeta === null ? "" : state.pumpDesign.zeta;
+/* 把勾出来的管件合计算进 Σζ(只写当前展开那一侧,不覆盖另一侧) */
+export function applyFittings(side) {
+  const key = side || state.pumpDesign.openSide || "suction";
+  const total = fittingsZeta(key);
+  const ed = editOf(key);
+  ed.zeta_sum = total > 0 ? Math.round(total * 100) / 100 : null;
+  const zetaInput = document.querySelector(`[data-side="${key}"][data-key="zeta_sum"]`);
+  if (zetaInput) zetaInput.value = ed.zeta_sum === null ? "" : ed.zeta_sum;
+}
+
+export const LINE_DN_LADDER = [
+  15, 20, 25, 32, 40, 50, 65, 80, 100, 125, 150, 200, 250, 300, 350, 400, 450, 500,
+  600, 700, 800, 900, 1000,
+];
+
+function lineOf(side) {
+  return (state.pumpDesign.view || {})[side] || null;
+}
+
+function editOf(side) {
+  const d = state.pumpDesign;
+  if (!d.edits) d.edits = {};
+  if (!d.edits[side]) {
+    const line = lineOf(side) || {};
+    const run = line.run || {};
+    d.edits[side] = {
+      l_m: pumpDesignNum(run.l_m),
+      zeta_sum: pumpDesignNum(run.zeta_sum ?? line.zeta_sum),
+      dz_m: pumpDesignNum(run.dz_m),
+      mu_cp: pumpDesignNum(run.mu_cp),
+      fittings: { ...(run.fittings || {}) },
+      lambda_method: run.lambda_method || "colebrook",
+      lambda_manual: pumpDesignNum(run.lambda_manual),
+      dn_override: run.dn_override || null,
+      custom: !!(run.od_override_mm && run.wall_override_mm),
+      od_override_mm: pumpDesignNum(run.od_override_mm),
+      wall_override_mm: pumpDesignNum(run.wall_override_mm),
+    };
+  }
+  return d.edits[side];
+}
+
+function lineStatusText(line) {
+  if (!line) return "未载入";
+  return {
+    linked: "已关联",
+    manual: "人工 DN",
+    unset: "待填 L / Σζ",
+    unlinkable: "无法关联",
+    missing: "缺这一侧",
+    ambiguous: "待指定流股",
+  }[line.status] || line.status;
+}
+
+function editFittingsZeta(side) {
+  const e = editOf(side);
+  return PUMP_FITTINGS.reduce(
+    (sum, f) => sum + (Number(e.fittings && e.fittings[f.key]) || 0) * f.zeta,
+    0,
+  );
 }
 
 export function pumpDesignTotal(row) {
-  const head = typeof row.head_m === "number" ? row.head_m : null;
-  const dz = state.pumpDesign.dz;
-  const hf = state.pumpDesign.hf;
-  if (head === null || dz === null || hf === null) return null;
-  return head + dz + hf;
+  const view = state.pumpDesign.view;
+  const head = view ? pumpDesignNum(view.totals && view.totals.head_m) : pumpDesignNum(row.head_m);
+  const total = view ? pumpDesignNum(view.totals && view.totals.design_head_m) : null;
+  if (head === null || total === null) return null;
+  return total;
 }
 
-/* 只刷新结果那一行:输入时不重画整块,避免光标被踢走 */
+/* 只刷新结论行:输入时不重画表格,避免光标被踢走 */
 export function refreshPumpDesignSum(row) {
   const el = document.getElementById("pumpDesignSum");
   if (!el) return;
-  const head = typeof row.head_m === "number" ? row.head_m : null;
-  const total = pumpDesignTotal(row);
+  const view = state.pumpDesign.view;
+  if (!view) {
+    el.textContent = "管路记录载入中…";
+    return;
+  }
+  const totals = view.totals || {};
+  const npsh = view.npsh || {};
+  const head = pumpDesignNum(totals.head_m) ?? pumpDesignNum(row.head_m);
+  const npshText = npsh.corrected_m == null
+    ? `<span class="muted">NPSHₐ(修正) 待吸入段</span>`
+    : `NPSHₐ(修正) <b>${fmt(npsh.corrected_m, 2)} m</b>`
+      + ` <span class="pump-sel-state-mini" data-state="${esc(npsh.state || "unknown")}">${
+        { ok: "满足", bad: "不满足", unknown: "无法判定" }[npsh.state] || "无法判定"
+      }</span>`;
   if (head === null) {
     el.textContent = "压升扬程没读到,算不了";
     return;
   }
-  if (total === null) {
-    el.innerHTML = `${fmt(head, 2)} m + 待填 = 待算`;
+  if (totals.design_head_m == null) {
+    el.innerHTML =
+      `${fmt(head, 2)} m + 已计阻力 ${fmt(totals.partial_hf_m, 2)} m`
+      + ` + 已计 ΔZ ${fmt(totals.partial_dz_m, 2)} m · <span class="muted">两侧未齐,设计扬程不给</span>`;
     return;
   }
-  const padded = Math.ceil(total * PUMP_DESIGN_MARGIN);
   el.innerHTML =
-    `${fmt(head, 2)} + ${fmt(state.pumpDesign.dz, 2)} + ${fmt(state.pumpDesign.hf, 2)}` +
-    ` = <b>${fmt(total, 2)} m</b> · ×${PUMP_DESIGN_MARGIN} 取整 <b>${padded} m</b>`;
+    `${fmt(head, 2)} + ΔZ ${fmt(totals.dz_m, 2)} + Σhf ${fmt(totals.hf_m, 2)}`
+    + ` = <b>${fmt(totals.design_head_m, 2)} m</b> · ×${PUMP_DESIGN_MARGIN} 取整 `
+    + `<b>${fmt(totals.selection_head_m, 0)} m</b><br>${npshText}`;
+}
+
+function lineInput(side, key, value, ph, label) {
+  return `<input class="pump-design-input pump-line-input" data-side="${side}"
+    data-key="${key}" inputmode="decimal" placeholder="${ph}"
+    value="${value === null || value === undefined ? "" : value}" aria-label="${esc(label)}">`;
+}
+
+function renderLineRow(side, label) {
+  const line = lineOf(side);
+  if (!line) {
+    return `<tr><td>${label}</td><td colspan="7" class="muted">管路记录载入中…</td></tr>`;
+  }
+  if (line.status === "missing") {
+    return `<tr><td>${label}</td><td colspan="7" class="muted">${esc(line.reason || "泵没有这一侧流股")}</td></tr>`;
+  }
+  if (line.status === "ambiguous") {
+    const opts = (line.streams || []).map((s) =>
+      `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+    return `<tr><td>${label}</td><td colspan="7">
+      <span class="muted">${esc(line.reason)}</span>
+      <select class="pump-design-select pump-pick" data-side="${side}" aria-label="指定${label}流股">
+        <option value="">请选择</option>${opts}
+      </select></td></tr>`;
+  }
+  const e = editOf(side);
+  const dn = line.dn == null ? "—" : `DN${line.dn}`;
+  const manual = line.dn_source === "manual" || line.dn_source === "custom";
+  return `<tr data-line-side="${side}">
+    <td>${label}</td>
+    <td><a href="#" class="pump-line-jump" data-stream="${esc(line.stream)}"
+        title="到「管道」页看这条管子的选型">${esc(line.stream)}</a></td>
+    <td class="num">${dn}${manual ? ' <span class="badge warn">人工</span>' : ""}</td>
+    <td class="num">${lineInput(side, "l_m", e.l_m, "未填", "管长 L")}</td>
+    <td class="num">${lineInput(side, "zeta_sum", e.zeta_sum, "未填", "Σζ")}</td>
+    <td class="num">${lineInput(side, "dz_m", e.dz_m, "如 −1.5", "ΔZ")}</td>
+    <td class="num">${line.hf_m == null
+      ? `<span class="muted" title="${esc((line.missing || []).join("、"))}">缺 ${
+        esc((line.missing || []).slice(0, 2).join("、"))}</span>`
+      : `<span title="u=${fmt(line.u_ms, 2)} m/s · Re=${fmt(line.re, 0)} · λ=${fmt(line.lam, 4)}">${
+        fmt(line.hf_m, 3)}</span>`}</td>
+    <td><span class="badge ${line.status === "linked" ? "ok" : "warn"}">${
+      esc(lineStatusText(line))}</span>
+      <button class="link-btn pump-line-more" data-side="${side}">管件 / 管径</button></td>
+  </tr>`;
+}
+
+function renderLineDetail(side, label) {
+  const line = lineOf(side);
+  if (!line) return "";
+  const e = editOf(side);
+  const dnOpts = ["", ...LINE_DN_LADDER].map((dn) => {
+    const v = dn === "" ? "" : String(dn);
+    const sel = e.dn_override === null || e.dn_override === undefined
+      ? (dn === "" ? " selected" : "")
+      : (String(e.dn_override) === v ? " selected" : "");
+    return `<option value="${v}"${sel}>${dn === "" ? "自动(跟随管道页)" : `DN${dn}`}</option>`;
+  }).join("");
+  const customOpt = `<option value="custom"${e.custom ? " selected" : ""}>自定义外径 / 壁厚</option>`;
+  return `<div class="pump-line-detail" data-detail="${side}">
+    <div class="pump-design-inputs">
+      <label>管径
+        <select class="pump-design-select pump-line-dn" data-side="${side}" aria-label="管径">
+          ${dnOpts}${customOpt}
+        </select>
+      </label>
+      ${e.custom ? `
+        <label>外径 mm ${lineInput(side, "od_override_mm", e.od_override_mm, "如 168.3", "外径")}</label>
+        <label>壁厚 mm ${lineInput(side, "wall_override_mm", e.wall_override_mm, "如 7.1", "壁厚")}</label>`
+      : ""}
+      <label>粘度 cP ${lineInput(side, "mu_cp", e.mu_cp, "自动", "粘度")}</label>
+      <label>λ 口径
+        <select class="pump-design-select pump-line-lambda" data-side="${side}" aria-label="λ 口径">
+          <option value="colebrook"${e.lambda_method === "colebrook" ? " selected" : ""}>Colebrook</option>
+          <option value="gu"${e.lambda_method === "gu" ? " selected" : ""}>顾毓珍</option>
+          <option value="manual"${e.lambda_method === "manual" ? " selected" : ""}>手填</option>
+        </select>
+      </label>
+      ${e.lambda_method === "manual"
+        ? `<label>λ 值 ${lineInput(side, "lambda_manual", e.lambda_manual, "如 0.028", "λ")}</label>`
+        : ""}
+    </div>
+    <div class="pump-design-fits">
+      <span class="muted">常用管件(填数量,自动求和)</span>
+      ${PUMP_FITTINGS.map((f) => {
+        const n = Number(e.fittings[f.key]) || 0;
+        return `<label title="ζ = ${f.zeta}">${f.label} ×${f.zeta}
+          <input class="pump-fit-input" data-side="${side}" data-fit="${f.key}" type="number"
+                 min="0" step="1" inputmode="numeric" value="${n}" aria-label="${f.label} 数量"></label>`;
+      }).join("")}
+      <span class="muted">合计 Σζ = ${fmt(editFittingsZeta(side), 2)}</span>
+    </div>
+    ${line.dn_source === "custom" ? '<p class="pump-design-note">自定义外径 / 壁厚按专项设计,壁厚不再自动圆整。</p>' : ""}
+  </div>`;
 }
 
 export function renderPumpDesign(row) {
   const box = document.getElementById("pumpDesign");
   if (!box) return;
-  const head = typeof row.head_m === "number" ? row.head_m : null;
-  const total = pumpDesignTotal(row);
-  const padded = total === null ? null : Math.ceil(total * PUMP_DESIGN_MARGIN);
-  const val = (key, ph) =>
-    `<input class="pump-design-input" data-key="${key}" inputmode="decimal" placeholder="${ph}"
-            value="${state.pumpDesign[key] === null || state.pumpDesign[key] === undefined ? "" : state.pumpDesign[key]}"
-            aria-label="${key}">`;
-  if (!state.pumpDesign.fittings) {
-    state.pumpDesign.fittings = { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 };
-  }
-  const calc = state.pumpDesign.calc;
-  const calcLine = !calc
-    ? "填管长与 Σζ 后可自动算 Re / λ / Σhf"
-    : calc.missing && calc.missing.length
-      ? `缺:${calc.missing.join("、")}`
-      : `u = ${fmt(calc.u_ms, 2)} m/s · Re = ${fmt(calc.re, 0)} · λ = ${fmt(calc.lam, 4)}` +
-        ` · ε/d = ${calc.eps_d == null || !isFinite(calc.eps_d)
-          ? "—" : (calc.eps_d * 1000).toFixed(2) + "‰"}` +
-        (calc.method ? ` · ${LAMBDA_LABELS[calc.method] || calc.method}` : "");
-  const brief = total === null
-    ? '<span class="muted">待填 ΔZ / Σhf</span>'
-    : `<span class="muted">${fmt(total, 2)} m → 选型 ${padded} m</span>`;
-  // 参数借自同模型旧版本时标出来源(模型保存一次哈希就变,不能让人以为是本版填的)
-  const designSrc = state.pumpDesign.source;
-  const designSrcNote = designSrc
-    ? `<p class="pump-design-note">ΔZ / Σhf / 管长等来自同模型旧版本 #${designSrc.case_id}（${esc(String(designSrc.read_at || "").slice(0, 16))}）；再次保存后写入当前工况。</p>`
+  const view = state.pumpDesign.view;
+  const totals = (view && view.totals) || {};
+  const npsh = (view && view.npsh) || {};
+  const brief = view
+    ? (totals.design_head_m == null
+      ? `<span class="muted">两侧未齐 · 已计 Σhf ${fmt(totals.partial_hf_m, 2)} m</span>`
+      : `<span class="muted">${fmt(totals.design_head_m, 2)} m → 选型 ${fmt(totals.selection_head_m, 0)} m</span>`)
+    : '<span class="muted">载入中…</span>';
+  const src = view && view.run_sources && Object.keys(view.run_sources).length
+    ? `<p class="pump-design-note">管段记录来自同模型旧版本 #${
+      esc(String(Object.values(view.run_sources)[0].case_id || ""))}（${
+      esc(String(Object.values(view.run_sources)[0].read_at || "").slice(0, 16))}）；保存后写入当前工况。</p>`
     : "";
+  const legacy = state.pumpDesign.legacy;
+  const legacyNote = legacy && legacy.needs_choice
+    ? `<p class="pump-design-note">这台泵还有旧的一组 Σhf（${fmt(legacy.hf_m, 2)} m）没归到吸入 / 排出。
+        <button class="link-btn pump-legacy-open">迁移</button></p>`
+    : "";
+  const tablesError = state.pumpDesign.view && state.pumpDesign.view.tables_error
+    ? `<p class="pump-design-note">管道选型未完成:${esc(state.pumpDesign.view.tables_error)}</p>`
+    : "";
+  const open = state.pumpDesign.openSide;
   box.innerHTML = `
-    <summary class="pump-fold-summary" title="ΔZ / L / Σζ 由你填,工具不估算">
-      <span class="pump-fold-title">设计扬程</span>
+    <summary class="pump-fold-summary" title="两侧管段共用「管道」页的选型结果">
+      <span class="pump-fold-title">设计扬程 / 管路阻力</span>
       ${brief}
       <span class="pump-fold-mark" aria-hidden="true"></span>
     </summary>
-    ${designSrcNote}
-    <div class="pump-design-inputs">
-      <label>ΔZ m ${val("dz", "如 9.45")}</label>
-      <label>Σhf m ${val("hf", "如 5.93")}</label>
-    </div>
-    <div class="pump-design-inputs">
-      <label>管长 L m ${val("l", "如 40")}</label>
-      <label>Σζ ${val("zeta", "如 17.43")}</label>
-      <label${state.pumpDesign.idNote ? ` title="${esc(state.pumpDesign.idNote)}"` : ""}>内径 mm ${
-        val("idMm", state.pumpDesign.idNote ? "超档,手填" : "自动")}</label>
-      <label>粘度 cP ${val("muCp", "自动")}</label>
-      <label>粗糙度 mm ${val("epsMm", "0.05")}</label>
-    </div>
-    <div class="pump-design-inputs pump-design-lambda">
-      <label>λ 口径
-        <select class="pump-design-select" data-key="lambdaMethod" aria-label="λ 口径">
-          <option value="colebrook"${state.pumpDesign.lambdaMethod === "colebrook" ? " selected" : ""}>Colebrook(默认)</option>
-          <option value="gu"${state.pumpDesign.lambdaMethod === "gu" ? " selected" : ""}>顾毓珍</option>
-          <option value="manual"${state.pumpDesign.lambdaMethod === "manual" ? " selected" : ""}>手填</option>
-        </select>
-      </label>
-      ${state.pumpDesign.lambdaMethod === "manual"
-        ? `<label>λ 值 ${val("lambdaManual", "如 0.028")}</label>`
-        : ""}
-      <span class="muted">默认 Colebrook;两份算例口径不同,别混用</span>
-    </div>
-    ${state.pumpDesign.idNote
-      ? `<p class="pump-design-note">内径没给:${esc(state.pumpDesign.idNote)}</p>`
-      : ""}
-    <div class="pump-design-fits">
-      <span class="muted">常用管件(填数量,自动求和)</span>
-      ${PUMP_FITTINGS.map((f) => {
-        const n = state.pumpDesign.fittings[f.key] || 0;
-        return `<label title="ζ = ${f.zeta}">${f.label} ×${f.zeta}
-          <input class="pump-fit-input" data-fit="${f.key}" type="number" min="0" step="1"
-                 inputmode="numeric" value="${n}" aria-label="${f.label} 数量"></label>`;
-      }).join("")}
-      <span class="muted">合计 Σζ = ${fmt(fittingsZeta(), 2)}</span>
-    </div>
+    ${src}${legacyNote}${tablesError}
+    <table class="pump-line-table">
+      <thead><tr><th scope="col">侧</th><th scope="col">流股</th><th scope="col">DN</th>
+        <th scope="col">L m</th><th scope="col">Σζ</th><th scope="col">ΔZ m</th>
+        <th scope="col">Σhf m</th><th scope="col">状态</th></tr></thead>
+      <tbody>${renderLineRow("suction", "吸入")}${renderLineRow("discharge", "排出")}</tbody>
+    </table>
+    ${open ? renderLineDetail(open, open === "suction" ? "吸入" : "排出") : ""}
     <div class="pump-design-actions">
-      <button class="link-btn" id="pumpCalcHf">按管路算 Σhf</button>
-      <span class="muted pump-design-calc" id="pumpCalcLine">${calcLine}</span>
+      <button class="link-btn" id="pumpLineSave">保存两侧管段</button>
+      <span class="muted pump-design-calc">DN 与流速跟随管道页;人工选 DN 后该管段冻结</span>
     </div>
     <p class="pump-design-sum" id="pumpDesignSum"></p>`;
 
-  box.querySelectorAll(".pump-design-input").forEach((input) => {
+  box.querySelectorAll(".pump-line-input").forEach((input) => {
     input.addEventListener("input", (e) => {
-      const key = e.target.dataset.key;
       const raw = e.target.value.trim();
       const parsed = raw === "" ? null : Number(raw);
-      const value = parsed !== null && isFinite(parsed) ? parsed : null;
-      state.pumpDesign[key] = value;
-      // 这三项原本是自动取值;只有人改过才记进 overrides,免得模型换了还显示旧值
-      if (key === "idMm" || key === "muCp" || key === "epsMm") {
-        state.pumpDesign.manual[key] = value;
-      }
+      const key = e.target.dataset.key;
+      editOf(e.target.dataset.side)[key] =
+        parsed !== null && Number.isFinite(parsed) ? parsed : null;
       refreshPumpDesignSum(row);
     });
-    input.addEventListener("change", () => savePumpDesign(row));
+  });
+  box.querySelectorAll(".pump-line-more").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.pumpDesign.openSide = state.pumpDesign.openSide === btn.dataset.side
+        ? null : btn.dataset.side;
+      renderPumpDesign(row);
+    });
   });
   box.querySelectorAll(".pump-fit-input").forEach((input) => {
     input.addEventListener("change", (e) => {
-      const key = e.target.dataset.fit;
+      const side = e.target.dataset.side;
       const count = Math.floor(Number(e.target.value));
-      state.pumpDesign.fittings[key] = Number.isFinite(count) && count > 0 ? count : 0;
-      applyFittings();
+      const ed = editOf(side);
+      ed.fittings[e.target.dataset.fit] = Number.isFinite(count) && count > 0 ? count : 0;
+      ed.zeta_sum = Math.round(editFittingsZeta(side) * 100) / 100 || null;
       renderPumpDesign(row);
-      savePumpDesign(row);   // 管件数量也按模型+位号存,刷新不丢
     });
   });
-  box.querySelectorAll(".pump-design-select").forEach((sel) => {
+  box.querySelectorAll(".pump-line-lambda").forEach((sel) => {
     sel.addEventListener("change", (e) => {
-      const v = e.target.value;
-      state.pumpDesign.lambdaMethod = ["colebrook", "gu", "manual"].includes(v)
-        ? v : "colebrook";
-      renderPumpDesign(row);   // 手填 λ 输入框随方法显隐
-      savePumpDesign(row);     // 口径也按模型 + 位号存,刷新不丢
+      editOf(e.target.dataset.side).lambda_method = e.target.value;
+      renderPumpDesign(row);
     });
   });
-  const calcBtn = document.getElementById("pumpCalcHf");
-  if (calcBtn) calcBtn.onclick = () => computeHeadLoss(row);
+  box.querySelectorAll(".pump-line-dn").forEach((sel) => {
+    sel.addEventListener("change", (e) => {
+      const ed = editOf(e.target.dataset.side);
+      if (e.target.value === "custom") {
+        ed.custom = true;
+        ed.dn_override = null;
+      } else {
+        ed.custom = false;
+        ed.dn_override = e.target.value === "" ? null : Number(e.target.value);
+        ed.od_override_mm = null;
+        ed.wall_override_mm = null;
+      }
+      renderPumpDesign(row);
+    });
+  });
+  box.querySelectorAll(".pump-pick").forEach((sel) => {
+    sel.addEventListener("change", async (e) => {
+      if (!e.target.value) return;
+      try {
+        await apiPost(
+          `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/streams`,
+          { [e.target.dataset.side]: e.target.value },
+        );
+        await loadPumpDesign(row);
+        loadPumpSelection(row);
+      } catch (err) {
+        reportNotice(`流股没保存:${err.message}`, "warn");
+      }
+    });
+  });
+  box.querySelectorAll(".pump-line-jump").forEach((a) => {
+    a.addEventListener("click", (e) => {
+      e.preventDefault();
+      // 用事件解耦:pump.js 不反向 import pipe.js(两者本来就有依赖方向)
+      window.dispatchEvent(new CustomEvent("casebook:pipe-jump", { detail: a.dataset.stream }));
+    });
+  });
+  const saveBtn = document.getElementById("pumpLineSave");
+  if (saveBtn) saveBtn.onclick = () => savePumpDesign(row);
+  const legacyBtn = box.querySelector(".pump-legacy-open");
+  if (legacyBtn) legacyBtn.onclick = () => migrateLegacy(row);
   bindPumpFold(box, "design");
   refreshPumpDesignSum(row);
 }
 
-/* 按管路参数算 Σhf:人只给 L 与 Σζ(内径/粘度/粗糙度可覆盖),公式部分交给后端 */
-export async function computeHeadLoss(row) {
-  const d = state.pumpDesign;
-  const line = document.getElementById("pumpCalcLine");
-  if (d.l === null) {
-    if (line) line.textContent = "先填管长 L";
+/* 旧单一 Σhf 只能归到一侧或登记为合计;合计不拆,修正 NPSH 判 unknown(D7)。 */
+async function migrateLegacy(row) {
+  const legacy = state.pumpDesign.legacy || {};
+  const pick = window.prompt(
+    `旧 Σhf ${fmt(legacy.hf_m, 2)} m 归到哪一侧?输入 suction / discharge / total(合计)`,
+    "suction",
+  );
+  if (!pick) return;
+  if (!["suction", "discharge", "total"].includes(pick)) {
+    reportNotice("只能填 suction / discharge / total", "warn");
     return;
   }
-  if (d.zeta === null) {
-    if (line) line.textContent = "先填 Σζ(弯头/阀门的局部阻力之和)";
-    return;
-  }
-  const method = ["colebrook", "gu", "manual"].includes(d.lambdaMethod)
-    ? d.lambdaMethod : "colebrook";
-  const lam = pumpDesignNum(d.lambdaManual);
-  if (method === "manual" && lam === null) {
-    if (line) line.textContent = "选手填口径时先填 λ 值";
-    return;
-  }
-  if (line) line.textContent = "计算中…";
   try {
     const res = await apiPost(
-      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/head-loss`,
-      {
-        l_m: d.l, zeta_sum: d.zeta, d_mm: d.idMm, eps_mm: d.epsMm, mu_cp: d.muCp,
-        method, ...(method === "manual" ? { lam } : {}),
-      }
+      `/api/cases/${state.current.id}/pump-lines/migrate`,
+      { block: row.name, split: pick },
     );
-    d.calc = res;
-    if (typeof res.hf_m === "number") {
-      d.hf = Math.round(res.hf_m * 100) / 100;
-      const hfInput = document.querySelector('[data-key="hf"]');
-      if (hfInput) hfInput.value = d.hf;
-      savePumpDesign(row);
-    }
-    renderPumpDesign(row);
+    if (res.warnings && res.warnings.length) reportNotice(res.warnings.join(";"), "warn");
+    await loadPumpDesign(row);
+    loadPumpSelection(row);
   } catch (err) {
-    if (line) line.textContent = err.message;
+    reportNotice(`迁移失败:${err.message}`, "warn");
   }
+}
+
+/* 两侧一起存:各自带 version,冲突就整次退回,不留半新半旧。 */
+export async function savePumpDesign(row) {
+  const view = state.pumpDesign.view;
+  if (!view) return;
+  const sides = ["suction", "discharge"];
+  try {
+    for (const side of sides) {
+      const line = view[side] || {};
+      if (!line.stream) continue;
+      const e = editOf(side);
+      const body = {
+        l_m: pumpDesignNum(e.l_m),
+        zeta_sum: pumpDesignNum(e.zeta_sum),
+        dz_m: pumpDesignNum(e.dz_m),
+        mu_cp: pumpDesignNum(e.mu_cp),
+        fittings: e.fittings || {},
+        lambda_method: ["colebrook", "gu", "manual"].includes(e.lambda_method)
+          ? e.lambda_method : "colebrook",
+        lambda_manual: e.lambda_method === "manual" ? pumpDesignNum(e.lambda_manual) : null,
+        dn_override: e.dn_override ?? null,
+        od_override_mm: e.custom ? pumpDesignNum(e.od_override_mm) : null,
+        wall_override_mm: e.custom ? pumpDesignNum(e.wall_override_mm) : null,
+        version: line.version || 0,
+      };
+      await apiPost(
+        `/api/cases/${state.current.id}/lines/${encodeURIComponent(line.stream)}`,
+        body,
+      );
+    }
+  } catch (err) {
+    reportNotice(`管段没保存:${err.message}`, "warn");
+    return;
+  }
+  await loadPumpDesign(row);
+  loadPumpSelection(row);
 }
 
 export async function loadPumpDesign(row) {
   state.pumpDesign = {
-    dz: null, hf: null, l: null, zeta: null, idMm: null, muCp: null, epsMm: null, calc: null,
-    idNote: "", source: null, fittings: { el90: 0, gate: 0, globe: 0, check: 0, reducer: 0 },
-    manual: { idMm: null, muCp: null, epsMm: null },
-    lambdaMethod: "colebrook", lambdaManual: null,
+    view: null,
+    versions: {},
+    edits: {},
+    openSide: null,
+    legacy: null,
+    source: null,
   };
   renderPumpDesign(row);
-  const cid = state.current.id;
-  const name = encodeURIComponent(row.name);
   try {
-    const saved = await api(`/api/cases/${cid}/pumps/${name}/design-head`);
+    const saved = await api(`/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/design-head`);
+    state.pumpDesign.view = saved.lines || null;
+    state.pumpDesign.legacy = saved.legacy || null;
     state.pumpDesign.source = saved.source || null;
-    state.pumpDesign.dz = pumpDesignNum(saved.dz_m);
-    state.pumpDesign.hf = pumpDesignNum(saved.hf_m);
-    state.pumpDesign.l = pumpDesignNum(saved.l_m);
-    // zeta_json 服务端已解析成对象;老服务没这个字段时整块保持空,不猜值
-    const z = saved.zeta_json && typeof saved.zeta_json === "object" ? saved.zeta_json : null;
-    state.pumpDesign.zeta = z ? pumpDesignNum(z.zeta_sum) : null;
-    if (z && z.fittings && typeof z.fittings === "object") {
-      PUMP_FITTINGS.forEach((f) => {
-        const n = z.fittings[f.key];
-        state.pumpDesign.fittings[f.key] = Number.isInteger(n) && n > 0 ? n : 0;
-      });
-    }
-    const ov = z && z.overrides && typeof z.overrides === "object" ? z.overrides : null;
-    [["idMm", "id_mm"], ["muCp", "mu_cp"], ["epsMm", "eps_mm"]].forEach(([key, jsonKey]) => {
-      const v = ov ? pumpDesignNum(ov[jsonKey]) : null;
-      state.pumpDesign.manual[key] = v;
-      if (v !== null) state.pumpDesign[key] = v;
-    });
-    const lam = z && z.lambda && typeof z.lambda === "object" ? z.lambda : null;
-    if (lam) {
-      state.pumpDesign.lambdaMethod = ["colebrook", "gu", "manual"].includes(lam.method)
-        ? lam.method : "colebrook";
-      state.pumpDesign.lambdaManual = pumpDesignNum(lam.manual);
-    }
     renderPumpDesign(row);
   } catch (err) {
     // 读不到就是没填过 / 老服务:保持空,不影响主功能
-  }
-  try {
-    const h = await api(`/api/cases/${cid}/pumps/${name}/hydraulics`);
-    if (state.pumpDesign.idMm === null && typeof h.id_mm === "number") {
-      state.pumpDesign.idMm = h.id_mm;
-    }
-    if (state.pumpDesign.muCp === null && typeof h.mu_cp === "number") {
-      state.pumpDesign.muCp = h.mu_cp;
-    }
-    if (state.pumpDesign.epsMm === null && typeof h.eps_default_mm === "number") {
-      state.pumpDesign.epsMm = h.eps_default_mm;
-    }
-    state.pumpDesign.idNote = typeof h.id_note === "string" ? h.id_note : "";
-    renderPumpDesign(row);
-  } catch (err) {
-    // 标准表没录全 / 老服务:内径与粘度留给手填
-  }
-}
-
-export async function savePumpDesign(row) {
-  const d = state.pumpDesign;
-  const dz = pumpDesignNum(d.dz), hf = pumpDesignNum(d.hf);
-  const l = pumpDesignNum(d.l), zeta = pumpDesignNum(d.zeta);
-  const fittings = {};
-  PUMP_FITTINGS.forEach((f) => {
-    const n = d.fittings && d.fittings[f.key];
-    fittings[f.key] = Number.isInteger(n) && n > 0 ? n : 0;
-  });
-  const manual = d.manual || {};
-  const overrides = {
-    id_mm: pumpDesignNum(manual.idMm),
-    mu_cp: pumpDesignNum(manual.muCp),
-    eps_mm: pumpDesignNum(manual.epsMm),
-  };
-  const hasOverride = Object.values(overrides).some((v) => v !== null);
-  const method = ["colebrook", "gu", "manual"].includes(d.lambdaMethod)
-    ? d.lambdaMethod : "colebrook";
-  const lambda = { method, manual: method === "manual" ? pumpDesignNum(d.lambdaManual) : null };
-  const hasLambda = method !== "colebrook" || lambda.manual !== null;
-  // 全空 = 清除这一行:发全 null 让后端删记录,别留一条空挂账
-  const empty = dz === null && hf === null && l === null && zeta === null
-    && !Object.values(fittings).some((n) => n > 0) && !hasOverride && !hasLambda;
-  try {
-    await apiPost(
-      `/api/cases/${state.current.id}/pumps/${encodeURIComponent(row.name)}/design-head`,
-      {
-        dz_m: empty ? null : dz,
-        hf_m: empty ? null : hf,
-        l_m: empty ? null : l,
-        zeta_json: empty ? null : { zeta_sum: zeta, fittings, overrides, lambda },
-      }
-    );
-  } catch (err) {
-    reportNotice(`设计扬程没保存:${err.message}`, "warn");
   }
 }
 
@@ -611,7 +722,8 @@ export function renderPumpSelection(row, data) {
       ${kv("流量", fmt(data.flow_m3h, 2), " m³/h")}
       ${kv("设计扬程", fmt(data.design_head_m, 2), " m")}
       ${kv("选型扬程", fmt(data.selection_head_m, 0), " m")}
-      ${kv("NPSHₐ", fmt(data.npsh_a_m, 2), " m")}
+      ${kv("NPSHₐ(装置)", fmt(data.npsh_a_m, 2), " m")}
+      ${kv("NPSHₐ(修正)", fmt(data.npsh_a_corrected_m, 2), " m")}
       ${kv("建议电机", fmt(data.motor_suggested_kw, 1), " kW")}
     </div>
     <p class="pump-sel-state" data-state="${esc(data.npsh_state)}">

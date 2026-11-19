@@ -15,6 +15,7 @@ from tests import (
     test_judge,
     test_pipe,
     test_pump,
+    test_pump_line,
     test_report,
     test_store,
     test_tools,
@@ -67,6 +68,13 @@ CASES: list[tuple[str, object]] = [
     ("同模型旧版本兜底", test_store.test_model_identity_fallback),
     ("设计参数来源透传", test_store.test_pump_design_source_passthrough),
     ("λ 口径持久化与校验", test_store.test_lambda_method),
+    ("泵两侧管段计算与存储", test_pump_line.test_pump_line_formula),
+    ("泵管段缺一侧", test_pump_line.test_pump_line_missing_side),
+    ("泵两侧流股待指定", test_pump_line.test_pump_line_ambiguous_and_pick),
+    ("管段记录乐观锁", test_pump_line.test_pump_line_store),
+    ("台账用修正 NPSH", test_pump_line.test_pump_line_selection_corrected),
+    ("管道页参数校验", test_pump_line.test_pipe_options_validate),
+    ("管段记录 HTTP 往返", test_pump_line.test_line_http_roundtrip),
 ]
 
 
@@ -92,6 +100,7 @@ def verify_coverage() -> list[str]:
         test_judge,
         test_pipe,
         test_pump,
+        test_pump_line,
         test_report,
         test_store,
         test_tools,
@@ -115,6 +124,7 @@ def verify_coverage() -> list[str]:
                 test_judge,
                 test_pipe,
                 test_pump,
+                test_pump_line,
                 test_report,
                 test_store,
                 test_tools,

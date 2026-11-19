@@ -96,8 +96,12 @@ class PipeRoutes:
         try:
             # 管材跟着**已录入的表 B.1** 走:表里有什么牌号就能选什么(方案 A)。
             # 以前这里把认不出的牌号静默换成 S30408,页面什么也不说;现在改成明确报错。
+            from app.design import pump_line_context
+
             available = pipe_data.piping_class_grades()
-            default_material = (
+            base = pump_line_context.options_for(conn, case_id)
+            stored = db.read_pipe_options(conn, db.model_key(conn, case_id))
+            default_material = base.get("material") or (
                 "S30408" if "S30408" in available else (available[0] if available else "S30408")
             )
             material = _q("material") or default_material
@@ -109,20 +113,32 @@ class PipeRoutes:
                 )
             options = {
                 "velocity": {
-                    "liquid": _f("liquid", pipe_calc.DEFAULT_VELOCITY["liquid"], 0.01, 100.0),
-                    "gas": _f("gas", pipe_calc.DEFAULT_VELOCITY["gas"], 0.01, 100.0),
-                    "two": _f("two", pipe_calc.DEFAULT_VELOCITY["two"], 0.01, 100.0),
-                    "pump_inlet": _f(
-                        "pump_inlet", pipe_calc.DEFAULT_VELOCITY["pump_inlet"], 0.01, 100.0
-                    ),
+                    "liquid": _f("liquid", base["velocity"]["liquid"], 0.01, 100.0),
+                    "gas": _f("gas", base["velocity"]["gas"], 0.01, 100.0),
+                    "two": _f("two", base["velocity"]["two"], 0.01, 100.0),
+                    "pump_inlet": _f("pump_inlet", base["velocity"]["pump_inlet"], 0.01, 100.0),
                 },
                 # §17.1/§17.2 口径:压力系数 1.15(原 1.1),DN 上限 1000(原 600)
-                "pressure_factor": _f("factor", 1.15, 0.5, 10.0),
-                "pressure_add_mpa": 0.15,
-                "pressure_floor_mpa": _f("floor", 1.0, 0.0, 100.0),
-                "max_dn": int(_f("max_dn", 1000, 1, 10000)),
+                "pressure_factor": _f("factor", base["pressure_factor"], 0.5, 10.0),
+                "pressure_add_mpa": float(base.get("pressure_add_mpa", 0.15)),
+                "pressure_floor_mpa": _f("floor", base["pressure_floor_mpa"], 0.0, 100.0),
+                "max_dn": int(_f("max_dn", base["max_dn"], 1, 10000)),
                 "material": material,
             }
+            explicit = any(
+                k in query
+                for k in (
+                    "liquid",
+                    "gas",
+                    "two",
+                    "pump_inlet",
+                    "factor",
+                    "floor",
+                    "max_dn",
+                    "material",
+                )
+            )
+            options_source = "query" if explicit else ("saved" if stored else "default")
         except BadQuery as exc:
             self._error(str(exc), 400)
             return
@@ -145,8 +161,69 @@ class PipeRoutes:
 
         result["validation"] = pipe_calc.validate(result["rows"], options)
         result["options"] = options
+        result["options_source"] = options_source
         result["tables"] = pipe_table_status()
+        result["pump_lines"] = self._pump_lines(
+            conn, case_id, streams, blocks, conns, result, options
+        )
         self._json(result)
+
+    def _pump_lines(self, conn, case_id, streams, blocks, conns, result, options) -> dict:
+        """给管道页补上「这段是不是泵管、管长/Σζ/μ 填了没、此刻 Σhf 多少」。
+
+        与泵面板同一份 `pipe_run` 记录、同一套 `pump_line` 计算 —— 页面只是两个视图,
+        不能各算一遍。
+        """
+        from app.design import block_family, pump_line
+
+        users = {}
+        for c in conns:
+            name = str(c.get("block") or "")
+            if not name:
+                continue
+            users.setdefault(str(c.get("stream") or ""), set()).add(name)
+        role_of = {}
+        for c in conns:
+            block = str(c.get("block") or "")
+            direction = str(c.get("direction") or "")
+            if direction in ("in", "out"):
+                role_of[(block, str(c.get("stream") or ""))] = (
+                    "suction" if direction == "in" else "discharge"
+                )
+
+        pump_names = {
+            str(b.get("name")) for b in blocks if block_family.family_of_block(b) == "pump"
+        }
+        rows = result.get("rows") or []
+        names = [str(r.get("stream")) for r in rows]
+        runs, sources = db.pipe_runs_for(conn, case_id, names)
+        out = {}
+        for row in rows:
+            stream = str(row.get("stream"))
+            pump_block = next((n for n in users.get(stream, set()) if n in pump_names), None)
+            if not pump_block:
+                continue
+            block = next((dict(b) for b in blocks if b.get("name") == pump_block), {})
+            role = role_of.get((pump_block, stream), "suction")
+            run = runs.get(stream) or {}
+            line = pump_line.compute_line(
+                role,
+                {"status": pump_line.ST_LINKED, "stream": stream, "reason": ""},
+                pipe_rows=rows,
+                pipe_missing=result.get("missing") or [],
+                streams=streams,
+                block=block,
+                run=run,
+                eps_mm=options.get("roughness_mm"),
+            )
+            out[stream] = {
+                **line,
+                "pump": pump_block,
+                "version": int(run.get("version") or 0),
+                "run": run,
+                "source": sources.get(stream),
+            }
+        return out
 
     def get_pipes(self, conn, case, m, query):
         """GET /api/cases/{id}/pipes —— 管路选型一览表。"""

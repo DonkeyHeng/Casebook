@@ -118,9 +118,38 @@ PUMP_HEADERS = (
     "进口汽化率",
     "p_v bar",
     "NPSHₐ m",
+    "NPSHₐ(修正) m",
+    "吸入 DN",
+    "吸入 Σhf m",
+    "排出 DN",
+    "排出 Σhf m",
+    "Σhf 合计 m",
     "提示",
 )
-PUMP_WIDTHS = (14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 50)
+PUMP_WIDTHS = (
+    14,
+    8,
+    12,
+    10,
+    10,
+    12,
+    14,
+    14,
+    14,
+    12,
+    12,
+    10,
+    12,
+    10,
+    12,
+    14,
+    10,
+    10,
+    10,
+    10,
+    12,
+    50,
+)
 
 
 def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, str]:
@@ -147,33 +176,63 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
 
     if family == "pump":
         from app.design import pump as pump_rules
+        from app.design import pump_line_context
+
+        streams = db.read_streams(conn, case_id)
+        connections = db.read_connections(conn, case_id)
+        all_blocks = db.read_blocks(conn, case_id)
+        lines_by_block = {
+            b["name"]: pump_line_context.lines_for(
+                conn,
+                case_id,
+                b,
+                blocks=all_blocks,
+                streams=streams,
+                connections=connections,
+            )
+            for b in blocks
+        }
 
         def npsh(b):
             return _r(pump_rules.npsh_available_m(b["p_in_bar"], b["pv_bar"], b["rho_kgm3"]), 2)
 
+        def line_cells(b, side):
+            line = (lines_by_block.get(b["name"]) or {}).get(side) or {}
+            return _r(line.get("hf_m"), 2), line.get("dn")
+
         headers = list(PUMP_HEADERS)
         widths = list(PUMP_WIDTHS)
-        rows = [
-            [
-                b["name"],
-                STATUS_TEXT.get(b["status"], ""),
-                _r(b["flow_m3h"], 2),
-                _r(b["head_m"], 2),
-                None if b["pump_eff"] is None else _r(b["pump_eff"] * 100, 1),
-                _r(b["power_kw"], 2),
-                b["motor_kw"],
-                b["p_in_bar"],
-                b["p_out_bar"],
-                b["dp_bar"],
-                _r(b["rho_kgm3"], 1),
-                _r(b["mu_cp"], 4),
-                _r(b["pump_vap_frac"], 4),
-                _r(b["pv_bar"], 4),
-                npsh(b),
-                b["message"],
-            ]
-            for b in blocks
-        ]
+        rows = []
+        for b in blocks:
+            lines = lines_by_block.get(b["name"]) or {}
+            suction_hf, suction_dn = line_cells(b, "suction")
+            discharge_hf, discharge_dn = line_cells(b, "discharge")
+            rows.append(
+                [
+                    b["name"],
+                    STATUS_TEXT.get(b["status"], ""),
+                    _r(b["flow_m3h"], 2),
+                    _r(b["head_m"], 2),
+                    None if b["pump_eff"] is None else _r(b["pump_eff"] * 100, 1),
+                    _r(b["power_kw"], 2),
+                    b["motor_kw"],
+                    b["p_in_bar"],
+                    b["p_out_bar"],
+                    b["dp_bar"],
+                    _r(b["rho_kgm3"], 1),
+                    _r(b["mu_cp"], 4),
+                    _r(b["pump_vap_frac"], 4),
+                    _r(b["pv_bar"], 4),
+                    npsh(b),
+                    _r((lines.get("npsh") or {}).get("corrected_m"), 2),
+                    suction_dn,
+                    suction_hf,
+                    discharge_dn,
+                    discharge_hf,
+                    _r((lines.get("totals") or {}).get("hf_m"), 2),
+                    b["message"],
+                ]
+            )
     else:
         cols = FAMILY_COLUMNS[family]
         headers = [_COLS[c][0] for c in cols]
