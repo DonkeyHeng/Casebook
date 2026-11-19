@@ -429,10 +429,11 @@ def _group_row(doc, group: str):
 
 
 def _figure_slot(doc, text: str) -> None:
-    """图片插入处:一个带虚线框的大空位,人工把流程图贴进来。
+    """图片插入处:一个带虚线框的大空位,人工把 Aspen 原版流程截图贴进来。
 
-    工具不生成流程图(服务端没有 SVG 渲染器,流程图目前由前端画),所以这里
-    留一个显眼的空位 + 一行说明,而不是假装"没有流程图"。
+    设计文件里要的是 Aspen 自己的流程图(权威版式),不是前端画的拓扑示意;
+    工具也生成不了它(服务端没有 SVG 渲染器),所以这里留一个显眼的空位 +
+    一行说明,而不是假装"没有图"。
     """
     from docx.enum.text import WD_ALIGN_PARAGRAPH
     from docx.oxml import OxmlElement
@@ -498,11 +499,13 @@ def _mass_chapter(doc, data: dict, cap: _Captions, chapter: str = "1") -> None:
         )
     for zone in wide["zones"]:
         _heading(doc, zone["label"], 3)
-        _figure_slot(doc, f"{zone['label']}流程图")
+        _figure_slot(doc, f"{zone['label']} Aspen 流程截图")
         _wide_table(doc, zone, cap, chapter, title=f"{zone['label']}物料平衡表")
 
-    # 附注里要列"本册该贴几张图":流程图是人工贴的,漏贴没人提醒(2026-11-15)
-    data["_figures"] = [f"{zone['label']}流程图" for zone in wide["zones"]] + ["全流程图"]
+    # 附注里要列"本册该贴几张图":截图是人工贴的,漏贴没人提醒(2026-11-15)
+    data["_figures"] = [f"{zone['label']} Aspen 流程截图" for zone in wide["zones"]] + [
+        "全流程 Aspen 截图"
+    ]
 
     _heading(doc, f"{chapter}.2 全流程物料平衡表", 2)
     _para(
@@ -516,7 +519,7 @@ def _mass_chapter(doc, data: dict, cap: _Captions, chapter: str = "1") -> None:
         False,
         WD_ALIGN_PARAGRAPH.LEFT,
     )
-    _figure_slot(doc, "全流程图")
+    _figure_slot(doc, "全流程 Aspen 截图")
     _wide_table(doc, wide["overall"], cap, chapter, title="全流程物料平衡表")
 
     _heading(doc, f"{chapter}.3 物料消耗与产出汇总", 2)
@@ -812,7 +815,8 @@ def _notes_chapter(doc, data: dict) -> None:
     figures = data.get("_figures") or []
     if figures:
         notes.append(
-            f"本册共 {len(figures)} 张流程图需人工贴入：{'、'.join(figures)}。"
+            f"本册共 {len(figures)} 张 Aspen 流程截图需人工贴入：{'、'.join(figures)}。"
+            "截图请从 Aspen 导出原版流程图（不要用本软件的拓扑示意图）；"
             "正文各处已留虚线框并标注「图片插入处」，贴完请逐条核对。"
         )
     for text in notes:
