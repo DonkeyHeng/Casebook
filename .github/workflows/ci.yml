@@ -19,6 +19,10 @@ jobs:
     # 这里守住发布面必须兼容的版本与代码风格口径。
     runs-on: windows-latest
     timeout-minutes: 20
+    # Windows runner 的默认控制台是 cp1252:自测和探针都会打印中文,
+    # 不强制 UTF-8 会在 charmap 上炸掉(与代码本身无关)。
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
