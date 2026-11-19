@@ -11,6 +11,7 @@ from pathlib import Path
 from app.aspen import balance as balance_rules
 from app.design import energy_report as energy_rules
 from app.design import mass_balance as mass_rules
+from app.design import mole_balance as mole_rules
 from app.design import sections as section_rules
 from app.store import db
 from tests._harness import (
@@ -22,6 +23,7 @@ from tests._harness import (
     _mb_streams,
     _streams,
     check,
+    check_close,
     check_eq,
 )
 
@@ -599,6 +601,99 @@ def test_mass_balance() -> None:
             scratch.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def test_mole_balance() -> None:
+    """mole_balance.build():摩尔只在无反应设备上守恒,是「质量/摩尔 = 分子量」的可判定形式。"""
+    # ① 单进单出:质量、摩尔都对得上 → pass,表观分子量就是 mass/mole
+    res = mole_rules.build(
+        _mb_streams(("0101", 100.0, 5.0), ("0102", 100.0, 5.0)),
+        _mb_blocks(("E0101", "Heater")),
+        _mb_conns(("E0101", "in", "0101"), ("E0101", "out", "0102")),
+    )
+    dev = res["devices"][0]
+    check_eq("mole: 单进单出 → pass", dev["state"], mole_rules.PASS)
+    check_close("mole: 表观分子量 = 质量/摩尔", dev["mw_in_kgkmol"], 20.0)
+
+    # ② 摩尔口径错(质量对得上、摩尔砍半):必须报 fail,并报两端表观分子量
+    res = mole_rules.build(
+        _mb_streams(("0201", 100.0, 5.0), ("0202", 100.0, 2.5)),
+        _mb_blocks(("E0201", "Heater")),
+        _mb_conns(("E0201", "in", "0201"), ("E0201", "out", "0202")),
+    )
+    dev = res["devices"][0]
+    check_eq("mole: 摩尔砍半 → fail", dev["state"], mole_rules.FAIL)
+    check_close("mole: 出口表观分子量翻倍", dev["mw_out_kgkmol"], 40.0)
+    check("mole: 超差说明指向口径", "单位、字段" in dev["note"], dev["note"])
+    # 同一份数据质量守恒仍然 pass —— 两条判据各管一件事,不能互相顶替
+    mass = mass_rules.build(
+        _mb_streams(("0201", 100.0, 5.0), ("0202", 100.0, 2.5)),
+        _mb_blocks(("E0201", "Heater")),
+        _mb_conns(("E0201", "in", "0201"), ("E0201", "out", "0202")),
+    )
+    check_eq("mole: 质量守恒对这条错误是瞎的", mass["devices"][0]["state"], mass_rules.PASS)
+
+    # ③ 反应器:摩尔数本来会变 → 整台不判,但要出现在 skipped 里
+    res = mole_rules.build(
+        _mb_streams(("0301", 100.0, 5.0), ("0302", 100.0, 6.0)),
+        _mb_blocks(("R0301", "RCSTR")),
+        _mb_conns(("R0301", "in", "0301"), ("R0301", "out", "0302")),
+    )
+    check_eq("mole: 反应器不判", len(res["devices"]), 0)
+    check("mole: 反应器进 skipped 并写明原因", "反应器" in res["skipped"][0]["reason"])
+
+    # ④ 塔:RadFrac 可以挂反应,同样不判
+    res = mole_rules.build(
+        _mb_streams(("0401", 100.0, 5.0), ("0402", 60.0, 3.0), ("0403", 40.0, 2.0)),
+        _mb_blocks(("T0401", "RadFrac")),
+        _mb_conns(("T0401", "in", "0401"), ("T0401", "out", "0402"), ("T0401", "out", "0403")),
+    )
+    check_eq("mole: 塔不判", len(res["devices"]), 0)
+    check("mole: 塔的豁免原因写明", "塔" in res["skipped"][0]["reason"])
+
+    # ⑤ 倍增块:出口是进口的缩放副本,进出本就不相等 → 不判
+    res = mole_rules.build(
+        _mb_streams(("0501", 100.0, 5.0), ("0502", 200.0, 10.0)),
+        _mb_blocks(("X0501", "Mult")),
+        _mb_conns(("X0501", "in", "0501"), ("X0501", "out", "0502")),
+    )
+    check_eq("mole: 倍增块不判", len(res["devices"]), 0)
+
+    # ⑥ 缺摩尔流量 → 无法校验(不能当 0 加)
+    res = mole_rules.build(
+        _mb_streams(("0601", 100.0), ("0602", 100.0, 5.0)),
+        _mb_blocks(("E0601", "Heater")),
+        _mb_conns(("E0601", "in", "0601"), ("E0601", "out", "0602")),
+    )
+    check_eq("mole: 缺摩尔流量 → 无法校验", res["devices"][0]["state"], mole_rules.NO_DATA)
+
+    # ⑦ 小流量豁免按质量判:进 0.2、出 0.1 kg/h,摩尔差 100% 也不判
+    res = mole_rules.build(
+        _mb_streams(("0701", 0.2, 0.01), ("0702", 0.1, 0.005)),
+        _mb_blocks(("V0701", "Valve")),
+        _mb_conns(("V0701", "in", "0701"), ("V0701", "out", "0702")),
+    )
+    check_eq("mole: 小流量 → too_small", res["devices"][0]["state"], mole_rules.TOO_SMALL)
+
+    # ⑧ 不认识的块类型保守不判,并进 skipped(不静默跳过)
+    res = mole_rules.build(
+        _mb_streams(("0801", 100.0, 5.0), ("0802", 100.0, 5.0)),
+        _mb_blocks(("Z0801", "Foo")),
+        _mb_conns(("Z0801", "in", "0801"), ("Z0801", "out", "0802")),
+    )
+    check_eq("mole: 不认识类型不判", len(res["devices"]), 0)
+    check_eq("mole: 不认识类型进 skipped", len(res["skipped"]), 1)
+
+    # ⑨ picked 只判勾选设备,不认识的名字单独记
+    res = mole_rules.build(
+        _mb_streams(("0901", 100.0, 5.0), ("0902", 100.0, 5.0)),
+        _mb_blocks(("E0901", "Heater"), ("E0902", "Heater")),
+        _mb_conns(("E0901", "in", "0901"), ("E0901", "out", "0902")),
+        picked=["E0901", "不存在"],
+    )
+    check_eq("mole: picked 只判勾选的", len(res["devices"]), 1)
+    check_eq("mole: 不认识的名字记下来", res["unknown_picked"], ["不存在"])
+    check_eq("mole: summary 统计台数", res["summary"]["total"], 1)
 
 
 def test_energy_report() -> None:

@@ -26,6 +26,7 @@ CASES: list[tuple[str, object]] = [
     ("空模型 mark_empty()", test_judge.test_empty),
     ("焓平衡 balance.compute()", test_balance.test_balance),
     ("物料衡算 mass_balance", test_balance.test_mass_balance),
+    ("摩尔守恒 mole_balance", test_balance.test_mole_balance),
     ("能量衡算 energy_report", test_balance.test_energy_report),
     ("物料平衡宽表 stream_table", test_report.test_stream_table),
     ("衡算报告 report_export", test_report.test_report_export),

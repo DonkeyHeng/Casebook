@@ -150,6 +150,7 @@ python -m tools.selftest                        # 全离线,不需要 Aspen
 python -m tools.selftest --db data/cases.db     # 再核库内结论与规则一致
 ```
 
-衡算相关的用例分三组:`物料衡算 mass_balance`(界区 + 逐设备)、
+衡算相关的用例分四组:`物料衡算 mass_balance`(界区 + 逐设备)、
+`摩尔守恒 mole_balance`(只判无反应设备,用来发现质量守恒看不见的摩尔流量口径错)、
 `能量衡算 energy_report`、`衡算报告 report_export`。阳性夹具在
 `samples/case-23-error.db` 的副本上运行时删一条连接造出来,不新增二进制样本。

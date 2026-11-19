@@ -24,6 +24,8 @@ app/
     sections.py    工段(界区)判定:设备名段号推草稿、配置归一化、草稿与确认结果合并
     stream_table.py 物料平衡宽表:流股做列、属性与组分做行(工段级 + 全流程 + 年量)
     mass_balance.py 物料衡算:界区 Σ进界=Σ出界 + 逐设备 Σ进口=Σ出口(纯函数)
+    mole_balance.py 摩尔守恒:无反应设备的 Σ摩尔进口=Σ摩尔出口,补质量守恒看不见的
+                   流量口径错(纯函数,反应器与塔不判)
     energy_report.py 能量衡算表与全流程汇总(ΔH 由调用方注入 compute() 的结果)
     block_family.py 设备家族:把 Aspen 几十种块类型收敛成 9 个页签
     model_identity.py 模型身份:内容哈希优先,文件名兜底(选型台账按模型去重靠它)
