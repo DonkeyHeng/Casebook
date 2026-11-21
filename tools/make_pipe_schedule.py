@@ -94,7 +94,7 @@ def _audit(res: dict, case: dict | None = None) -> list[str]:
         )
     out.append("")
     out.append(
-        "[高压不锈钢升 R1E] 4.7–5.6 MPa 共 "
+        "[高压不锈钢升 R1E] 4.7–6.4 MPa 共 "
         f"{s['upgraded']} 条: {names(lambda r: r['hp_ss_upgraded'])}"
     )
     for r in rows:
@@ -119,11 +119,16 @@ def _audit(res: dict, case: dict | None = None) -> list[str]:
     )
     tol = [r for r in rows if r.get("oversize_tolerated")]
     if tol:
+
+        def _tol_pct(row: dict) -> float:
+            base = float(row["od_mm"]) - 2.0 * float(row["wall_mm"])
+            return pipe_calc.dn1000_oversize_pct(row["inner_d_mm"], base_inner_mm=base)
+
         out.append(
-            "[DN1000 +5% 容差(996–1045 mm)] "
+            "[DN1000 +5% 容差(按实际圆整内径)] "
             + "、".join(
                 f"{r['stream']}(内径 {r['inner_d_mm']:.1f}mm,"
-                f"超 {pipe_calc.dn1000_oversize_pct(r['inner_d_mm']):.1f}%,"
+                f"超 {_tol_pct(r):.1f}%,"
                 f"DN{r['dn']}×{r['wall_mm']:g}mm)"
                 for r in tol
             )

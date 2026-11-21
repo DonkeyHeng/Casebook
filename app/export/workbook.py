@@ -202,11 +202,23 @@ def build_workbook(conn, case_id: int) -> bytes:
 
         def pump_npsh(row):
             # 口径与页面一致:p_v 只认用户填的值,程序不估算
-            return pump_rules.npsh_available_m(row["p_in_bar"], row["pv_bar"], row["rho_kgm3"])
+            return pump_rules.npsh_available_m(
+                row["p_in_bar"], row["pv_bar"], row["rho_kgm3"], row["pump_vap_frac"]
+            )
 
         def line_cells(b, side):
             line = (lines_by_block.get(b["name"]) or {}).get(side) or {}
             return line.get("dn"), line.get("hf_m")
+
+        def motor_cells(b):
+            motor = (lines_by_block.get(b["name"]) or {}).get("totals", {}).get("motor") or {}
+            if not motor:
+                return b["motor_kw"], "Aspen轴功率（历史建议值）"
+            return motor.get("kw"), motor.get("power_source") or ""
+
+        def pump_message(b):
+            warns = (lines_by_block.get(b["name"]) or {}).get("totals", {}).get("warnings") or []
+            return "；".join(x for x in [b["message"], *warns] if x)
 
         ws = wb.create_sheet("泵")
         fill_sheet(
@@ -219,6 +231,7 @@ def build_workbook(conn, case_id: int) -> bytes:
                 "效率 %",
                 "轴功率 kW",
                 "建议电机 kW",
+                "电机功率口径",
                 "进口压力 bar",
                 "出口压力 bar",
                 "压升 bar",
@@ -243,7 +256,7 @@ def build_workbook(conn, case_id: int) -> bytes:
                     b["head_m"],
                     None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1),
                     b["power_kw"],
-                    b["motor_kw"],
+                    *motor_cells(b),
                     b["p_in_bar"],
                     b["p_out_bar"],
                     b["dp_bar"],
@@ -258,11 +271,36 @@ def build_workbook(conn, case_id: int) -> bytes:
                     line_cells(b, "discharge")[0],
                     line_cells(b, "discharge")[1],
                     (lines_by_block.get(b["name"]) or {}).get("totals", {}).get("hf_m"),
-                    b["message"],
+                    pump_message(b),
                 )
                 for b in pumps
             ],
-            [14, 8, 12, 10, 10, 12, 14, 14, 14, 12, 12, 10, 12, 10, 12, 14, 10, 10, 10, 10, 12, 50],
+            [
+                14,
+                8,
+                12,
+                10,
+                10,
+                12,
+                14,
+                28,
+                14,
+                14,
+                14,
+                12,
+                12,
+                10,
+                12,
+                10,
+                12,
+                14,
+                10,
+                10,
+                10,
+                10,
+                12,
+                50,
+            ],
         )
 
     # --- 连接关系 ---
@@ -316,6 +354,8 @@ def build_workbook(conn, case_id: int) -> bytes:
         pres = pipe_calc.build(
             [dict(s) for s in streams], [dict(b) for b in blocks], [dict(c) for c in connections]
         )
+        runs, _run_sources = db.pipe_runs_for(conn, case_id, [dict(s)["name"] for s in streams])
+        pres["rows"] = pipe_calc.apply_pipe_run_overrides(pres["rows"], runs)
         pchecks = pipe_calc.validate(pres["rows"])
         hit_by_stream: dict[str, list[str]] = {}
         for f in pchecks["findings"]:

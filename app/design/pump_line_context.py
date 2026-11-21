@@ -35,6 +35,12 @@ def _merge_options(stored: dict | None) -> dict:
     out = {**base, **{k: v for k, v in stored.items() if v is not None}}
     if isinstance(stored.get("velocity"), dict):
         out["velocity"] = {**base["velocity"], **stored["velocity"]}
+    # 旧库可能存过 K_p < 1 的死区值。读侧统一抬到 1.0,避免页面/泵面板/导出
+    # 三条路径继续用低于操作表压的设计压力;下次保存按新校验落成 ≥1.0。
+    try:
+        out["pressure_factor"] = max(1.0, float(out.get("pressure_factor")))
+    except (TypeError, ValueError):
+        out["pressure_factor"] = base["pressure_factor"]
     return out
 
 
@@ -132,7 +138,7 @@ def lines_for(
 
 FITTING_ZETA = {
     "el90": 0.75,
-    "gate": 0.9,
+    "gate": 0.17,  # 全开闸阀;半开需按实际开度另计
     "globe": 9.5,
     "check": 2.0,
     "reducer": 0.04,

@@ -669,6 +669,24 @@ ok("⑩ 排出保存到 /lines/S2", linePosts.some((c) => c.url.endsWith("/lines
 ok("⑩ 请求体带版本次", Boolean(linePosts[0] && linePosts[0].body.version === 0));
 ok("⑩ 请求体带 Σζ", Boolean(linePosts[0] && linePosts[0].body.zeta_sum === 5));
 
+// 未勾管件、未手填 0:Σζ 必须保存 null,而不是 0,否则会给出"只有沿程"的假 Σhf
+vm.runInContext(`
+  state.pumpDesign.view = {
+    suction: { stream: "S1", version: 0, run: {}, zeta_sum: null },
+    discharge: { stream: "S2", version: 0, run: {}, zeta_sum: null },
+  };
+  const ed = { l_m: 12, zeta_sum: null, dz_m: 2, fittings: {}, lambda_method: "colebrook",
+               lambda_manual: null, dn_override: null, custom: false };
+  state.pumpDesign.edits = { suction: { ...ed }, discharge: { ...ed } };
+  applyFittings("suction");
+`, ctx);
+capture.length = 0;
+await vm.runInContext("savePumpDesign(__row)", ctx);
+const nullZetaPosts = capture.filter((c) => c.url.includes("/lines/"));
+ok("⑩ 未填管件保存 Σζ=null", Boolean(
+  nullZetaPosts.length === 2 && nullZetaPosts.every((c) => c.body.zeta_sum === null)
+), JSON.stringify(nullZetaPosts.map((c) => c.body.zeta_sum)));
+
 // 保存后真实页面会重新拉 design-head;测试桩不返回数据,这里补回视图再继续
 vm.runInContext(`
   state.pumpDesign.view = {
@@ -706,7 +724,7 @@ vm.runInContext("renderPumpDesign(__row)", ctx);
 has("⑩ 缺一侧写明原因", box.innerHTML, "泵缺进口流股");
 has("⑩ 缺一侧只给已计阻力", box.innerHTML, "两侧未齐");
 
-// 台账同时给装置值与修正值(判据用修正值)
+// 台账同时给进口基准值与修正值(判据用修正值)
 vm.runInContext(`
   renderPumpSelection(__row, {
     saved: { model_no: "IS65-50-160" },
@@ -717,7 +735,7 @@ vm.runInContext(`
     sources: { selection: null, design: null },
   });
 `, ctx);
-has("⑩ 台账保留装置 NPSHₐ", selFold.innerHTML, "NPSHₐ(装置)");
+has("⑩ 台账保留进口基准 NPSHₐ", selFold.innerHTML, "NPSHₐ(进口基准)");
 has("⑩ 台账显示修正 NPSHₐ", selFold.innerHTML, "NPSHₐ(修正)");
 
 // ⑪ 对比页:state.compare / state.filter → #table thead/tbody/count(纯同步,不 await)
@@ -943,6 +961,11 @@ has("⑮ 泵面板用悬浮窗类", indexHtml, "pump-modal");
 has("⑮ 顶部有切泵下拉", indexHtml, 'id="pumpSwitch"');
 has("⑮ 左列放详细参数", indexHtml, "pump-modal-left");
 has("⑮ 右列放设计扬程与台账", indexHtml, "pump-modal-right");
+const pumpJsSrc = fs.readFileSync(
+  path.join(ROOT, "app", "web", "static", "views", "pump.js"), "utf8");
+has("⑮ 闸阀 ζ 改为全开值 0.17", pumpJsSrc, "zeta: 0.17");
+has("⑮ λ 口径提示带过渡区说明", pumpJsSrc, "lambda_note");
+has("⑮ 反向/自流不给选型扬程", pumpJsSrc, "反向/自流");
 
 console.log(`\n新增覆盖:${passed - basePassed} 条断言(⑥ 流股表 / ⑦ 首页 / ⑧ 家族页签 / ⑨ 常驻区块 / ⑩ λ 口径 / ⑪ 对比页 / ⑫ 报告勾选 / ⑬ 缺字段兜底 / ⑭ 详细参数折叠 / ⑮ 泵面板结构)`);
 console.log(`本轮新增:${passed - roundBase} 条断言(⑩ / ⑪ / ⑫ / ⑬ / ⑭ / ⑮)`);

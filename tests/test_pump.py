@@ -31,6 +31,21 @@ def test_pump() -> None:
     npsh = pump.npsh_available_m(0.5, 0.2, 950.0)
     check("泵:NPSHₐ ≈ 3.22 m", npsh is not None and abs(npsh - 3.22) < 0.02, f"实际 {npsh}")
     check_eq("泵:缺 p_v 时 NPSHₐ 为 None", pump.npsh_available_m(0.5, None, 950.0), None)
+    check_eq(
+        "泵:两相进口(汽化率 0.05)不计算 NPSHₐ",
+        pump.npsh_available_m(0.5, 0.2, 950.0, 0.05),
+        None,
+    )
+    near = pump.npsh_available_m(0.5, 0.2, 950.0, 1e-5)
+    check("泵:汽化率低于 1e-4 仍计算", near is not None and abs(near - 3.22) < 0.02, f"实际 {near}")
+    # 阈值与管道相态判定是同一个常量:5e-4 在管道页判两相,泵侧也必须拒算
+    check_eq(
+        "泵:汽化率 5e-4 与管道同判两相 → 不计算",
+        pump.npsh_available_m(0.5, 0.2, 950.0, 0.0005),
+        None,
+    )
+    boundary = pump.npsh_available_m(0.5, 0.2, 950.0, 1e-4)
+    check("泵:汽化率 =1e-4 边界为单相 → 照算", boundary is not None, f"实际 {boundary}")
 
     # p_v 闸门:0 / 负数 / 非数字都不是有效蒸气压(防止把目录标志位 1 当读数)
     check_eq("泵:p_v 为 0 视为无效", pump.sanitize_pv_bar(0), None)
@@ -40,6 +55,14 @@ def test_pump() -> None:
     check("泵:p_v 正常值原样返回", pump.sanitize_pv_bar(0.5338) == 0.5338)
     check_eq("泵:p_v 为正无穷视为无效", pump.sanitize_pv_bar(float("inf")), None)
     check_eq("泵:p_v 为负无穷视为无效", pump.sanitize_pv_bar(float("-inf")), None)
+
+    # p_in 闸门:0 / 负数 / 非有限都不是有效绝压,不能代入 (p_in − p_v)
+    for label, p_in in (("0", 0.0), ("负数", -1.0), ("NaN", float("nan"))):
+        check_eq(
+            f"泵:p_in 为 {label} 时 NPSHₐ 为 None",
+            pump.npsh_available_m(p_in, 0.2, 950.0),
+            None,
+        )
 
     import math
 
@@ -65,6 +88,43 @@ def test_pump() -> None:
     check(
         "泵:超出档位表给出说明",
         pump.pick_motor(1000.0)[0] is None and "超出" in pump.pick_motor(1000.0)[1],
+    )
+    # 电机铭牌是轴输出功率:轴功率 → 档位只除传动效率(直联 1.0)、乘裕量
+    check_eq("泵:140 kW × 1.10 = 154 → 160 kW 档", pump.pick_motor(140.0)[0], 160.0)
+    check_eq(
+        "泵:直联传动效率 1.0 不折减 → 仍是 160 kW",
+        pump.pick_motor(140.0, transmission_eff=1.0)[0],
+        160.0,
+    )
+    check_eq(
+        "泵:皮带 0.95 才除传动效率 → 140/0.95×1.1=162 → 200 kW",
+        pump.pick_motor(140.0, transmission_eff=0.95)[0],
+        200.0,
+    )
+    check(
+        "泵:推导说明里写明除的是传动效率",
+        "÷ 1" in pump.pick_motor(140.0)[1],
+        pump.pick_motor(140.0)[1],
+    )
+
+
+def test_pump_motor_margin_segments() -> None:
+    """电机裕量按 API 610 分段;显式 margin 仍兼容旧口径。"""
+    from app.design import pump
+
+    for power, want in ((0.5, 1.25), (21.9, 1.25), (22.0, 1.15), (55.0, 1.15), (55.1, 1.10)):
+        check_eq(f"电机裕量: {power:g} kW → {want}", pump.motor_margin(power), want)
+    check_eq("电机裕量:缺功率按小功率档", pump.motor_margin(None), 1.25)
+    check_eq("电机:20 kW × 1.25 = 25 → 30 kW 档", pump.pick_motor(20.0)[0], 30.0)
+    check_eq(
+        "电机:显式 1.10 兼容旧口径",
+        pump.pick_motor(20.0, margin=1.10)[0],
+        22.0,
+    )
+    check(
+        "电机:推导说明写明实际裕量",
+        "× 1.25" in pump.pick_motor(20.0)[1],
+        pump.pick_motor(20.0)[1],
     )
 
 
@@ -465,6 +525,7 @@ def test_pump_pv_store() -> None:
                     "p_out_bar": 2.1,
                     "rho_kgm3": 947.0,
                     "pump_vap_frac": 0.0,
+                    "power_source": "ELEC_POWER",
                     "motor_kw": 160.0,
                     "status": 0,
                     "message": "",
@@ -503,6 +564,11 @@ def test_pump_pv_store() -> None:
         db.set_pump_pv(conn, cid, "P1", None)
         check_eq("pv:可以清空", dict(db.read_blocks(conn, cid)[0])["pv_bar"], None)
         check_eq("pv:清空时来源一并清掉", dict(db.read_blocks(conn, cid)[0])["pv_source"], None)
+        check_eq(
+            "功率来源:电功率回退入库",
+            dict(db.read_blocks(conn, cid)[0])["power_source"],
+            "ELEC_POWER",
+        )
         conn.close()
     finally:
         try:
@@ -568,6 +634,82 @@ def test_pump_pv_inherit() -> None:
 
         other = make("other.apw", ["P1"])
         check_eq("p_v 沿用:不同模型不搬", db.inherit_pump_pv(conn, other)["source_case_id"], None)
+        conn.close()
+    finally:
+        try:
+            scratch.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def test_pump_export_two_phase_npsh() -> None:
+    """两相进口:Excel / AI 包 / 工作簿三条导出的 NPSHₐ 都为空。"""
+    import io
+    from pathlib import Path
+
+    import openpyxl
+
+    from app.export import aipack, family_xlsx, workbook
+    from app.store import db
+
+    scratch = Path("data/preview/_selftest-two-phase-export.db")
+    scratch.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        conn = db.open_db(str(scratch))
+        case = {
+            "model": {"path": "x.apw", "name": "x.apw", "read_at": "2026-11-21 00:00:00"},
+            "convergence": {},
+            "streams": [],
+            "columns": [],
+            "connections": [],
+            "blocks": [
+                {
+                    "name": "P1",
+                    "type": "Pump",
+                    "status": 0,
+                    "message": "",
+                    "flow_m3h": 8.5,
+                    "head_m": 41.5,
+                    "pump_eff": 0.4,
+                    "power_kw": 131.466,
+                    "motor_kw": 160.0,
+                    "p_in_bar": 1.8,
+                    "p_out_bar": 2.1,
+                    "rho_kgm3": 900.0,
+                    "pump_vap_frac": 0.05,
+                    "pv_bar": 0.3,
+                    "raw": {},
+                    "balance": {},
+                }
+            ],
+            "stats": {
+                "stream_count": 0,
+                "block_count": 1,
+                "column_count": 0,
+                "connection_count": 0,
+                "elapsed_sec": 0,
+            },
+            "unit_gaps": {},
+        }
+        cid = db.save_case(conn, case)
+
+        data, _, _ = family_xlsx.build_family_workbook(conn, cid, "pump")
+        ws = openpyxl.load_workbook(io.BytesIO(data)).active
+        head = [c.value for c in ws[1]]
+        row = [c.value for c in ws[2]]
+        check("两相导出:Excel NPSHₐ 为空", row[head.index("NPSHₐ m")] is None)
+
+        rows = [dict(r) for r in db.read_blocks(conn, cid)]
+        lines = aipack._pumps_csv(rows).decode("utf-8-sig").splitlines()
+        hdr = lines[0].split(",")
+        check("两相导出:AI 包 NPSHa 为空", lines[1].split(",")[hdr.index("NPSHa m")] == "")
+
+        wb = openpyxl.load_workbook(io.BytesIO(workbook.build_workbook(conn, cid)))
+        ws2 = wb["泵"]
+        heads = [c.value for c in ws2[1]]
+        vals = [c.value for c in ws2[2]]
+        check("两相导出:工作簿 NPSHₐ 为空", vals[heads.index("NPSHₐ m")] is None)
+
         conn.close()
     finally:
         try:

@@ -234,13 +234,42 @@ class CaseRoutes:
         self._stream_composition(conn, int(m["case_id"]), m["stream"])
 
     def get_case_blocks(self, conn, case, m, query):
-        """GET /api/cases/{id}/blocks —— 设备表(家族现算,老工况不用迁移)。"""
-        from app.design import block_family
+        """GET /api/cases/{id}/blocks —— 设备表(家族现算,老工况不用迁移)。
 
+        泵块额外补 `motor_suggested_kw` 与功率口径:与泵选型页、Excel、AI 包同源,
+        页面表格不再回落到 Aspen 轴功率口径的旧 `motor_kw`。
+        """
+        from app.design import block_family, pump_line_context
+
+        case_id = int(m["case_id"])
+        blocks = [dict(row) for row in db.read_blocks(conn, case_id)]
+        streams = [dict(row) for row in db.read_streams(conn, case_id)]
+        connections = [dict(row) for row in db.read_connections(conn, case_id)]
         rows = []
-        for row in db.read_blocks(conn, int(m["case_id"])):
-            item = row_to_dict(row)
+        for item in blocks:
             item["family"] = block_family.family_of_block(item)
+            if item["family"] == "pump":
+                try:
+                    lines = pump_line_context.lines_for(
+                        conn,
+                        case_id,
+                        item,
+                        blocks=blocks,
+                        streams=streams,
+                        connections=connections,
+                    )
+                    motor = (lines.get("totals") or {}).get("motor") or {}
+                    item["motor_suggested_kw"] = motor.get("kw")
+                    item["motor_power_source"] = motor.get("power_source")
+                    item["motor_basis_kw"] = motor.get("basis_kw")
+                    item["motor_margin"] = motor.get("margin")
+                    item["motor_note"] = motor.get("note")
+                except Exception:  # 单台泵算不出不该让整张设备表打不开
+                    item["motor_suggested_kw"] = item.get("motor_kw")
+                    item["motor_power_source"] = "Aspen轴功率（回退）"
+                    item["motor_basis_kw"] = None
+                    item["motor_margin"] = None
+                    item["motor_note"] = "泵两侧管段计算失败，暂按 Aspen 轴功率列值"
             rows.append(item)
         self._json(rows)
 

@@ -78,22 +78,27 @@ def _num(value, digits: int) -> str:
 def _pipe_tag(row: dict) -> str:
     """管路编号 = 介质代号-流股号-DN-等级号(等级号自带绝热代号,如 -H / -C)。
 
-    2026-11-18 第二轮:保持**纯净**,不拼任何校核标记 —— 这列是 BOM 材料统计与
-    PID 匹配的唯一主键;状态提示全部移到「校核备注」列(`_check_remark`)。
+    保持**纯净**,不拼任何校核标记 —— 这列是 BOM 材料统计与 PID 匹配的唯一主键;
+    状态提示全部移到「校核备注」列(`_check_remark`)。
+    等级号为空(缺压力 / P_d > 22 MPa)时写「待确认」;自定义规格无标准 DN 时
+    DN 段用 Φ{外径};两者都不允许把 Python 的 None 拼成字面 ``-None``。
     """
-    return f"{row['medium_code']}-{row['stream']}-{_num(row['dn'], 0)}-{row['grade_code']}"
+    grade = str(row.get("grade_code") or "").strip() or "待确认"
+    dn = pipe_calc.pipe_dn_text(row) or "待确认"
+    return f"{row['medium_code']}-{row['stream']}-{dn}-{grade}"
 
 
 def _check_remark(row: dict) -> str:
     """校核备注:状态提示与风险预警集中一列(§17.8),按轻重排序,分号隔开。"""
     marks: list[str] = []
     dn = row.get("dn") or 0
+    is_vacuum = bool(row.get("is_vacuum", row.get("vacuum")))
+    if is_vacuum:
+        marks.append("真空工况（按外压筛查，管道等级按PN10配级）")
     if row.get("hot_vacuum") and dn >= 400:
         marks.append("高温真空:外压失稳复核")
     if row.get("vacuum_stiffener"):
         marks.append("需设外压加强圈,严禁全真空抽吸")
-    elif row.get("vacuum"):
-        marks.append("真空管:外压失稳复核")
     if row.get("hp_ss_upgraded"):
         marks.append("高压不锈钢升R1E(按[σ]^t公式壁厚)")
     if row.get("stratified_risk"):
@@ -110,9 +115,10 @@ def _check_remark(row: dict) -> str:
     # §19.3 DN1000 5% 容差:内径与超径百分比都给出,便于回查原流股
     if row.get("oversize_tolerated"):
         d_i = float(row.get("inner_d_mm") or 0.0)
-        pct = pipe_calc.dn1000_oversize_pct(d_i)
+        base = (float(row.get("od_mm") or 0.0) - 2.0 * float(row.get("wall_mm") or 0.0)) or None
+        pct = pipe_calc.dn1000_oversize_pct(d_i, base_inner_mm=base)
         marks.append(f"流速略超上限(内径{d_i:.1f}mm),建议复核压降")
-        marks.append(f"计算内径略超DN1000上限(约{pct:.1f}%),需复核实际压降")
+        marks.append(f"计算内径超DN1000实际内径(约{pct:.1f}%),需复核实际压降")
     # §19.4 深冷 / 高温应力与韧性提示(按操作温度)。两组措辞都列出,避免漏读。
     if row.get("low_temp"):
         marks.append("低温工况:复核焊缝低温韧性及低温螺栓选型")
@@ -120,6 +126,9 @@ def _check_remark(row: dict) -> str:
     if row.get("high_temp"):
         marks.append("高温管线:需做柔性应力分析(热膨胀补偿)")
         marks.append("高温管线(≥300℃):需做热膨胀柔性应力分析")
+    for note in ("人工DN", "自定义规格"):
+        if note in (row.get("warnings") or []):
+            marks.append(note)
     return ";".join(marks)
 
 
@@ -133,8 +142,9 @@ def _notes(res: dict) -> list[str]:
         "注 1:设计压力按 max(操作表压×1.15,操作表压+0.15 MPa,1.0 MPa) 取;壁厚依 "
         "GB/T 20801.3 计算,计入壁厚负偏差与腐蚀裕量后圆整到该外径的标准壁厚序列,"
         "并按管道的公称压力(PN)复核最小壁厚。",
-        "注 2:绝压 < 95.0 kPa(表压 < −6.3 kPa)归真空管,等级代号用 V(非 H,免与高压混淆);"
-        "1 bar = 100 kPa 的常压微压降流股仍按常压,不判真空。"
+        "注 2:绝压 < 95.0 kPa(表压 < −6.3 kPa)归真空管,按布尔 is_vacuum 判定,"
+        "等级代号默认 L(PN1.0;法兰/阀门按最低压力等级 PN10 配级),不再借用 HG/T 20519 中 "
+        "V(=25.0 MPa)的高压代号;1 bar = 100 kPa 的常压微压降流股仍按常压,不判真空。"
         "内压按最小壁厚,并另按外压 0.1 MPa 失稳算最小壁厚,实际支撑跨距需专项复核;"
         "负压 / 真空液相吸入管线按防闪蒸限速(≤ 0.8 m/s)放大管径;"
         "操作 ≥ 250 ℃ 且 DN ≥ 400 的真空管壁厚下限 10 mm,DN ≥ 700 真空焊接管需设外压加强圈;"
@@ -148,7 +158,7 @@ def _notes(res: dict) -> list[str]:
         "计算内径 996–1045 mm(DN1000 内径 996 mm 的 +5% 容差)仍选 DN1000 焊接管 × 10 mm,"
         "在备注标注流速略超上限并建议复核压降,不再踢入未选型清单。"
         "液相 80–105 ℃ 且绝压 95–115 kPa 的吸入侧按防汽蚀限速 0.8 m/s"
-        "(泵排出口及升压管线不适用);绝压 4.7–5.6 MPa 的不锈钢统一升 R1E,"
+        "(泵排出口及升压管线不适用);绝压 4.7–6.4 MPa 的不锈钢统一升 R1E,"
         "壁厚按 t = PD/(2[σ]^t·E_j+P)+C 动态计算(小口径不小于 3 mm),防止高温薄壁倒挂。",
         "注 4:管路编号(介质代号-流股号-DN-等级号)为唯一主键,可直接用于 BOM 材料统计与"
         "PID 匹配;状态提示与风险预警集中在「校核备注」列。已按 Aspen 流股类型过滤非物流"
@@ -183,6 +193,8 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
     pres = pipe_calc.build(
         [dict(s) for s in streams], [dict(b) for b in blocks], [dict(c) for c in connections]
     )
+    runs, _run_sources = db.pipe_runs_for(conn, case_id, [dict(s)["name"] for s in streams])
+    pres["rows"] = pipe_calc.apply_pipe_run_overrides(pres["rows"], runs)
 
     by_name = {s["name"]: dict(s) for s in streams}
 
@@ -245,7 +257,7 @@ def build_pipe_docx(conn, case_id: int) -> tuple[bytes, str]:
                 _num(value_of(name, "pressure_bar", 100.0), 1),
                 PHASE_TEXT.get(r["phase"], r["phase"]),
                 _num(r["vol_flow_m3h"], 2),
-                _num(r["dn"], 0),
+                pipe_calc.pipe_dn_text(r) or "—",
                 _num(r["wall_mm"], 1),
                 r["material"] or "",
                 r.get("pipe_type") or "无缝",

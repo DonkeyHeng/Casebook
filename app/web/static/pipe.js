@@ -51,10 +51,10 @@ const PIPE_PHASE_TEXT = { liquid: "液体", gas: "气体", two: "气液共存" }
    这张表只是给人看的说明,不用它决定标哪一格) */
 const PIPE_CODE_TEXT = {
   V1: "编号口径与 DN 不一致", V2: "实际流速超推荐区间", V3: "所需壁厚超过标准壁厚",
-  V4: "等级号压力不足", V5: "两相按单相流速选型", V6: "真空流股(V1E)",
+  V4: "等级号压力不足", V5: "两相按单相流速选型", V6: "真空流股(L1E/PN10配级)",
   V7: "超出材料使用温度", V8: "泵出口按泵入口流速", V9: "高温未加保温代号",
   V10: "非标准流水号", V11: "真空 DN≥150 外压失稳需复核", V12: "大口径两相分层流风险",
-  V13: "高压不锈钢升 R1E",
+  V13: "高压不锈钢升 R1E", V15: "缺/非法操作压力",
 };
 
 /* 列定义:group=calc 的列勾选「显示计算过程」才显示 —— 那一组就是每个数字怎么来的 */
@@ -1003,10 +1003,17 @@ function pipeCellValue(row, col, ctx) {
     case "vol_flow": return fmt(row.vol_flow_m3h, 2);
     case "velocity": return fmt(pipeVelocity(row), 2);
     case "dn": {
-      if (!line) return row.dn === null || row.dn === undefined ? "—" : `DN${row.dn}`;
+      if (!line) {
+        if (row.dn !== null && row.dn !== undefined) return `DN${row.dn}`;
+        if (row.spec_source === "custom" && row.od_mm) return `Φ${fmt(row.od_mm, 1)}`;
+        return "—";
+      }
       const manual = line.dn_source === "manual" || line.dn_source === "custom";
-      const text = line.dn === null || line.dn === undefined ? "—" : `DN${line.dn}`;
-      return `${text}${manual ? ' <span class="badge warn" title="人工 DN,已冻结,不随管道页参数变">人工</span>' : ""}`;
+      const text = line.dn !== null && line.dn !== undefined
+        ? `DN${line.dn}`
+        : (line.dn_source === "custom" && line.od_mm ? `Φ${fmt(line.od_mm, 1)}` : "—");
+      const label = line.dn_source === "custom" ? "自定义" : "人工";
+      return `${text}${manual ? ` <span class="badge warn" title="${label}规格,已冻结,不随管道页参数变">${label}</span>` : ""}`;
     }
     case "pump_side": {
       if (!line) return '<span class="muted">—</span>';

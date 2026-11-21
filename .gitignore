@@ -87,3 +87,6 @@ desktop.ini
 
 # ---- 项目专属的禁词 / 放行规则(本地,不公开) ----
 .public-safe.local
+
+# DOCX 改版过程的本地工作目录(中间产物,不入库)
+.docx_*_work/

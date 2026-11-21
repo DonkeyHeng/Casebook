@@ -110,6 +110,7 @@ PUMP_HEADERS = (
     "效率 %",
     "轴功率 kW",
     "建议电机 kW",
+    "电机功率口径",
     "进口压力 bar",
     "出口压力 bar",
     "压升 bar",
@@ -134,6 +135,7 @@ PUMP_WIDTHS = (
     10,
     12,
     14,
+    28,
     14,
     14,
     12,
@@ -194,11 +196,21 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
         }
 
         def npsh(b):
-            return _r(pump_rules.npsh_available_m(b["p_in_bar"], b["pv_bar"], b["rho_kgm3"]), 2)
+            return _r(
+                pump_rules.npsh_available_m(
+                    b["p_in_bar"], b["pv_bar"], b["rho_kgm3"], b["pump_vap_frac"]
+                ),
+                2,
+            )
 
         def line_cells(b, side):
             line = (lines_by_block.get(b["name"]) or {}).get(side) or {}
             return _r(line.get("hf_m"), 2), line.get("dn")
+
+        def pump_message(b):
+            lines = lines_by_block.get(b["name"]) or {}
+            warns = (lines.get("totals") or {}).get("warnings") or []
+            return "；".join(x for x in [b["message"], *warns] if x)
 
         headers = list(PUMP_HEADERS)
         widths = list(PUMP_WIDTHS)
@@ -207,6 +219,7 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
             lines = lines_by_block.get(b["name"]) or {}
             suction_hf, suction_dn = line_cells(b, "suction")
             discharge_hf, discharge_dn = line_cells(b, "discharge")
+            motor = (lines.get("totals") or {}).get("motor") or {}
             rows.append(
                 [
                     b["name"],
@@ -215,7 +228,8 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
                     _r(b["head_m"], 2),
                     None if b["pump_eff"] is None else _r(b["pump_eff"] * 100, 1),
                     _r(b["power_kw"], 2),
-                    b["motor_kw"],
+                    motor.get("kw") if motor else b["motor_kw"],
+                    (motor.get("power_source") or "") if motor else "Aspen轴功率（历史建议值）",
                     b["p_in_bar"],
                     b["p_out_bar"],
                     b["dp_bar"],
@@ -230,7 +244,7 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
                     discharge_dn,
                     discharge_hf,
                     _r((lines.get("totals") or {}).get("hf_m"), 2),
-                    b["message"],
+                    pump_message(b),
                 ]
             )
     else:

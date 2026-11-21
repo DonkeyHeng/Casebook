@@ -28,6 +28,16 @@ def test_units() -> None:
         ("volume_flow", 465.043291, "l/min", 27.90259746),
         ("volume_flow", 9.68000453, "cum/hr", 9.68000453),
         ("pressure", 3.95, "bar", 3.95),
+        # 功率:Aspen 按模型单位集给 W/MW/kJ/hr/kcal/hr/Btu/hr,一律归到 kW
+        ("power", 1.0, "W", 0.001),
+        ("power", 1.0, "MW", 1000.0),
+        ("power", 1.0, "kJ/hr", 1.0 / 3600.0),
+        ("power", 1.0, "kcal/hr", 0.001163),
+        ("power", 1.0, "Btu/hr", 0.0002930711),
+        # Aspen 的 ton 是短吨(2000 lb),tonne/t 才是公吨;三者不能混用。
+        ("mass_flow", 1.0, "t/hr", 1000.0),
+        ("mass_flow", 1.0, "tonne/hr", 1000.0),
+        ("mass_flow", 1.0, "ton/hr", 907.18474),
     ]
     for quantity, value, unit, want in cases:
         got = u.convert(quantity, value, unit)
@@ -202,6 +212,21 @@ def test_reader_fixture() -> None:
     check_close("夹具:泵 p_v(V15:PBUB\\MIXED\\TOTAL)", pump["pv_bar"], 0.53383137)
     check_close("夹具:泵粘度(MUMX\\MIXED\\TOTAL, cP 原样)", pump["mu_cp"], 0.483)
     check_close("夹具:泵密度优先用进口 m/V(7000/8)", pump["rho_kgm3"], 875.0)
+    negative = reader.read_case(
+        fake_session.FakeSession(
+            fake_session.patch(
+                tree,
+                r"\Data\Streams\S05\Output\RES_MASSFLOW",
+                value=-7000.0,
+            )
+        )
+    )
+    negative_pump = {b["name"]: b for b in negative["blocks"]}["P01"]
+    check_close(
+        "夹具:负质量流量不参与 m/V,回退 RHO_LIQ×MW_LIQ",
+        negative_pump["rho_kgm3"],
+        55.4 * 18.0,
+    )
     check_close("夹具:泵效率(无量纲原样)", pump["pump_eff"], 0.72)
     check_close("夹具:泵进口压力来自进口流股", pump["p_in_bar"], 2.0)
     check_close("夹具:泵出口压力来自出口流股", pump["p_out_bar"], 5.2)

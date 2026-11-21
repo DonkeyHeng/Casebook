@@ -9,7 +9,7 @@
 **简体中文** | [English](README-en.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.7.1](https://img.shields.io/badge/version-v1.7.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.1)
+[![Version: v1.7.2](https://img.shields.io/badge/version-v1.7.2-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.2)
 [![安装说明](https://img.shields.io/badge/安装说明-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **免责与隐私声明**
@@ -244,8 +244,9 @@ Casebook/
 
 ## 版本演进
 
-**当前最新版本：[v1.7.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.1)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+**当前最新版本：[v1.7.2](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.2)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
 
+- **v1.7.2（计算说明书复核与壁厚/材质口径修正）**：两册计算说明书按当前代码逐条复核并重建：壁厚圆整的「最小壁厚托底」标记改为只在工艺下限真正把档位抬高时置真，无可用壁厚时把「名义下限不足」与「扣负偏差后净厚不足」分开说明；PN 整档保护把厚度顶过薄壁公式适用域时给出显式提示；1Cr5Mo、9Cr1Mo 等铬钼耐热钢不再被静默判为不锈钢类别，统一转入待人工确认并告警；单位换算补齐 kJ/hr 与 lb/(ft·s)，管道页主表与 Word 管路一览表的列口径分别写明。
 - **v1.7.1（摩尔守恒自检）**：新增无反应设备的摩尔流量守恒校验，补上质量守恒看不见的一类读取问题——质量完全对得上、摩尔流量却不在同一口径时报出提示，并同时给出两端表观分子量；反应器与塔不参与判定，热流 / 公用工程流股单独说明。用例已接入离线自测，不需要 Aspen。
 - **v1.7.0（泵两侧管段联动与悬浮参数窗）**：泵参数改为页面居中的悬浮窗，顶部可直接切换泵；左侧详细参数、右侧设计扬程 / 管路阻力与选型台账并排，表头顶端对齐。设计扬程可直接关联吸入 / 排出流股在「管道」页的选型结果，管径、流速、Re、λ 与 Σhf 双向同步，人工 DN 则按管段冻结。三个区块不再折叠，默认打开当前流股详情并标明流股号；粘度读到即用黑色数值显示，只有缺读数时才标「自动」。保存两侧管段后输入值常驻页面，可继续二次修改；同时修复旧版本记录回显和重复保存 409。
 - **v1.6.0（自带窗口的桌面版与身份识别修正）**：新增桌面窗口壳 `app/desktop.py`（内置 WebView2，**不再依赖本机浏览器**，也没有黑窗控制台）：起停由窗口生命周期管理，日志固定落 `data/desktop.log`，窗口大小记在 `data/window.json`；壳内导出一律由主进程写 `data/exports/` 并自动打开文件夹，外链交给系统浏览器；左下「退出」确认后直接关闭窗口。新增 `--data-dir` 参数，包版与源码版可共用同一份 `data/`（标准表、工况库不再各存一份）；标准表缺失时泵内径改为明示「无从算起」而不是静默留空。模型身份改为**内容哈希 + 文件名双键兜底**：模型改过之后手填 CAS、泵选型台账不再错位。内置示例工况刷新为最近一次读取的全流程快照（121 流股 / 77 模块 / 214 连接 / 401 塔板级 / 2178 组成 / 7 台泵，$p_v$ 齐全，组分字典带 18 条 CAS），并清空本机模型哈希，示例可移植；修掉空库首屏「载入示例工况」按钮失效与示例构建脚本的列名取值错误。

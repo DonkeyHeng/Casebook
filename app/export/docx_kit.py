@@ -343,7 +343,7 @@ def _header_block(table, headers, size, header_extra, meta, fill):
         header_row = table.rows[0]
 
     for index, head in enumerate(headers):
-        fill(header_row.cells[index], head, True)
+        fill(header_row.cells[index], head, True, split_unit=True)
         _shade(header_row.cells[index], meta["light"])
         if index == 0:
             header_row.cells[index].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.LEFT
@@ -483,15 +483,27 @@ def _three_line(
 
     _table_borders(table)
 
-    def fill(cell, text, bold=False, align=WD_ALIGN_PARAGRAPH.CENTER, color=None):
+    def fill(
+        cell,
+        text,
+        bold=False,
+        align=WD_ALIGN_PARAGRAPH.CENTER,
+        color=None,
+        split_unit=False,
+    ):
         para = cell.paragraphs[0]
         para.alignment = align
         para.paragraph_format.space_after = Pt(0)
         para.paragraph_format.line_spacing = 1.0  # 继承 1.22 会把长表撑高一倍
         raw = "" if text is None else str(text)
         # 「ΣHin|kW」这种写法渲染成两行:名称在上、单位在下(7.5pt 灰),
-        # 各列表头等高,不会出现有的折行有的不折
-        name, _, unit = raw.partition("|")
+        # 各列表头等高,不会出现有的折行有的不折。
+        # 只对表头生效:表体里的竖线是内容(正则 `a|b`、绝对值 `|x|`),
+        # 一律原样保留,不能在这里变成换行。
+        if split_unit:
+            name, _, unit = raw.partition("|")
+        else:
+            name, unit = raw, ""
         run = _font(para.add_run(name), size, bold)
         if color:
             run.font.color.rgb = _rgb(color)

@@ -70,7 +70,7 @@ export const BLOCK_COLS = {
   flow:    { key: "flow_m3h", label: "流量 m³/h", num: true, digits: 2, scaled: true, unit: "m³/h" },
   head:    { key: "head_m", label: "扬程 m", num: true, digits: 2, scaled: true, unit: "m" },
   eff:     { key: "pump_eff", label: "效率 %", num: true, digits: 1, percent: true },
-  motor:   { key: "motor_kw", label: "建议电机 kW", num: true, digits: 1, tip: "motor" },
+  motor:   { key: "motor_suggested_kw", label: "建议电机 kW", num: true, digits: 1, tip: "motor" },
   npsh:    { key: "npsh", label: "NPSHₐ m", num: true, digits: 2, npsh: true, tip: "npsh" },
   // p_v:读取工况时自动取 Aspen 进口流股的泡点压力;空着才需手填(见 docs/aspen-field-map.md §13.2)
   pv:      { key: "pv_bar", label: "p_v bar", num: true, pvInput: true },
@@ -193,13 +193,17 @@ export async function loadPumpSpec() {
 /* NPSHₐ = (p_进口 − p_v) × 10⁵ ÷ (ρ·g)
    p_v 优先用 Aspen 进口流股的泡点压力(读取工况时已填进 pv_bar),手填值覆盖它;
    缺 p_v、进口两相、缺密度 → 返回 null(显示「—」),绝不拿 0 顶替。
+   两相门禁与后端 app/design/pump.npsh_available_m 同一阈值(app/values.py 的
+   TWO_PHASE_VAP_EPS = 1e-4),三处(管道相态、泵 NPSH、读取层 ρ)同步改。
    泡点进料时 p_v ≈ p_in,结果会有 -0.0 这种浮点噪声,归零免得显示成「-0.00」。 */
+const TWO_PHASE_VAP_EPS = 1e-4;   // 与 app/values.py 同一常量
+
 export function pumpNpsh(row) {
   const spec = state.pumpSpec;
   const pv = row.pv_bar;
   if (!spec || pv === null || pv === undefined || Number.isNaN(Number(pv))) return null;
   const vap = row.pump_vap_frac;
-  if (vap !== null && vap !== undefined && vap > 0.001) return null;
+  if (vap !== null && vap !== undefined && vap > TWO_PHASE_VAP_EPS) return null;
   if (row.p_in_bar === null || row.p_in_bar === undefined) return null;
   if (!row.rho_kgm3) return null;
   const value = ((row.p_in_bar - Number(pv)) * 1e5) / (row.rho_kgm3 * spec.g);
@@ -218,7 +222,9 @@ export function pvSourceText(row) {
 export function npshWhy(row) {
   if (!state.pumpSpec) return "泵口径常量没取到(后端可能是旧版本)";
   const vap = row.pump_vap_frac;
-  if (vap !== null && vap !== undefined && vap > 0.001) return "进口是两相,不计算汽蚀余量";
+  if (vap !== null && vap !== undefined && vap > TWO_PHASE_VAP_EPS) {
+    return "进口是两相,不计算汽蚀余量";
+  }
   if (row.pv_bar === null || row.pv_bar === undefined) {
     return "缺 p_v:模型没给出泡点压力 —— 物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况;也可直接在这格手填";
   }

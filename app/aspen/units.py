@@ -57,7 +57,8 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "lb/hr": (0.45359237, 0.0),
         "lb/s": (1632.932532, 0.0),
         "t/hr": (1000.0, 0.0),  # 公吨
-        "ton/hr": (1000.0, 0.0),  # Aspen 里按公吨处理
+        "tonne/hr": (1000.0, 0.0),  # 公吨;Aspen 用 tonne 明确区别于 ton
+        "ton/hr": (907.18474, 0.0),  # 美制短吨(2000 lb);Aspen 的 ton 不是公吨
     },
     "mole_flow": {
         "kmol/hr": (1.0, 0.0),
@@ -95,6 +96,10 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "kcal/hr": (0.001163, 0.0),  # 与 IT 卡一致
         "kcal/s": (4.1868, 0.0),
         "btu/hr": (0.0002930711, 0.0),
+        # kJ 系:Aspen 的 ENTHAL 与部分电力/热流节点会直接给 kJ/hr、kJ/s
+        "kj/hr": (1.0 / 3600.0, 0.0),
+        "kj/h": (1.0 / 3600.0, 0.0),
+        "kj/s": (1.0, 0.0),
         "hp": (0.745699872, 0.0),
         "j/s": (0.001, 0.0),
     },

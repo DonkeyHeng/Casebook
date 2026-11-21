@@ -20,9 +20,24 @@ from __future__ import annotations
 
 import math
 
-# 电机效率(默认值,可被调用方覆盖)与裕量
+# 「两相」的统一定义:进口汽化率超过它,管道侧按两相选型、泵侧不计算 NPSHₐ、
+# 读取层不再拿 m/V 当液相密度。一个常量管三处,免得同一流股两处判成不同相态。
+TWO_PHASE_VAP_EPS = 1e-4
+
+# 电机效率:只用于「电功率 → 轴功率」的折算(ELEC_POWER 回退时),不是选档时的除数。
+# 电机铭牌标的是轴输出功率,所以轴功率 → 电机功率只再乘裕量。
 MOTOR_EFF = 0.95
+#: 设计扬程余量(泵选型扬程 ×1.10),与电机裕量不是一回事,不要混用。
 DEFAULT_MARGIN = 1.10
+#: 电机裕量分段(参照 API 610 / GB/T 3215):小功率档留更大余量,
+#: 大功率档按 1.10。显式传 margin 时仍以调用方为准,兼容旧单测与项目口径。
+MOTOR_MARGIN_TIERS: tuple[tuple[float | None, float], ...] = (
+    (22.0, 1.25),  # power_kw < 22 kW
+    (55.0, 1.15),  # 22 ≤ power_kw ≤ 55 kW
+    (None, 1.10),  # power_kw > 55 kW
+)
+# 传动效率:直联(联轴器)取 1.0;皮带 ≈0.95、齿轮箱按厂家样本。默认按直联算。
+TRANSMISSION_EFF_DIRECT = 1.0
 
 # 常用低压/高压电机功率档(kW)。来源是工程常用序列,不是某个标准的原文。
 MOTOR_KW: tuple[float, ...] = (
@@ -55,7 +70,10 @@ MOTOR_KW: tuple[float, ...] = (
     400.0,
 )
 
-MOTOR_RULE = "建议电机 = 轴功率 ÷ 电机效率(0.95) × 裕量(1.10),向上取标准档位"
+MOTOR_RULE = (
+    "建议电机 = 基准功率 ÷ 传动效率(直联 1.0) × 分段裕量"
+    "(<22 kW 1.25;22–55 kW 1.15;>55 kW 1.10),向上取标准档位"
+)
 
 
 def mass_density_kgm3(rho_molar_kmol_m3, mw_kg_kmol):
@@ -88,12 +106,37 @@ def sanitize_pv_bar(p_v_bar) -> float | None:
     return v
 
 
+def motor_margin(power_kw) -> float:
+    """按基准功率取电机裕量(API 610 / GB/T 3215 分段口径)。
+
+    分段点按**基准功率**(设计轴功率或 Aspen 折回的轴功率)判断,而不是乘完
+    裕量后的需求功率;功率非法时给小功率档余量,由 `pick_motor` 另行拦截。
+    """
+    try:
+        power = float(power_kw)
+    except (TypeError, ValueError):
+        return 1.25
+    if power < MOTOR_MARGIN_TIERS[0][0]:
+        return MOTOR_MARGIN_TIERS[0][1]
+    if power <= MOTOR_MARGIN_TIERS[1][0]:
+        return MOTOR_MARGIN_TIERS[1][1]
+    return MOTOR_MARGIN_TIERS[2][1]
+
+
 def pick_motor(
-    shaft_kw, margin: float = DEFAULT_MARGIN, motor_eff: float = MOTOR_EFF
+    shaft_kw,
+    margin: float | None = None,
+    transmission_eff: float = TRANSMISSION_EFF_DIRECT,
 ) -> tuple[float | None, str]:
     """轴功率 → 建议电机功率 + 一句可展示的推导。
 
-    返回 (档位 kW 或 None, 说明)。功率 ≤ 0 视为反向工况,不选电机。
+    电机铭牌的功率是**轴输出功率**,所以这里只除传动效率(直联 1.0)再乘裕量;
+    电机效率 0.95 只在「电功率折回轴功率」时用(见 app/aspen/reader.py),
+    两者不是同一个折算,混用会把档位系统性放大 1/0.95。
+
+    `margin` 不传时走 `motor_margin()` 的分段裕量;显式传入(如 1.10)时按旧口径,
+    便于老单测与特殊项目覆写。返回 (档位 kW 或 None, 说明)。
+    功率 ≤ 0 视为反向工况,不选电机。
     """
     if shaft_kw is None:
         return None, "缺轴功率"
@@ -103,11 +146,15 @@ def pick_motor(
         return None, "轴功率不是数字"
     if power <= 0:
         return None, f"反向工况(轴功率 {power:.2f} kW ≤ 0),不选电机"
+    used_margin = motor_margin(power) if margin is None else margin
     try:
-        need = power / float(motor_eff) * float(margin)
+        need = power / float(transmission_eff) * float(used_margin)
     except (TypeError, ValueError, ZeroDivisionError):
-        return None, "电机效率或裕量不合法"
+        return None, "传动效率或裕量不合法"
     for kw in MOTOR_KW:
         if need <= kw:
-            return kw, (f"{power:.2f} ÷ {motor_eff} × {margin} = {need:.2f} kW → 取 {kw} kW 档")
+            return kw, (
+                f"{power:.2f} ÷ {transmission_eff:g} × {used_margin:g} = "
+                f"{need:.2f} kW → 取 {kw} kW 档"
+            )
     return None, f"需 {need:.1f} kW,超出档位表上限({MOTOR_KW[-1]} kW)"

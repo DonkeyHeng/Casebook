@@ -1,4 +1,4 @@
-"""选型结果校验 V1–V14 与实际流速反算。
+"""选型结果校验 V1–V15（V1 为历史校验、无产出方；V14 未实现）与实际流速反算。
 
 `validate()` 只读一张已生成的表，不做任何选型计算，也不改行；
 每条 finding 带 `field`，前端据此只标单元格而不是整行。
@@ -25,7 +25,7 @@ def actual_velocity(vol_flow_m3h: float, inner_d_mm: float) -> float | None:
 def validate(
     rows: Iterable[Mapping[str, Any]], options: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
-    """对选型结果跑 §6 的 V1–V9,只陈述事实,不给"该怎么改模型"的建议。
+    """对选型结果跑 §6 的 V1–V15,只陈述事实,不给"该怎么改模型"的建议。
 
     返回 `{"findings": [...], "summary": {"error": n, "warn": n}}`,
     每条 finding 是 `{stream, code, level, message, field}`。
@@ -54,16 +54,33 @@ def validate(
         v_used = r.get("velocity_ms")
         phase = r.get("phase")
 
-        # V1 编号里的 DN ≠ 公称直径列(没有编号的工况跳过)
+        # V1 历史校验:行里没有 pipe_no 的产出方(selection.build 不写该字段),
+        # 常规流程恒不触发;仅为外部手工注入 pipe_no 的旧数据保留。编号格式若真是
+        # 「介质-流股-DN-等级号(-绝热)」,DN 在第 3 段,但这里仍按末段解析,不要据此
+        # 判断现网编号——真要用先给行加 pipe_no 生成,再改成 parts[2] 并补单测。
         pipe_no = r.get("pipe_no")
         if pipe_no:
             tail = str(pipe_no).split("-")[-1]
             if tail.isdigit() and dn is not None and int(tail) != int(dn):
                 add(name, "V1", "error", f"管道编号里的口径 {tail} 与选出的 DN{dn} 不一致", "dn")
 
-        # V5 气液共存但按单相流速选型(先判,好在 V2 里避免同一个问题报两次)
+        # V15 压力缺失/非法:选型表只给几何 DN,不给壁厚与等级号;这里报 error,
+        # 不能让它以 H1E / L1E 的假结论出现在表里。
+        if r.get("design_pressure_mpa") is None:
+            add(
+                name,
+                "V15",
+                "error",
+                str(r.get("pressure_error") or "缺操作压力，无法计算设计压力、壁厚与等级号"),
+                "design_pressure_mpa",
+            )
+
+        # V5 气液共存但按单相流速选型(先判,好在 V2 里避免同一个问题报两次)。
+        # 泵入口/汽蚀限速是**刻意**用 0.5–1.0 m/s 的,不能拿两相 5–10 m/s 去要求它,
+        # 否则每一条两相进口泵管都会挂一条无法消解的告警。
+        pump_limited = bool(r.get("pump_inlet") or r.get("cavitation_limited"))
         v5_hit = False
-        if phase == "two" and v_used is not None:
+        if phase == "two" and v_used is not None and not pump_limited:
             lo2, hi2 = VELOCITY_RANGE["two"]
             if not (lo2 - 1e-9 <= v_used <= hi2 + 1e-9):
                 v5_hit = True
@@ -81,7 +98,9 @@ def validate(
         if id_mm:
             area = math.pi * (id_mm / 1000.0) ** 2 / 4.0
             v_act = (float(r["vol_flow_m3h"]) / 3600.0) / area if r.get("vol_flow_m3h") else None
-        key = "pump_inlet" if (r.get("pump_inlet") or r.get("cavitation_limited")) else phase
+        key = "pump_inlet" if pump_limited else phase
+        # 报文案要用**实际用的那套区间**的名字,否则两相泵入口会写成「two 区 0.5–1.0」
+        label = "泵入口" if key == "pump_inlet" else phase
         lo, hi = VELOCITY_RANGE.get(key, (0.0, float("inf")))
         # 两相流"慢下来"是刻意的:管径被 ρv² 或上游液相管径抬高之后,实际流速
         # 本来就会掉到 5 m/s 以下。这时再报"低于推荐区间"是自相矛盾的噪音,
@@ -93,29 +112,31 @@ def validate(
                 name,
                 "V2",
                 "warn",
-                f"实际流速 {v_act:.2f} m/s 超出 {phase} 推荐区间 {lo:g}–{hi:g} m/s"
-                + ("(泵入口)" if r.get("pump_inlet") else ""),
+                f"实际流速 {v_act:.2f} m/s 超出{label}推荐区间 {lo:g}–{hi:g} m/s",
                 "velocity",
             )
 
-        # V3 计算壁厚 + 附加量 > 所选标准壁厚
+        # V3 扣负偏差后仍须够:非 R1E 看 S−C1, R1E 的 C1 已除入 t_req(c1_mm=0)
         need = r.get("t_required_mm")
-        if need is not None and wall is not None and need > wall + 1e-9:
+        c1 = r.get("c1_mm") or 0.0
+        if need is not None and wall is not None and wall - c1 < need - 1e-9:
             add(
                 name,
                 "V3",
                 "error",
-                f"所需壁厚 {need:.2f} mm 超过所选标准壁厚 {wall:g} mm",
+                f"扣负偏差后 {wall - c1:.2f} mm(S={wall:g} mm, C1={c1:.2f} mm)"
+                f" 小于所需壁厚 {need:.2f} mm",
                 "wall_mm",
             )
 
-        # V4 等级号的压力代号 < 设计压力(真空代号 V 不参与 PN 数值比较)
+        # V4 等级号的压力代号 < 设计压力(真空流股按布尔 is_vacuum 跳过 PN 数值比较)
         code = r.get("grade_code") or ""
+        is_vacuum = bool(r.get("is_vacuum", r.get("vacuum")))
         if code and r.get("design_pressure_mpa") is not None:
-            prefix = code[:1]
-            if prefix == pipe_data.VACUUM_PN_CODE:
-                pass  # V = 真空管路,按外压校核,不与 PN 表比大小
+            if is_vacuum:
+                pass  # 真空按外压校核,等级代号只作 PN10 配级,不与 PN 表比大小
             else:
+                prefix = code[:1]
                 pn = pipe_data.PN_CODES.get(prefix)
                 if pn is None:
                     add(
@@ -138,8 +159,14 @@ def validate(
         # V5 已在前面先判(与 V2 互斥,避免同一个问题报两次)
 
         # V6 真空流股
-        if r.get("vacuum"):
-            add(name, "V6", "warn", "真空流股:按外压 0.1 MPa 另行校核", "design_pressure_mpa")
+        if is_vacuum:
+            add(
+                name,
+                "V6",
+                "warn",
+                "真空工况（按外压筛查，管道等级按PN10配级）:另按外压 0.1 MPa 校核",
+                "design_pressure_mpa",
+            )
 
         # V7 超出材料使用温度
         dt = r.get("design_temp_c")
@@ -156,8 +183,9 @@ def validate(
         if r.get("pump_outlet") and r.get("pump_inlet"):
             add(name, "V8", "error", "泵出口流股被按泵入口流速选型", "velocity")
 
-        # V9 高温但没加保温代号
-        if dt is not None and dt >= hot_c and not r.get("insulation"):
+        # V9 高温但没加保温代号。grade_code 为空(缺操作压力或 P_d > 22.0 MPa)
+        # 时与 V4 一致跳过:没有等级号就谈不上“等级号缺 -H”,不能误报。
+        if code and dt is not None and dt >= hot_c and not r.get("insulation"):
             add(
                 name,
                 "V9",
@@ -177,13 +205,13 @@ def validate(
             )
 
         # V11 真空 DN≥150:外压失稳需专项复核(§17.1)
-        if r.get("vacuum") and dn is not None and dn >= pipe_data.VACUUM_EXTERNAL_MIN_DN:
+        if is_vacuum and dn is not None and dn >= pipe_data.VACUUM_EXTERNAL_MIN_DN:
             add(
                 name,
                 "V11",
                 "warn",
                 f"真空 DN{dn}:已按外压失稳算最小壁厚 {r.get('external_wall_mm')} mm,"
-                "仍需按实际支撑跨距复核",
+                "管道等级按PN10配级;仍需按实际支撑跨距复核",
                 "wall_mm",
             )
 
@@ -203,7 +231,8 @@ def validate(
                 name,
                 "V13",
                 "warn",
-                "高压(4.7–5.6 MPa)不锈钢:等级升 R1E,按 [σ]^t 公式重算壁厚,避免高温薄壁倒挂",
+                "高压不锈钢(操作绝压 4.7–6.4 MPa，P_d≤10.0 MPa):等级升 R1E,"
+                "按 [σ]^t 公式重算壁厚,避免高温薄壁倒挂",
                 "grade_code",
             )
 

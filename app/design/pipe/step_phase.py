@@ -19,7 +19,7 @@ def phase_of(vap_frac: float | None) -> str:
     """
     if vap_frac is None:
         return "liquid"
-    if vap_frac < PHASE_EPS:
+    if vap_frac <= PHASE_EPS:
         return "liquid"
     if vap_frac > 1.0 - PHASE_EPS:
         return "gas"

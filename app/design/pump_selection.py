@@ -57,6 +57,7 @@ def compute_view(
         hf = _num(totals.get("hf_m"))
         total = _num(totals.get("design_head_m"))
         selection_head = _num(totals.get("selection_head_m"))
+        reverse = bool(totals.get("reverse"))
         npsh_a = _num(npsh.get("device_m"))
         corrected = _num(npsh.get("corrected_m"))
         state = str(npsh.get("state") or "unknown")
@@ -70,12 +71,14 @@ def compute_view(
         dz = _num(d.get("dz_m"))  # 位压头,m
         hf = _num(d.get("hf_m"))  # 管路阻力,m
         total = head + dz + hf if None not in (head, dz, hf) else None
-        selection_head = math.ceil(total * DESIGN_MARGIN) if total is not None else None
+        reverse = total is not None and total <= 0
+        selection_head = pump_rules.selection_head_m(total)
 
         p_in = _num(b.get("p_in_bar"))
         p_v = _num(b.get("pv_bar"))
         rho = _num(b.get("rho_kgm3"))
-        npsh_a = pump_rules.npsh_available_m(p_in, p_v, rho)
+        vap = _num(b.get("pump_vap_frac"))
+        npsh_a = pump_rules.npsh_available_m(p_in, p_v, rho, vap)
         corrected = None  # 旧路径没有吸入段拆分,修正值不给
 
         npshr = _num(s.get("npshr_m"))
@@ -84,6 +87,8 @@ def compute_view(
         margin_default = margin_given is None
 
         missing: list[str] = []
+        if vap is not None and vap > pump_rules.TWO_PHASE_VAP_LIMIT:
+            missing.append("两相进口")
         if p_v is None:
             missing.append("p_v")
         if p_in is None:
@@ -107,6 +112,15 @@ def compute_view(
                 f"{'≤' if state == 'ok' else '>'} NPSHₐ {npsh_a:g} m"
             )
 
+    motor = ((lines or {}).get("totals") or {}).get("motor") or {}
+    warnings = list(((lines or {}).get("totals") or {}).get("warnings") or [])
+    if _num(b.get("pump_vap_frac")) is None:
+        vap_note = "缺汽化率，暂按液相估算，请复核"
+        if vap_note not in reason:
+            reason = f"{reason}；{vap_note}" if reason else vap_note
+        if vap_note not in warnings:
+            warnings.append(vap_note)
+
     return {
         # 实时设计点(全部来自当前工况,不落库)
         "flow_m3h": _num(b.get("flow_m3h")),
@@ -115,10 +129,18 @@ def compute_view(
         "hf_m": hf,
         "design_head_m": total,
         "selection_head_m": selection_head,
+        "reverse": bool(reverse),
         "pump_eff": _num(b.get("pump_eff")),
         "npsh_a_m": npsh_a,
         "npsh_a_corrected_m": corrected,
-        "motor_suggested_kw": _num(b.get("motor_kw")),
+        "motor_suggested_kw": (_num(motor.get("kw")) if motor else _num(b.get("motor_kw"))),
+        "motor_power_source": (
+            str(motor.get("power_source") or "") if motor else "Aspen轴功率（历史建议值）"
+        ),
+        "motor_basis_kw": _num(motor.get("basis_kw")) if motor else None,
+        "motor_margin": _num(motor.get("margin")) if motor else None,
+        "motor_note": str(motor.get("note") or "") if motor else "",
+        "motor_basis": str(motor.get("basis") or "") if motor else "aspen",
         # 判据与三态
         "npsh_state": state,  # ok / bad / unknown
         "npsh_reason": reason,
@@ -127,6 +149,7 @@ def compute_view(
         "margin_is_default": margin_default,
         "design_margin": DESIGN_MARGIN,
         "npsh_rule": pump_rules.NPSH_RULE,
+        "warnings": warnings,
         # 两侧明细(只有新路径才有;旧路径为空,方便页面判断)
         "lines": lines,
         "suction": (lines or {}).get("suction"),

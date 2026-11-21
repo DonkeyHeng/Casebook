@@ -28,19 +28,25 @@ def grade_code(
     """管道等级号 = 压力代号 + 顺序号(默认 1) + 材质代号,绝热代号接在后面。
 
     两个代号来自 options(§17):
-      * `vacuum=True` → 压力代号用 V(真空管路,与高压 H 区分);
+      * `vacuum=True` → 压力代号默认 L(PN1.0,真空管按最低压力等级配级);
+        真空判定由 `is_vacuum` 布尔单独承担,不靠代号字母反推;
       * `force_pn_code` → 强制升档(高压不锈钢 4.8–5.6 MPa 升 R)。
     """
     opts = options or {}
     seq = str(opts.get("sequence_no", 1))
-    if opts.get("vacuum"):
+    is_vacuum = bool(opts.get("vacuum"))
+    if is_vacuum:
         pn = str(opts.get("vacuum_pn_code", pipe_data.VACUUM_PN_CODE))
     elif opts.get("force_pn_code"):
         pn = str(opts["force_pn_code"])
     else:
         pn = pn_code_for(design_mpa)
     if pn is None:
-        return {"code": None, "note": f"设计压力 {design_mpa:g} MPa 超出 PN 代号表"}
+        return {
+            "code": None,
+            "is_vacuum": is_vacuum,
+            "note": (f"设计压力 {design_mpa:g} MPa 超出 PN 代号表，未吃 PN 保护，需专项设计"),
+        }
     suffix = ""
     auto = opts.get("auto_insulation", True)
     if not insulation and auto and design_c is not None:
@@ -52,4 +58,9 @@ def grade_code(
             insulation = "C"  # 保冷:低温管线不标,现场会当成普通管去包
     if insulation:
         suffix = f"-{insulation}"
-    return {"code": f"{pn}{seq}{material_code}{suffix}", "insulation": insulation, "note": ""}
+    return {
+        "code": f"{pn}{seq}{material_code}{suffix}",
+        "insulation": insulation,
+        "is_vacuum": is_vacuum,
+        "note": "",
+    }

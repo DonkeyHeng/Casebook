@@ -6,9 +6,13 @@
 
 from __future__ import annotations
 
+from app.values import TWO_PHASE_VAP_EPS
+
 from . import data as pipe_data
 
-PHASE_EPS = 1e-4
+#: 相态容差:与泵侧 `pump.TWO_PHASE_VAP_LIMIT`、读取层的 ρ 判定同一个常量
+#: (见 app/values.py),同一股流在管道页与泵面板不会判成不同相态。
+PHASE_EPS = TWO_PHASE_VAP_EPS
 
 
 DEFAULT_VELOCITY = {

@@ -9,7 +9,7 @@ python -m tools.selftest                    # 不装 pytest 时的薄入口（�
 python -m tools.selftest --db samples/case-23-error.db  # 追加库一致性检查
 ```
 
-2026-11-19 实测：`pytest tests/ -q` 为 56 passed；`tools.selftest` 为 910 条，带样本库一致性共 917 条。
+2026-11-21 实测：`pytest tests/ -q` 为 73 passed；`tools.selftest` 为 1191 条断言（新增说明书一致性用例）。
 
 ## 文件
 
@@ -24,6 +24,7 @@ python -m tools.selftest --db samples/case-23-error.db  # 追加库一致性检�
 | `test_pipe.py` | 管路十步选型、V1–V14 校核、标准表导入 / 版本化、管道等级表、Re / λ / Σhf |
 | `test_pump.py` | 泵派生量、p_v 读取 / 存储 / 沿用、设备表泵列、分类导出、选泵提示词 |
 | `test_pump_line.py` | 泵两侧管段：L / Σζ / ΔZ / 管件 → Σhf、缺项与三态、修正 NPSHₐ，以及 `pipe_run` / `pipe_setting` 的读写与版本冲突 |
+| `test_calc_manuals_consistency.py` | 计算说明书与 `app/design` 常量、两册公共阈值的一致性；复用 `tools/check_manual_refs.py` 检查全部交叉引用死链 |
 | `test_api.py` | HTTP 路由、请求校验、只读 GET 实跑 |
 | `test_store.py` | SQLite 表结构、模型身份、旧库迁移与库一致性 |
 | `test_tools.py` | 设备家族、塔剖面诊断、探针离线冒烟、示例库安装 |

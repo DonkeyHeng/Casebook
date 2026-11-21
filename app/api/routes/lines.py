@@ -158,6 +158,8 @@ class LineRoutes:
         wall = num("wall_override_mm", 0.1, 100.0)
         if (od is None) != (wall is None):
             raise ValueError("自定义外径与壁厚必须同时填写")
+        if od is not None and wall is not None and 2.0 * wall >= od:
+            raise ValueError("自定义规格必须满足 2×壁厚 < 外径")
         values["od_override_mm"] = od
         values["wall_override_mm"] = wall
         if values["dn_override"] is None and od is None and wall is None:
@@ -307,7 +309,7 @@ class LineRoutes:
             raise ValueError(f"牌号 {material!r} 不在已录入的表 B.1 里")
         return {
             "velocity": velocity,
-            "pressure_factor": num("pressure_factor", 0.5, 10.0),
+            "pressure_factor": num("pressure_factor", 1.0, 10.0),
             "pressure_add_mpa": num("pressure_add_mpa", 0.0, 10.0),
             "pressure_floor_mpa": num("pressure_floor_mpa", 0.0, 100.0),
             "max_dn": int(num("max_dn", 1, 10000, int)),

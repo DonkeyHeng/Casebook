@@ -87,7 +87,8 @@ export const ZHONGLIAN_URL = "https://www.cipump.com/sbxx.html";
 export function pumpSpecLine(row) {
   const margin = state.pump.margin || 1;
   const scaled = (v, d) => (v === null || v === undefined ? "—" : fmt(v * margin, d));
-  const motor = row.motor_kw === null || row.motor_kw === undefined ? "—" : fmt(row.motor_kw, 1);
+  const motorValue = row.motor_suggested_kw === undefined ? row.motor_kw : row.motor_suggested_kw;
+  const motor = motorValue === null || motorValue === undefined ? "—" : fmt(motorValue, 1);
   return `流量 ${scaled(row.flow_m3h, 2)} m³/h · 扬程 ${scaled(row.head_m, 2)} m · 配套功率 ${motor} kW`;
 }
 
@@ -144,8 +145,9 @@ export function closePumpPromptTip() {
 /* 泵参数卡:把要抄进中联表单的那几个数摆出来。余量只影响显示,不改库 */
 /* 详细参数折叠头收起时的一行摘要。缺数据走 fmt 的「—」,不拿 0 顶替。 */
 export function pumpParamsBrief(row) {
+  const motorValue = row.motor_suggested_kw === undefined ? row.motor_kw : row.motor_suggested_kw;
   return `流量 ${fmt(row.flow_m3h, 2)} m³/h · 压升扬程 ${fmt(row.head_m, 2)} m`
-    + ` · 建议电机 ${fmt(row.motor_kw, 1)} kW`;
+    + ` · 建议电机 ${fmt(motorValue, 1)} kW`;
 }
 
 export function fillPumpParamsBrief(row) {
@@ -207,8 +209,23 @@ export function openPump(block) {
          ? "没读到"
          : `原值 ${fmt(row.head_m, 2)};这只是 Δp/(ρg),不含位压头与管路阻力。`
            + "设计扬程 = 本值 + ΔZ + Σhf,见下方「设计扬程」"),
-    kv("轴功率 kW", fmt(row.power_kw, 2), "Aspen", "BRAKE_POWER,反向工况为负"),
-    kv("建议电机 kW", fmt(row.motor_kw, 1), "计算", spec ? spec.motor_rule : ""),
+    kv(
+      "轴功率 kW",
+      fmt(row.power_kw, 2),
+      row.power_source === "ELEC_POWER" ? "Aspen 电功率" : "Aspen",
+      row.power_source === "ELEC_POWER"
+        ? "ELEC_POWER(轴功率缺失);反向工况为负"
+        : "BRAKE_POWER,反向工况为负",
+    ),
+    kv(
+      "建议电机 kW",
+      fmt(row.motor_suggested_kw === undefined ? row.motor_kw : row.motor_suggested_kw, 1),
+      row.motor_power_source || "计算",
+      row.motor_note
+        || (row.power_source === "ELEC_POWER"
+          ? "轴功率缺失:电功率 × 电机效率 0.95 折回轴功率,再乘分段裕量取档"
+          : (spec ? spec.motor_rule : "")),
+    ),
     kv("效率 %", fmt(row.pump_eff == null ? null : row.pump_eff * 100, 1), "Aspen", "CEFF"),
     kv("进口压力 bar", fmt(row.p_in_bar, 3), "进口流股"),
     kv("出口压力 bar", fmt(row.p_out_bar, 3), "出口流股"),
@@ -283,7 +300,7 @@ export function bindPumpFold(box, key) {
    只作为"数管件"的辅助,勾完仍可手改 Σζ —— 不给任何默认数量,没勾就是 0。 */
 export const PUMP_FITTINGS = [
   { key: "el90", label: "90° 弯头", zeta: 0.75 },
-  { key: "gate", label: "闸阀", zeta: 0.9 },
+  { key: "gate", label: "闸阀", zeta: 0.17 }, // 全开闸阀;半开需按实际开度另计
   { key: "globe", label: "截止阀", zeta: 9.5 },
   { key: "check", label: "止回阀", zeta: 2.0 },
   { key: "reducer", label: "变径管", zeta: 0.04 },
@@ -388,16 +405,29 @@ export function refreshPumpDesignSum(row) {
     el.textContent = "压升扬程没读到,算不了";
     return;
   }
+  if (totals.reverse) {
+    el.textContent =
+      fmt(totals.design_head_m, 2) + " m · 反向/自流工况,不给选型扬程";
+    return;
+  }
   if (totals.design_head_m == null) {
     el.innerHTML =
       `${fmt(head, 2)} m + 已计阻力 ${fmt(totals.partial_hf_m, 2)} m`
       + ` + 已计 ΔZ ${fmt(totals.partial_dz_m, 2)} m · <span class="muted">两侧未齐,设计扬程不给</span>`;
     return;
   }
+  const est = totals.shaft_kw_estimate || {};
+  const estBits = [];
+  if (est.check_kw != null) estBits.push(`压升扬程 ${fmt(est.check_kw, 2)} kW`);
+  if (est.design_kw != null) estBits.push(`设计扬程 ${fmt(est.design_kw, 2)} kW`);
+  const estText = estBits.length
+    ? `<br><span class="muted">估算轴功率(照会,不参与电机选档):${estBits.join(" · ")}</span>`
+    : "";
   el.innerHTML =
     `${fmt(head, 2)} + ΔZ ${fmt(totals.dz_m, 2)} + Σhf ${fmt(totals.hf_m, 2)}`
     + ` = <b>${fmt(totals.design_head_m, 2)} m</b> · ×${PUMP_DESIGN_MARGIN} 取整 `
-    + `<b>${fmt(totals.selection_head_m, 0)} m</b><br>${npshText}`;
+    + `<b>${fmt(totals.selection_head_m, 0)} m</b><br>${npshText}`
+    + estText;
 }
 
 function lineInput(side, key, value, ph, label) {
@@ -433,11 +463,11 @@ function renderLineRow(side, label) {
     <td class="num">${dn}${manual ? ' <span class="badge warn">人工</span>' : ""}</td>
     <td class="num">${lineInput(side, "l_m", e.l_m, "未填", "管长 L")}</td>
     <td class="num">${lineInput(side, "zeta_sum", e.zeta_sum, "未填", "Σζ")}</td>
-    <td class="num" title="${esc(line.mu_source === "manual" ? "手填覆盖值" : "进口流股 MUMX(混合物粘度),自动取值")}">${
+    <td class="num" title="${esc(line.mu_source === "manual" ? "手填覆盖值" : "优先取 MUMX 混合总粘度,无 TOTAL 时回退液相粘度")}">${
       fmtVisc(line.mu_cp)}</td>    <td class="num">${lineInput(side, "dz_m", e.dz_m, "如 −1.5", "ΔZ")}</td>
     <td class="num">${line.hf_m == null
       ? `<span class="muted" title="缺 ${esc((line.missing || []).join("、"))}">—</span>`
-      : `<span title="u=${fmt(line.u_ms, 2)} m/s · Re=${fmt(line.re, 0)} · λ=${fmt(line.lam, 4)}">${
+      : `<span title="u=${fmt(line.u_ms, 2)} m/s · Re=${fmt(line.re, 0)} · λ=${fmt(line.lam, 4)}${line.lambda_note ? " · " + line.lambda_note : ""}">${
         fmt(line.hf_m, 3)}</span>`}</td>
     <td class="pump-line-state">
       <span class="badge ${line.status === "linked" ? "ok" : "warn"}"
@@ -534,13 +564,18 @@ export function renderPumpDesign(row) {
   const tablesError = state.pumpDesign.view && state.pumpDesign.view.tables_error
     ? `<p class="pump-design-note">管道选型未完成:${esc(state.pumpDesign.view.tables_error)}</p>`
     : "";
+  const flowNote = totals.flow_note
+    ? `<p class="pump-design-note">${esc(totals.flow_note)}</p>`
+    : "";
+  const warnNotes = (totals.warnings || [])
+    .map((msg) => `<p class="pump-design-note">${esc(msg)}</p>`).join("");
   const open = state.pumpDesign.openSide || "suction";
   box.innerHTML = `
     <div class="pump-block-head" title="两侧管段共用「管道」页的选型结果">
       <span class="pump-block-title">设计扬程 / 管路阻力</span>
       ${brief}
     </div>
-    ${src}${legacyNote}${tablesError}
+    ${src}${flowNote}${warnNotes}${legacyNote}${tablesError}
     <table class="pump-line-table">
       <thead><tr><th scope="col">侧</th><th scope="col">流股</th><th scope="col">DN</th>
         <th scope="col">L m</th><th scope="col">Σζ</th><th scope="col">μ cP</th><th scope="col">ΔZ m</th>
@@ -754,9 +789,9 @@ export function renderPumpSelection(row, data) {
       ${kv("流量", fmt(data.flow_m3h, 2), " m³/h")}
       ${kv("设计扬程", fmt(data.design_head_m, 2), " m")}
       ${kv("选型扬程", fmt(data.selection_head_m, 0), " m")}
-      ${kv("NPSHₐ(装置)", fmt(data.npsh_a_m, 2), " m")}
+      ${kv("NPSHₐ(进口基准)", fmt(data.npsh_a_m, 2), " m")}
       ${kv("NPSHₐ(修正)", fmt(data.npsh_a_corrected_m, 2), " m")}
-      ${kv("建议电机", fmt(data.motor_suggested_kw, 1), " kW")}
+      ${kv("建议电机", fmt(data.motor_suggested_kw, 1), ` kW · ${esc(data.motor_power_source || "计算")}`)}
     </div>
     <p class="pump-sel-state" data-state="${esc(data.npsh_state)}">
       <b>${stateText}</b> · ${esc(data.npsh_reason || "")}

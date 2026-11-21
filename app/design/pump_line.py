@@ -104,35 +104,39 @@ def _custom_wall(dn: int, od_mm: float, pipe_row: dict | None) -> tuple[float | 
     """人工 DN 时按该外径重算标准壁厚;算不出就返回 (None, 原因)。
 
     不沿用自动档位的壁厚 —— 那等于拿 DN65 的壁厚配 DN125 的管子。
-    需要设计压力与许用应力:管道页已算过(auto row 里有),没有就不给,
-    让人填「自定义外径 + 壁厚」,不猜。
+    设计压力、材质、设计温度、腐蚀裕量、真空/高温真空与 R1E 标记都取管道页
+    已算好的同一行，再交给 `pipe.design_wall_for_od` 重算，保证人工 DN 与管道页
+    壁厚口径完全一致；缺关键工况就不给，让人填「自定义外径 + 壁厚」。
     """
     if not pipe_row:
         return None, "缺设计压力 / 许用应力,无法按该 DN 重算壁厚;请填自定义外径与壁厚"
-    try:
-        from app.design.pipe import calc_wall_thickness, round_up_wall
-        from app.design.pipe import data as pipe_data
-    except Exception:  # pragma: no cover - 标准表模块导入失败时按缺数据处理
-        return None, "标准表模块不可用,无法重算壁厚"
 
     pressure = _num(pipe_row.get("design_pressure_mpa"))
     sigma = _num(pipe_row.get("stress_mpa"))
     if pressure is None or sigma is None:
         return None, "缺设计压力 / 许用应力,无法按该 DN 重算壁厚;请填自定义外径与壁厚"
-    calc = calc_wall_thickness(pressure, od_mm, sigma)
-    t_calc = _num(calc.get("t_calc_mm"))
-    if t_calc is None:
-        return None, str(calc.get("note") or "壁厚公式算不出")
-    c2 = _num(pipe_row.get("c2_mm")) or 0.0
-    t_req = t_calc + c2
-    walls = pipe_data.OD_TO_WALLS.get(float(od_mm)) or pipe_data.OD_TO_WALLS_SST.get(float(od_mm))
-    if not walls:
-        return None, f"Φ{od_mm:g} 没有已录入的标准壁厚(T2),无法重算"
-    min_wall = pipe_data.MIN_WALL_BY_DN.get(int(dn))
-    got = round_up_wall(t_req, walls, od_mm, pipe_data.DEFAULT_WALL_TOL_GRADE, min_wall)
-    wall = _num(got.get("wall_mm"))
+
+    try:
+        from app.design.pipe import design_wall_for_od
+    except Exception:  # pragma: no cover - 标准表模块导入失败时按缺数据处理
+        return None, "标准表模块不可用,无法重算壁厚"
+
+    result = design_wall_for_od(
+        float(od_mm),
+        pressure,
+        dn=int(dn),
+        material=str(pipe_row.get("material") or ""),
+        sigma=sigma,
+        design_temp_c=_num(pipe_row.get("design_temp_c")),
+        c2_mm=_num(pipe_row.get("c2_mm")) or 0.0,
+        vacuum=bool(pipe_row.get("vacuum")),
+        hot_vacuum=bool(pipe_row.get("hot_vacuum")),
+        hp_c_mm=_num(pipe_row.get("r1e_c_mm")),
+        force_pn_code="R" if pipe_row.get("hp_ss_upgraded") else None,
+    )
+    wall = _num(result.get("wall_mm"))
     if wall is None:
-        return None, str(got.get("note") or "所需壁厚超出该外径标准序列")
+        return None, str(result.get("note") or "所需壁厚超出该外径标准序列")
     return wall, ""
 
 
@@ -208,6 +212,8 @@ def _line_common(role: str, stream: str, status: str, reason: str = "") -> dict:
         "re": None,
         "lam": None,
         "hf_m": None,
+        #: Σhf 是否**完整**(L 与 Σζ 都有):缺 Σζ 时不给数,也不让上游当完整值相加
+        "hf_complete": False,
         "l_m": None,
         "zeta_sum": None,
         "dz_m": None,
@@ -258,8 +264,10 @@ def compute_line(
     out["flow_m3h"] = flow
     mass = _num(s.get("mass_flow_kgh"))
     vol = _num(s.get("vol_flow_m3h"))
-    if mass is not None and vol and vol > 0:
-        out["rho_kgm3"] = mass / vol
+    if mass is not None and vol is not None and mass > 0 and vol > 0:
+        rho = mass / vol
+        if math.isfinite(rho) and rho > 0:
+            out["rho_kgm3"] = rho
     mu_manual = _num(run.get("mu_cp"))
     if mu_manual is not None:
         out["mu_cp"] = mu_manual
@@ -317,19 +325,22 @@ def compute_line(
     missing = []
     if flow is None:
         missing.append("体积流量")
-    if out["rho_kgm3"] is None:
-        missing.append("密度")
-    if out["mu_cp"] is None:
-        missing.append("粘度")
+    # 手填 λ 只依赖 u、L、Σζ 与 λ 本身:缺密度/粘度不阻断 Σhf,也不列成缺项。
+    if method != hydraulics.METHOD_MANUAL:
+        if out["rho_kgm3"] is None:
+            missing.append("密度")
+        if out["mu_cp"] is None:
+            missing.append("粘度")
     if l_m is None:
         missing.append("管长 L")
     if zeta is None:
         missing.append("管件系数 Σζ")
-    out["missing"] = missing
+    lam_manual = _num(run.get("lambda_manual"))
+    if method == hydraulics.METHOD_MANUAL and (lam_manual is None or lam_manual <= 0):
+        missing.append("手填 λ")
 
     # 有管径就先算 u,让人看见「DN 选得对不对」;L/Σζ 缺了才没有 Σhf
-    if flow is not None:
-        out["u_ms"] = hydraulics.velocity_ms(flow, out["id_mm"])
+    u_pre = hydraulics.velocity_ms(flow, out["id_mm"]) if flow is not None else None
     solved = hydraulics.solve(
         vol_m3h=flow,
         rho_kgm3=out["rho_kgm3"],
@@ -341,14 +352,29 @@ def compute_line(
         method=method,
         lam_manual=_num(run.get("lambda_manual")),
     )
-    out["u_ms"] = solved.get("u_ms")
+    solved_u = solved.get("u_ms")
+    out["u_ms"] = solved_u if solved_u is not None else u_pre
     out["re"] = solved.get("re")
     out["lam"] = solved.get("lam")
     out["hf_m"] = solved.get("hf_m")
-    out["missing"] = solved.get("missing") or missing
+    out["lambda_method_used"] = solved.get("method_used") or method
+    out["lambda_note"] = solved.get("method_note") or ""
+    out["missing"] = _merge_missing(missing, solved.get("missing"))
+
+    # Σζ 没填就不给 Σhf:head_loss_m 会把 None 当 0,只算沿程 —— 那样「未填」
+    # 会伪装成「已关联」,少算的正是全部局部阻力(通常占 10–30%)。
+    if zeta is None:
+        out["hf_m"] = None
+        out["hf_complete"] = False
+        out["status"] = ST_UNSET
+        return out
+    out["hf_complete"] = out["hf_m"] is not None
 
     if out["hf_m"] is None:
         out["status"] = ST_UNSET
+        # λ 口径回退之类的说明要让人看见,别把所有空 Σhf 都归因到「没填」
+        if not out["missing"] and out["lambda_note"]:
+            out["reason"] = out["lambda_note"]
     elif dninfo["source"] in ("manual", "custom"):
         out["status"] = ST_MANUAL
     else:
@@ -356,9 +382,134 @@ def compute_line(
     return out
 
 
+def _merge_missing(primary, secondary) -> list:
+    """按 primary 的顺序合并缺项,再补 secondary 中没出现过的项。
+
+    `hydraulics.solve()` 可能只回一部分缺项;不能因为它的列表非空就把
+    Σζ 这类调用方已知的缺项覆盖掉。
+    """
+    out = []
+    for item in (*list(primary or []), *list(secondary or [])):
+        if item not in out:
+            out.append(item)
+    return out
+
+
 def _sum(values):
     nums = [_num(v) for v in values]
     return None if any(v is None for v in nums) else sum(nums)
+
+
+def _shaft_kw(rho_kgm3, vol_m3h, head_m, pump_eff) -> float | None:
+    """轴功率照会值(kW):P = ρ·Q·H·g ÷ (3.6×10⁶·η)。
+
+    设计扬程口径的 `design_kw` 会参与电机选档(见 `_motor_suggestion`);
+    本式不含粘度修正与泵型效率曲线,只作设计轴功率的估算,不是 Aspen 实测。
+    """
+    rho = _num(rho_kgm3)
+    flow = _num(vol_m3h)
+    head = _num(head_m)
+    eff = _num(pump_eff)
+    if (
+        rho is None
+        or rho <= 0
+        or flow is None
+        or flow <= 0
+        or head is None
+        or eff is None
+        or eff <= 0
+    ):
+        return None
+    return rho * flow * head * pump_rules.G / (3.6e6 * eff)
+
+
+def _motor_suggestion(block: dict, totals: dict) -> dict:
+    """建议电机:设计扬程口径优先,缺管段/效率时回退 Aspen 轴功率口径。
+
+    设计扬程口径用 **H**(未乘 1.1 的 `design_head_m`)算 `design_kw`,避免与
+    分段电机裕量重复叠加;`selection_head_m` 的 ×1.1 只用于泵选型扬程。
+    """
+    design_head = _num(totals.get("design_head_m"))
+    hf_complete = bool(totals.get("hf_complete"))
+    shaft = totals.get("shaft_kw_estimate") or {}
+    design_kw = _num(shaft.get("design_kw"))
+    reverse = bool(totals.get("reverse"))
+
+    if reverse or (hf_complete and design_head is not None and design_head <= 0):
+        return {
+            "kw": None,
+            "basis_kw": design_kw if design_kw is not None and design_kw > 0 else None,
+            "power_source": "反向/自流工况",
+            "margin": None,
+            "basis": "none",
+            "note": f"设计扬程 {design_head:g} m ≤ 0,反向/自流工况,不选电机"
+            if design_head is not None
+            else "反向/自流工况,不选电机",
+        }
+
+    if hf_complete and design_kw is not None:
+        if design_kw <= 0:
+            return {
+                "kw": None,
+                "basis_kw": design_kw,
+                "power_source": "设计扬程口径",
+                "margin": pump_rules.motor_margin(design_kw),
+                "basis": "design",
+                "note": f"设计扬程口径功率 {design_kw:.2f} kW ≤ 0,不选电机",
+            }
+        margin = pump_rules.motor_margin(design_kw)
+        kw, note = pump_rules.pick_motor(design_kw)
+        return {
+            "kw": kw,
+            "basis_kw": design_kw,
+            "power_source": "设计扬程口径",
+            "margin": margin,
+            "basis": "design",
+            "note": note,
+        }
+
+    aspen_kw = _num(block.get("power_kw"))
+    if aspen_kw is not None and block.get("power_source") == "ELEC_POWER":
+        aspen_kw = aspen_kw * pump_rules.MOTOR_EFF
+    missing = []
+    if not hf_complete:
+        missing.append("管段未齐")
+    if shaft.get("design_kw") is None and design_head is not None and design_head > 0:
+        if _num(block.get("pump_eff")) is None:
+            missing.append("缺效率")
+        elif _num(shaft.get("design_kw")) is None:
+            missing.append("缺流量/密度")
+    if str(shaft.get("note") or "").strip():
+        missing.append("两相进口")
+    source_detail = "/".join(dict.fromkeys(missing)) or "未计管损"
+    if aspen_kw is None:
+        return {
+            "kw": None,
+            "basis_kw": None,
+            "power_source": f"Aspen压升口径（{source_detail}）",
+            "margin": None,
+            "basis": "aspen",
+            "note": "缺 Aspen 轴功率,不选电机",
+        }
+    if aspen_kw <= 0:
+        return {
+            "kw": None,
+            "basis_kw": aspen_kw,
+            "power_source": f"Aspen压升口径（{source_detail}）",
+            "margin": None,
+            "basis": "aspen",
+            "note": f"Aspen 轴功率 {aspen_kw:.2f} kW ≤ 0,反向工况不选电机",
+        }
+    margin = pump_rules.motor_margin(aspen_kw)
+    kw, note = pump_rules.pick_motor(aspen_kw)
+    return {
+        "kw": kw,
+        "basis_kw": aspen_kw,
+        "power_source": f"Aspen压升口径（{source_detail}）",
+        "margin": margin,
+        "basis": "aspen",
+        "note": note,
+    }
 
 
 def compute(
@@ -409,10 +560,13 @@ def compute(
     )
 
     hf = _sum([suction.get("hf_m"), discharge.get("hf_m")])
+    hf_complete = hf is not None
     dz = _sum([suction.get("dz_m"), discharge.get("dz_m")])
     head = _num(block.get("head_m"))
     design = _sum([head, dz, hf]) if head is not None else None
-    selection = math.ceil(design * DESIGN_MARGIN) if design is not None else None
+    # H ≤ 0 是反向/自流工况,不给选型扬程(不拿负值取整冒充结论)
+    reverse = design is not None and design <= 0
+    selection = pump_rules.selection_head_m(design)
 
     # 缺一侧时给「已计」值:看得见进展,但不让它冒充设计扬程
     partial_hf = sum(v for v in (suction.get("hf_m"), discharge.get("hf_m")) if _num(v) is not None)
@@ -422,14 +576,63 @@ def compute(
     p_in = _num(block.get("p_in_bar"))
     p_v = _num(block.get("pv_bar"))
     rho = _num(block.get("rho_kgm3"))
-    device = pump_rules.npsh_available_m(p_in, p_v, rho)
+    vap = _num(block.get("pump_vap_frac"))
+    two_phase = vap is not None and vap > pump_rules.TWO_PHASE_VAP_LIMIT
+    # 与管道页一致:汽化率缺失时不阻断计算,按液相暂估,但必须留下可复核提示。
+    # 不能用 two_phase 判断——缺值恰好会被算成 False,正是最容易静默的一侧。
+    warnings: list[str] = []
+    if vap is None:
+        warnings.append("缺汽化率，暂按液相估算，请复核")
+    device = pump_rules.npsh_available_m(p_in, p_v, rho, vap)
+
+    # 轴功率照会:check 用 Aspen 压升扬程与 BRAKE_POWER 互校,
+    # design 用设计扬程 H(未乘 1.1),两侧管段齐全且非两相时参与电机选档。
+    # Q 口径:check 用泵块 VFLOW(与 Aspen 功率同源);design 用吸入段流股体积流量
+    # (与 Σhf、ΔZ 的管段口径一致)。两者不等时给提示,不静默二选一。
+    q_block = _num(block.get("flow_m3h"))
+    q_in = _num(suction.get("flow_m3h"))
+    flow_note = None
+    if q_block is not None and q_in is not None and q_in > 0 and abs(q_block - q_in) > 0.01 * q_in:
+        flow_note = (
+            f"泵块 VFLOW {q_block:.2f} m³/h 与进口流股体积流量 {q_in:.2f} m³/h 不一致:"
+            "管段阻力用流股值、压升照会用 VFLOW,请复核模型流量"
+        )
+    # 两相进口的密度不能代表液相 cp 与 NPSHₐ;同一门禁也适用于轴功率照会:
+    # 用纯液相密度乘两相总体积流量会把扬程功高估,宁可留空。
+    shaft_est = {
+        "check_kw": (None if two_phase else _shaft_kw(rho, q_block, head, block.get("pump_eff"))),
+        "design_kw": (
+            None
+            if two_phase
+            else (
+                _shaft_kw(rho, q_in, design, block.get("pump_eff"))
+                if hf_complete and q_in is not None
+                else None
+            )
+        ),
+        "rule": "P = ρ·Q·H·g ÷ (3.6×10⁶·η);design_kw 参与电机选档(设计扬程口径),check_kw 仅照会",
+        "note": "含气/两相进口不计算轴功率照会" if two_phase else "",
+    }
+    motor = _motor_suggestion(
+        block,
+        {
+            "design_head_m": design,
+            "hf_complete": hf_complete,
+            "reverse": reverse,
+            "shaft_kw_estimate": shaft_est,
+        },
+    )
 
     npsh_missing = []
+    if two_phase:
+        npsh_missing.append("两相进口")
     if p_v is None:
         npsh_missing.append("p_v")
     if p_in is None:
         npsh_missing.append("进口压力")
-    if not rho:
+    elif p_in <= 0:
+        npsh_missing.append("进口压力(≤0 非法)")
+    if rho is None or rho <= 0:
         npsh_missing.append("密度")
     corrected = None
     if device is not None:
@@ -444,7 +647,13 @@ def compute(
     margin_given = _num(saved.get("margin_m"))
     margin = margin_given if margin_given is not None else NPSH_MARGIN_SUGGESTED
 
-    if npsh_missing:
+    if two_phase:
+        # 两相进口不是「缺一项读数」,而是公式前提不成立;单独前置,别拼成
+        # 「缺 两相进口,无法判定」这种像少填了某个字段的文案。
+        state = "unknown"
+        reason = "两相进口不计算 NPSHₐ，无法判定"
+        threshold = None
+    elif npsh_missing:
         state = "unknown"
         reason = "缺 " + "、".join(npsh_missing) + ",无法判定"
         threshold = None
@@ -458,21 +667,33 @@ def compute(
         reason = (
             f"NPSHᵣ {npshr:g} + 余量 {margin:g} = {threshold:g} m "
             f"{'≤' if state == 'ok' else '>'} NPSHₐ(修正) {corrected:g} m"
-            + (f"(装置值 {device:g} m)" if device is not None else "")
+            + (f"(进口基准值 {device:g} m)" if device is not None else "")
         )
+
+    # 三态判定照常给,但把「缺汽化率」的估算前提追加到理由里;ok/bad/unknown 都可见。
+    vap_note = "缺汽化率，暂按液相估算，请复核" if vap is None else ""
+    if vap_note:
+        reason = f"{reason}；{vap_note}" if reason else vap_note
 
     return {
         "suction": suction,
         "discharge": discharge,
+        "warnings": list(warnings),
         "totals": {
             "head_m": head,
             "dz_m": dz,
             "hf_m": hf,
+            "hf_complete": bool(hf_complete),
             "design_head_m": design,
             "selection_head_m": selection,
+            "reverse": bool(reverse),
             "partial_head_m": partial,
             "partial_hf_m": partial_hf,
             "partial_dz_m": partial_dz,
+            "shaft_kw_estimate": shaft_est,
+            "motor": motor,
+            "flow_note": flow_note,
+            "warnings": list(warnings),
         },
         "npsh": {
             "device_m": device,
@@ -487,5 +708,5 @@ def compute(
         },
         "design_margin": DESIGN_MARGIN,
         "rule": "H = 压升扬程 + (ΔZ_吸 + ΔZ_排) + (Σhf_吸 + Σhf_排);"
-        "NPSHₐ(修正) = NPSHₐ(装置) − ΔZ_吸 − Σhf_吸",
+        "NPSHₐ(修正) = NPSHₐ(进口基准) − ΔZ_吸 − Σhf_吸",
     }

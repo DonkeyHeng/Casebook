@@ -41,6 +41,7 @@ from .calc import (
     calc_wall_thickness,
     design_pressure,
     design_temperature,
+    design_wall_for_od,
     dn1000_oversize_pct,
     external_pressure_min_wall,
     grade_code,
@@ -61,6 +62,7 @@ from .calc import (
     validate,
     velocity_for,
 )
+from .overrides import apply_pipe_run_overrides, pipe_dn_text
 
 __all__ = [
     "PHASE_EPS",
@@ -87,6 +89,7 @@ __all__ = [
     "design_temperature",
     "allowable_stress",
     "calc_wall_thickness",
+    "design_wall_for_od",
     "external_pressure_min_wall",
     "near_boiling_liquid",
     "round_up_wall",
@@ -96,4 +99,6 @@ __all__ = [
     "VELOCITY_RANGE",
     "validate",
     "build",
+    "apply_pipe_run_overrides",
+    "pipe_dn_text",
 ]

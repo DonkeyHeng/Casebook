@@ -59,6 +59,7 @@ def select_dn(
     min_dn: int | None = None,
     oversize_tol: float = 0.0,
     oversize_band: tuple[float, float] | None = None,
+    min_wall_for=None,
 ) -> dict[str, Any]:
     """按**实际内径**选档:从小到大试 DN,直到 `外径 − 2×标准壁厚 ≥ 计算内径`。
 
@@ -66,8 +67,11 @@ def select_dn(
     会一路选大、实际流速偏低(实测 #19–#22 有 40–57 条 V2 就是这么来的)。
 
     `wall_for(od)` 负责给出该外径最终选定的标准壁厚(build 里会连负偏差一起算)。
-    `oversize_band` 限定容差只作用于指定计算内径区间(§19.3 DN1000 的 996–1045 mm),
+    `oversize_band` 限定容差只作用于指定计算内径区间(按最大档实际内径动态给出),
     不给则沿用旧的"只差一点点"全区间容差。
+    `min_wall_for(dn)` 只在**壁厚缺失**时用于退化判断:仍按该 DN 的最小壁厚
+    复核实际内径,而不是拿外径直接和 Di 比,避免选到偏小一档。返回值里的
+    `wall_mm` 仍是 `None` —— 不能拿最小壁厚冒充实际壁厚。
     """
     for dn in sorted(dn_to_od):
         if max_dn is not None and dn > max_dn:
@@ -77,8 +81,11 @@ def select_dn(
         od = float(dn_to_od[dn])
         wall = wall_for(od)
         if wall is None:
-            # 没有壁厚数据时退化成"外径 ≥ 计算内径"的判断,别把整条流股判死
-            if od >= inner_d_mm - 1e-9:
+            # 没有壁厚数据时退化:用该 DN 的最小壁厚反算可用内径,
+            # 而不是 od >= Di(那会把 DN100 的 Φ108 当成能过 105 mm 内径)。
+            fallback = min_wall_for(dn) if min_wall_for is not None else None
+            usable_id = od - 2.0 * float(fallback) if fallback is not None else od
+            if usable_id >= inner_d_mm - 1e-9:
                 return {"dn": dn, "od_mm": od, "wall_mm": None}
             continue
         if od - 2.0 * wall >= inner_d_mm - 1e-9:

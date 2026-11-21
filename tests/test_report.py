@@ -350,7 +350,7 @@ def test_export_consistency() -> None:
         ("扬程m", "扬程 m", "head_m"),
         ("效率%", "效率 %", None),
         ("轴功率kW", "轴功率 kW", "power_kw"),
-        ("建议电机kW", "建议电机 kW", "motor_kw"),
+        ("建议电机kW", "建议电机 kW", None),
         ("粘度cP", "粘度 cP", "mu_cp"),
         ("NPSHa m", "NPSHₐ m", None),
         ("p_v bar", "p_v bar", "pv_bar"),
@@ -369,6 +369,10 @@ def test_export_consistency() -> None:
                 d = num(db_row.get(db_key))
                 if d is not None and abs(a - d) > 1e-6:
                     bad.append(f"{name}.{db_key}: 包 {a} / 库 {d}")
+        a_src = str(csv.get(name, {}).get("电机功率口径") or "")
+        b_src = str(excel.get(name, {}).get("电机功率口径") or "")
+        if a_src != b_src:
+            bad.append(f"{name}.电机功率口径: 包 {a_src!r} / Excel {b_src!r}")
     check(
         f"出口一致:AI 包 / Excel / 库 同值(工况 {cid},{n_pumps} 台泵)", not bad, ";".join(bad[:3])
     )

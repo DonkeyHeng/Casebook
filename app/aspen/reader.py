@@ -22,12 +22,19 @@
 
 from __future__ import annotations
 
+import math
 import re
 import time
 from collections.abc import Callable
 
 from .. import component_names as names
-from ..values import mass_density_kgm3, pick_motor, sanitize_pv_bar
+from ..values import (
+    MOTOR_EFF,
+    TWO_PHASE_VAP_EPS,
+    mass_density_kgm3,
+    pick_motor,
+    sanitize_pv_bar,
+)
 from . import balance as balance_rules
 from . import units
 
@@ -686,6 +693,12 @@ def read_block(session, bid: str, node=None) -> dict:
     # 热负荷 / 功率 / 面积:按候选字段取第一个有值的
     rec["duty_kw"] = _first_converted(session, base, BLOCK_DUTY_FIELDS, "power", rec["raw"])
     rec["power_kw"] = _first_converted(session, base, BLOCK_POWER_FIELDS, "power", rec["raw"])
+    # 回退读的是电功率时,电机选档不能再除一次电机效率(否则重复折减)
+    rec["power_source"] = (
+        "BRAKE_POWER"
+        if "BRAKE_POWER" in rec["raw"]
+        else ("ELEC_POWER" if "ELEC_POWER" in rec["raw"] else None)
+    )
     rec["area_m2"] = _first_converted(session, base, BLOCK_AREA_FIELDS, "area", rec["raw"])
     # 塔没有单一 qcalc:冷凝器 / 再沸器各一块负荷(冷凝为负值,原样保留)
     for key, fields in BLOCK_TOWER_DUTY_FIELDS:
@@ -1010,9 +1023,18 @@ def _to_cp(value, unit) -> float | None:
         return None
     if num <= 0:
         return None
-    text = str(unit or "").strip().lower().replace(" ", "").replace("·", "-")
+    text = (
+        str(unit or "")
+        .strip()
+        .lower()
+        .replace(" ", "")
+        .replace("·", "-")
+        # 括号去掉:"lb/(ft·s)" 与 "lb/ft-s" 才有同一个 key
+        .replace("(", "")
+        .replace(")", "")
+    )
     # 常见写法都收:cp / centipoise → ×1;mPa·s → ×1;Pa·s、kg/(m·s) → ×1000;
-    # poise(P、g/(cm·s)) = 0.1 Pa·s → ×100;lb/(ft·hr) → ×0.413
+    # poise(P、g/(cm·s)) = 0.1 Pa·s → ×100;lb/(ft·hr) → ×0.4133789;lb/(ft·s) → ×1488.16394
     if "cp" in text or "centipoise" in text:
         return num
     if "mpa-s" in text or "mpas" in text:
@@ -1022,7 +1044,10 @@ def _to_cp(value, unit) -> float | None:
     if text in ("p", "poise", "g/cm-s", "g/cm/s"):
         return num * 100.0
     if "lb/ft-hr" in text or "lb/ft/h" in text or "lbm/ft-hr" in text:
-        return num * 0.413
+        return num * 0.4133789
+    # lb/(ft·s):1 lb = 453.59237 g、1 ft = 30.48 cm ⇒ 1 lb/(ft·s) = 1488.16394 cP
+    if "lb/ft-s" in text or "lbm/ft-s" in text or "lb/ft/sec" in text:
+        return num * 1488.16394
     return None
 
 
@@ -1177,15 +1202,28 @@ def read_pump_fields(session, streams, blocks, connections) -> None:
         block["mu_cp"] = read_stream_viscosity(session, inlet["name"]) if inlet else None
         rho_from_flow = None
         vap = block["pump_vap_frac"]
-        if inlet and (vap is None or float(vap) <= 0.001):
+        # 阈值与管道相态判定、泵 NPSH 门禁同一个常量(见 app/values.py)
+        if inlet and (vap is None or float(vap) <= TWO_PHASE_VAP_EPS):
             mass = inlet.get("mass_flow_kgh")
             vol = inlet.get("vol_flow_m3h")
-            if mass and vol:
-                rho_from_flow = float(mass) / float(vol)
+            if mass is not None and vol is not None:
+                try:
+                    mass_f = float(mass)
+                    vol_f = float(vol)
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    if math.isfinite(mass_f) and math.isfinite(vol_f) and mass_f > 0 and vol_f > 0:
+                        rho_from_flow = mass_f / vol_f
         block["rho_kgm3"] = (
             rho_from_flow if rho_from_flow is not None else mass_density_kgm3(rho_molar, mw)
         )
-        block["motor_kw"], _note = pick_motor(block.get("power_kw"))
+        # 电机选档只吃轴功率:BRAKE_POWER 本身就是轴功率(铭牌标的也是轴输出,
+        # 不再除电机效率);只有回退读到的 ELEC_POWER 是电功率,先乘效率折回轴功率。
+        shaft_kw = block.get("power_kw")
+        if shaft_kw is not None and block.get("power_source") == "ELEC_POWER":
+            shaft_kw = float(shaft_kw) * MOTOR_EFF
+        block["motor_kw"], _note = pick_motor(shaft_kw)
 
 
 # ---------------------------------------------------------------- 总入口

@@ -45,6 +45,7 @@ from .step_grade import grade_code, pn_code_for
 from .step_phase import medium_code, phase_of, velocity_for
 from .step_wall import (
     calc_wall_thickness,
+    design_wall_for_od,
     external_pressure_min_wall,
     near_boiling_liquid,
     round_up_wall,
@@ -76,6 +77,7 @@ __all__ = [
     "design_temperature",
     "allowable_stress",
     "calc_wall_thickness",
+    "design_wall_for_od",
     "external_pressure_min_wall",
     "near_boiling_liquid",
     "round_up_wall",

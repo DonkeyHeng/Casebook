@@ -25,6 +25,11 @@ def test_pipe() -> None:
     # ① 相态:痕量汽化率(库里实测 1e-8)必须按全液处理,不能 ==0 判
     check_eq("pipe: vap_frac=0 → 液", pipe_calc.phase_of(0.0), "liquid")
     check_eq("pipe: vap_frac=1e-8 → 仍算液(痕量)", pipe_calc.phase_of(1e-8), "liquid")
+    # 阈值 1e-4 与泵侧 / 读取层同一常量:同一流股不能管道判两相、泵按液算 NPSH
+    check_eq("pipe: vap_frac=5e-4 → 两相(与泵侧同阈值)", pipe_calc.phase_of(0.0005), "two")
+    check_eq("pipe: vap_frac=1e-5 → 仍算液", pipe_calc.phase_of(1e-5), "liquid")
+    # 边界取等号与泵侧一致:≤1e-4 为单相,NPSHₐ 照算;>1e-4 才按两相
+    check_eq("pipe: vap_frac=1e-4 边界 → 液", pipe_calc.phase_of(1e-4), "liquid")
     check_eq("pipe: vap_frac=0.5 → 两相", pipe_calc.phase_of(0.5), "two")
     check_eq("pipe: vap_frac=1 → 气", pipe_calc.phase_of(1.0), "gas")
     check_eq("pipe: vap_frac=None → 按液处理", pipe_calc.phase_of(None), "liquid")
@@ -63,6 +68,11 @@ def test_pipe() -> None:
     check_close("pipe: 真空设计压力取 0.1 MPa", pv["design_mpa"], 0.1)
     pv2 = pipe_calc.design_pressure(0.05)
     check("pipe: 绝压 0.05 bar → 真空", pv2["vacuum"] is True)
+    # 95–101.3 kPa 微负压:表压为负,下限/附加都给 0 时也不能出负设计压力
+    pn = pipe_calc.design_pressure(0.96, {"pressure_add_mpa": 0.0, "pressure_floor_mpa": 0.0})
+    check("pipe: 96 kPa 不算真空", pn["vacuum"] is False)
+    check("pipe: 96 kPa 表压为负", pn["gauge_mpa"] < 0)
+    check_eq("pipe: 微负压设计压力兜到 0", pn["design_mpa"], 0.0)
 
     # ⑤ 设计温度(§17.4):操作 +20 ℃;≥50 ℃ 自动保温;显式关裕量兼容旧调用
     check_close("pipe: 60 ℃ → 设计 80 ℃", pipe_calc.design_temperature(60.0)["design_c"], 80.0)
@@ -79,6 +89,17 @@ def test_pipe() -> None:
         pipe_calc.design_temperature(40.0)["insulated"] is False,
     )
     check_close("pipe: 90 ℃ → 设计 110 ℃", pipe_calc.design_temperature(90.0)["design_c"], 110.0)
+
+    # 低温段:裕量取偏冷侧,否则 -C 与 V7 会被 +20 ℃ 整体抬高 20 K 而漏判
+    cold = pipe_calc.design_temperature(-10.0)
+    check_close("pipe: 操作 −10 ℃ → 设计 −30 ℃(偏冷侧)", cold["design_c"], -30.0)
+    check_close("pipe: 低温段裕量记为 −20", cold["margin_c"], -20.0)
+    check("pipe: 低温说明写偏冷侧", "偏冷侧" in cold["note"], cold["note"])
+    check_eq(
+        "pipe: 操作 −10 ℃ 的设计温度触发保冷 -C",
+        pipe_calc.grade_code(1.0, "E", cold["design_c"], "", None)["insulation"],
+        "C",
+    )
 
     # ⑥ 许用应力:缺温度内插;T<40 取 40 ℃ 值;超范围返回 None(不猜)
     stress = SYNTH_TABLES["stress"]
@@ -121,6 +142,27 @@ def test_pipe() -> None:
         pipe_calc.round_up_wall(5.0, SYNTH_TABLES["od_to_walls"][108.0])["wall_mm"],
         None,
     )
+    # ⑧a 负偏差把最大标准壁厚的净厚吃掉时,文案要给出净厚,而不是"所需 > 最大标准壁厚"自相矛盾
+    overflow = pipe_calc.round_up_wall(2.8, (2.5, 3.0), od_mm=108.0, grade="S2-B")
+    check("pipe: 净厚不足仍判无可用档", overflow["wall_mm"] is None)
+    check(
+        "pipe: 净厚不足的备注同时写承压厚度与净厚 2.62 mm",
+        "所需承压厚度 2.80 mm" in overflow["note"] and "净厚 2.62 mm" in overflow["note"],
+    )
+    # ⑧a2 名义下限超序列最大档:单独说明"下限不足",不再和净厚混谈
+    floor_over = pipe_calc.round_up_wall(3.2, (2.5, 3.0), min_wall=3.5)
+    check("pipe: 名义下限超最大档仍无可用档", floor_over["wall_mm"] is None)
+    check(
+        "pipe: 名义下限超最大档的备注写下限与最大档",
+        "工艺最小壁厚下限 3.5 mm 超出" in floor_over["note"]
+        and "最大档 3 mm" in floor_over["note"],
+    )
+    check("pipe: 名义下限超最大档标记 floored", floor_over["floored"] is True)
+    check_eq(
+        "pipe: 无 od/grade 时备注退回名义壁厚口径",
+        "超过该外径最大标准壁厚 3 mm" in pipe_calc.round_up_wall(3.2, (2.5, 3.0))["note"],
+        True,
+    )
     check_eq("pipe: 无壁厚序列(T2 未录)→ None", pipe_calc.round_up_wall(1.0, None)["wall_mm"], None)
 
     # ⑧b 最小壁厚下限(DN10–100 不设限那档之外):下限只抬高、不降低
@@ -149,6 +191,26 @@ def test_pipe() -> None:
     check(
         "pipe: 承压更厚时不标 floored",
         pipe_calc.round_up_wall(2.4, (2.0, 2.5), min_wall=2.0)["floored"] is False,
+    )
+    # ⑧c 下限 > t_req,但真正把档位抬上去的是负偏差净厚约束:不能误标 floored
+    #    t_req=2.3、下限 2.5:2.5 档净厚 2.19 不够,选到 3.0;仅按净厚约束也是 3.0
+    nav = pipe_calc.round_up_wall(2.3, (2.5, 3.0, 4.0), od_mm=108.0, grade="S2-B", min_wall=2.5)
+    check_close("pipe: 净厚抬档时仍取 3.0", nav["wall_mm"], 3.0)
+    check("pipe: 净厚抬档不算下限抬高,floored 为假", nav["floored"] is False)
+    # ⑧d PN 整档保护把厚度顶过 D_o/6:薄壁公式已越界,必须显式提示(不能静默出结论)
+    pn_over = pipe_calc.design_wall_for_od(
+        108.0,
+        1.0,
+        sigma=30.0,
+        force_pn_code="U",
+        od_to_walls={108.0: (4.0, 36.0)},
+        min_wall_map={},
+    )
+    check_close("pipe: PN 保护超 D_o/6 时壁厚仍算到 36 mm", pn_over["wall_mm"], 36.0)
+    check(
+        "pipe: PN 保护超 D_o/6 时给出薄壁域警告",
+        "薄壁公式不适用" in pn_over["note"],
+        pn_over["note"],
     )
 
     # 端到端:小口径薄壁序列必须被下限托住;options 能关掉这一层
@@ -248,18 +310,143 @@ def test_pipe() -> None:
         check("pipe: 表未录入时报 TablesNotReady(不静默出表)", True)
 
 
+def test_pipe_run_overrides_export_and_validate() -> None:
+    """pipe_run 人工 DN / 自定义薄壁:统一合并、导出编号降级、V3 能报出。"""
+    from app.design import pipe as pc
+    from app.export import pipe_schedule
+
+    streams = [
+        {
+            "name": "0101",
+            "stream_type": "MATERIAL",
+            "vol_flow_m3h": 10.0,
+            "temperature_c": 25.0,
+            "pressure_bar": 11.0,
+            "vap_frac": 0.0,
+        },
+        {
+            "name": "0102",
+            "stream_type": "MATERIAL",
+            "vol_flow_m3h": 10.0,
+            "temperature_c": 25.0,
+            "pressure_bar": 11.0,
+            "vap_frac": 0.0,
+        },
+        {
+            "name": "0103",
+            "stream_type": "MATERIAL",
+            "vol_flow_m3h": 10.0,
+            "temperature_c": 200.0,
+            "pressure_bar": 50.0,
+            "vap_frac": 0.0,
+        },
+    ]
+    rows = pc.build(streams, tables=SYNTH_TABLES)["rows"]
+    runs = {
+        "0101": {"dn_override": 100},
+        "0102": {"od_override_mm": 108.0, "wall_override_mm": 0.4},
+        "0103": {"od_override_mm": 108.0, "wall_override_mm": 0.5},
+    }
+    merged = pc.apply_pipe_run_overrides(rows, runs)
+    by = {r["stream"]: r for r in merged}
+
+    s1 = by["0101"]
+    check_eq("override: 人工 DN 生效", s1["dn"], 100)
+    check_eq("override: 人工 DN 换外径", s1["od_mm"], 108.0)
+    check("override: 人工 DN 重算壁厚", s1["wall_mm"] is not None, str(s1["wall_mm"]))
+    check("override: 人工 DN 备注", "人工DN" in s1["warnings"], str(s1["warnings"]))
+    check_eq("override: 保留自动 DN 原值", s1.get("auto_dn"), rows[0]["dn"])
+
+    s2 = by["0102"]
+    check_eq("override: 自定义规格无标准 DN", s2["dn"], None)
+    check_eq("override: 自定义外径生效", s2["od_mm"], 108.0)
+    check_eq("override: 自定义壁厚生效", s2["wall_mm"], 0.4)
+    check_eq("override: 自定义壁厚负偏差按 0", s2["c1_mm"], 0.0)
+    check("override: 自定义流速按实际内径重算", s2["v_act_ms"] is not None, str(s2))
+    check("override: 自定义规格备注", "自定义规格" in s2["warnings"], str(s2["warnings"]))
+    tag = pipe_schedule._pipe_tag(s2)
+    check("override: 导出编号 DN 段降级为 Φ", "-Φ108-" in tag, tag)
+    check("override: 导出编号不含 -None", "-None" not in tag, tag)
+
+    checks = pc.validate(merged)
+    thin = [f for f in checks["findings"] if f["stream"] == "0102" and f["code"] == "V3"]
+    check("override: 自定义薄壁触发 V3", bool(thin), str(checks["findings"]))
+    r1e_thin = [f for f in checks["findings"] if f["stream"] == "0103" and f["code"] == "V3"]
+    check("override: R1E 自定义薄壁也触发 V3", bool(r1e_thin), str(checks["findings"]))
+
+
+def test_pipe_vacuum_code_and_wall() -> None:
+    """真空代号 L、布尔 is_vacuum 与壁厚外压路径解耦;V4 不误报、V6/V11 正常。"""
+    from app.design import pipe as pc
+
+    row = pc.build(
+        [
+            {
+                "name": "0301",
+                "stream_type": "MATERIAL",
+                "vol_flow_m3h": 800.0,
+                "temperature_c": 30.0,
+                "pressure_bar": 0.5,
+                "vap_frac": 0.0,
+            }
+        ],
+        tables=SYNTH_TABLES,
+    )["rows"][0]
+    check_eq("vacuum: 真空等级号 L1E", row["grade_code"], "L1E")
+    check("vacuum: 布尔 is_vacuum", row["is_vacuum"] is True, str(row.get("is_vacuum")))
+    check(
+        "vacuum: 备注写明 PN10 配级",
+        any("PN10配级" in str(w) for w in row["warnings"]),
+        str(row["warnings"]),
+    )
+    check("vacuum: 大口径走 DN600", row["dn"] == 600, str(row["dn"]))
+    check("vacuum: 外压筛查有下限", row["external_wall_mm"] is not None, str(row))
+    codes = [f["code"] for f in pc.validate([row], {})["findings"]]
+    check("vacuum: V4 不把 L 当普通 PN 比较", "V4" not in codes, str(codes))
+    check("vacuum: V6 触发", "V6" in codes, str(codes))
+    check("vacuum: V11 触发", "V11" in codes, str(codes))
+
+    # 去掉工艺最小壁厚,直接比较真空/非真空路径:L 的 PN1.0 不得抬高真空壁厚,
+    # 真空壁厚应完全由外压筛查 t_ext + C2 控制。
+    vac = pc.design_wall_for_od(
+        610.0,
+        0.1,
+        dn=600,
+        material="S30408",
+        sigma=130.0,
+        design_temp_c=50.0,
+        c2_mm=0.0,
+        vacuum=True,
+        min_wall_map={},
+        options={},
+    )
+    plain = pc.design_wall_for_od(
+        610.0,
+        0.1,
+        dn=600,
+        material="S30408",
+        sigma=130.0,
+        design_temp_c=50.0,
+        c2_mm=0.0,
+        vacuum=False,
+        min_wall_map={},
+        options={},
+    )
+    check("vacuum: 外压壁厚大于同外径内压壁厚", vac["wall_mm"] > plain["wall_mm"])
+    check_close("vacuum: t_req 等于外压筛查值", vac["t_required_mm"], vac["ext_wall_mm"])
+    check("vacuum: 未吃 PN1.0 整档保护", vac["pn_code"] != "L", str(vac.get("pn_code")))
+
+
 def test_pipe_2026_rules() -> None:
     """2026-11-18 工程校核口径(§17):真空 V1E / 外压 / 升 R1E / 非优先 DN / 汽蚀 / 零流量。"""
     from app.design import pipe as pc
     from app.design.pipe import data as pdata
 
-    # §17.1 真空代号 + 外压失稳最小壁厚
-    check_eq("rules: 真空压力代号 V", pdata.VACUUM_PN_CODE, "V")
-    check_eq(
-        "rules: 真空等级号 V1E",
-        pc.grade_code(0.1, "E", 30.0, options={"vacuum": True})["code"],
-        "V1E",
-    )
+    # §17.1 真空代号 + 外压失稳最小壁厚:默认 L(PN1.0,按 PN10 配级),不再借用 V(=25 MPa)
+    check_eq("rules: 真空压力代号 L", pdata.VACUUM_PN_CODE, "L")
+    gc = pc.grade_code(0.1, "E", 30.0, options={"vacuum": True})
+    check_eq("rules: 真空等级号 L1E", gc["code"], "L1E")
+    check("rules: 真空布尔标记与代号解耦", gc["is_vacuum"] is True)
     t_ext = pc.external_pressure_min_wall(219.0)
     check("rules: DN200 真空外压 t_min 在 0–5 mm", t_ext is not None and 0 < t_ext < 5.0)
     check("rules: 外压 t_min 随外径增大", pc.external_pressure_min_wall(630.0) > t_ext)
@@ -283,17 +470,76 @@ def test_pipe_2026_rules() -> None:
         "rules: 边界 4.7 MPa → R(合并邻近等级)", pc.hp_stainless_force_code("S30408", 4700.0), "R"
     )
     check_eq("rules: 4.6 MPa 不升档", pc.hp_stainless_force_code("S30408", 4600.0), None)
+    # 上限 5.6 → 6.4:5.6–6.4 原来落 PN Q 档,壁厚随压力升高反而变薄
+    check_eq(
+        "rules: 5.61 MPa 仍升 R(修补 5.6–6.4 倒挂)",
+        pc.hp_stainless_force_code("S30408", 5610.0),
+        "R",
+    )
+    check_eq(
+        "rules: 6.41 MPa 不再强制(自然 R1E 接管)",
+        pc.hp_stainless_force_code("S30408", 6410.0),
+        None,
+    )
     check_eq("rules: 碳钢不升档", pc.hp_stainless_force_code("20#", 5000.0), None)
     check_eq(
         "rules: 升档等级号 R1E-H",
         pc.grade_code(5.0, "E", 200.0, options={"force_pn_code": "R"})["code"],
         "R1E-H",
     )
+    # 5.67–6.4 MPa 段:Pd 已 >6.4,本来自然落 R1E;不能再标「强制升档」触发 V13
+    hp_natural = pc.build(
+        [
+            {
+                "name": "HP1",
+                "vol_flow_m3h": 50.0,
+                "temperature_c": 200.0,
+                "pressure_bar": 60.0,
+                "vap_frac": 0.0,
+            }
+        ],
+        tables=SYNTH_TABLES,
+    )
+    hp_row = hp_natural["rows"][0]
+    check("rules: 6.0 MPa 的 Pd 已 >6.4", hp_row["design_pressure_mpa"] > 6.4)
+    check("rules: 自然落 R 档不算强制升档", hp_row["hp_ss_upgraded"] is False)
+    check(
+        "rules: 自然落 R 档不报 V13",
+        all(f["code"] != "V13" for f in pc.validate(hp_natural["rows"])["findings"]),
+    )
 
     # §17.8 R1E 公式化壁厚:t = PD/(2[σ]^t·E_j+P) + C 后 ÷0.875
     check_close("rules: [σ] 100 ℃ → 137", pc.hp_ss_allowable_stress(100.0), 137.0)
     check_close("rules: [σ] 125 ℃ 内插 → 130", pc.hp_ss_allowable_stress(125.0), 130.0)
     check_close("rules: [σ] 90 ℃ 取平值 137", pc.hp_ss_allowable_stress(90.0), 137.0)
+    # 越界不外推:上面钳位取平值,上面 350 ℃ 以上直接给 None(蠕变段不许猜)
+    check_eq("rules: [σ] 400 ℃ 超字典上限 → None", pc.hp_ss_allowable_stress(400.0), None)
+    check(
+        "rules: [σ] 超上限时 R1E 壁厚不给",
+        pc.hp_ss_required_wall(6.09, 426.0, 400.0) is None,
+    )
+    # 薄壁前提 t < D_o/6:越界时不硬算厚壁(用低 σ 构造越界)
+    check_eq(
+        "rules: R1E 薄壁越界不给壁厚",
+        pc.hp_ss_required_wall(10.0, 100.0, 100.0, sigma_override=20.0),
+        None,
+    )
+    # 边界:承压厚度 t_c < D_o/6,但含腐蚀裕量 C 后总厚度越过 D_o/6。
+    # 薄壁判据只看 t_c,不能因为 C 把可算的小口径误判成厚壁。
+    w_boundary = pc.hp_ss_required_wall(10.0, 18.0, 100.0, sigma_override=137.0, c_mm=3.0)
+    check("rules: R1E 薄壁只按 t_c 校核,含 C 越界仍可算", w_boundary is not None)
+    check_close(
+        "rules: R1E 薄壁边界壁厚按 t_c+C 计算",
+        w_boundary,
+        (10.0 * 18.0 / (2.0 * 137.0 + 10.0) + 3.0) / 0.875,
+        tol=1e-9,
+    )
+    check_close(
+        "rules: R1E 的 C 由调用方传入(3 mm 比默认 1 mm 多 2÷0.875)",
+        pc.hp_ss_required_wall(6.0935, 426.0, 210.0, c_mm=3.0),
+        pc.hp_ss_required_wall(6.0935, 426.0, 210.0) + 2.0 / 0.875,
+        tol=1e-6,
+    )
     w1 = pc.hp_ss_required_wall(6.0935, 426.0, 210.0)
     check_close("rules: 6.09 MPa/Φ426/210 ℃ → t_req≈13.84", w1, 13.84, tol=0.02)
     w2 = pc.hp_ss_required_wall(5.635, 18.0, 230.0)
@@ -483,7 +729,7 @@ def test_pipe_third_round() -> None:
         check(f"rules: {nm} 标记容差", srow[0]["oversize_tolerated"] is True)
         sjoined = ";".join(srow[0]["warnings"])
         check(f"rules: {nm} 流速略超备注", f"内径{d_calc:.1f}mm" in sjoined)
-        check(f"rules: {nm} 超径百分比备注", "计算内径略超DN1000上限" in sjoined)
+        check(f"rules: {nm} 超径百分比备注", "计算内径超DN1000实际内径" in sjoined)
 
     # 容差只作用于 996–1045:1500 mm 仍不选型
     q_huge = math.pi * (1.5) ** 2 / 4.0 * 15.0 * 3600.0
@@ -564,11 +810,37 @@ def test_pipe_checks() -> None:
     f2 = pipe_calc.validate([dict(base, vol_flow_m3h=200.0)])["findings"][0]
     check_eq("checks: V2 的 field 定位到 velocity", f2["field"], "velocity")
     check_eq("checks: 所需壁厚超所选 → V3", codes({"t_required_mm": 5.0}), ["V3"])
+    check_eq(
+        "checks: 扣负偏差后不足 → V3",
+        codes({"wall_mm": 4.0, "c1_mm": 0.6, "t_required_mm": 3.6}),
+        ["V3"],
+    )
+    check_eq(
+        "checks: 扣负偏差后仍够 → 不报 V3",
+        codes({"wall_mm": 4.0, "c1_mm": 0.5, "t_required_mm": 3.4}),
+        [],
+    )
+    check_eq(
+        "checks: R1E(C1 已除入 t_req)不双扣",
+        codes({"wall_mm": 4.0, "c1_mm": 0.0, "t_required_mm": 3.9}),
+        [],
+    )
     check_eq("checks: 等级号压力不足 → V4", codes({"grade_code": "H1E"}), ["V4"])
     check_eq("checks: 编号口径与 DN 不符 → V1", codes({"pipe_no": "PG-0111-300"}), ["V1"])
     check_eq("checks: 两相按单相流速 → V5", codes({"phase": "two"}), ["V5"])
+    # 泵入口/汽蚀限速是刻意用 0.5–1.0 m/s 的:两相进口不能拿 5–10 m/s 去要求它
+    check_eq(
+        "checks: 两相泵入口(0.8 m/s)不报 V5",
+        codes({"phase": "two", "pump_inlet": True, "velocity_ms": 0.8, "vol_flow_m3h": 22.6}),
+        [],
+    )
     check_eq("checks: 真空流股 → V6", codes({"vacuum": True}), ["V6"])
     check_eq("checks: 设计温度超材料区间 → V7", codes({"design_temp_c": 500.0}), ["V7"])
+    check_eq(
+        "checks: 低温设计温度 −30 ℃ → V7",
+        codes({"design_temp_c": pipe_calc.design_temperature(-10.0)["design_c"]}),
+        ["V7"],
+    )
     check_eq(
         "checks: 泵出口当泵入口 → V8",
         codes({"pump_outlet": True, "pump_inlet": True, "velocity_ms": 0.8, "vol_flow_m3h": 20.0}),
@@ -578,6 +850,11 @@ def test_pipe_checks() -> None:
         "checks: 高温无保温代号 → V9",
         codes({"design_temp_c": 90.0, "insulation": "", "grade_code": "M1E"}),
         ["V9"],
+    )
+    check_eq(
+        "checks: 空 grade_code 时 V9 跳过(与 V4 一致)",
+        codes({"design_temp_c": 90.0, "insulation": "", "grade_code": None}),
+        [],
     )
     check_eq("checks: 有保温代号就不再报 V9", codes({"design_temp_c": 90.0}), [])
     # §17 新增 V10–V14
@@ -589,7 +866,16 @@ def test_pipe_checks() -> None:
     )
     check_eq("checks: 大口径两相分层流 → V12", codes({"stratified_risk": True}), ["V12"])
     check_eq("checks: 高压升 R1E → V13", codes({"hp_ss_upgraded": True}), ["V13"])
-    check_eq("checks: 真空代号 V1E 不误报 V4", codes({"grade_code": "V1E", "vacuum": True}), ["V6"])
+    check_eq(
+        "checks: 真空代号 L1E 不误报 V4",
+        codes({"grade_code": "L1E", "is_vacuum": True}),
+        ["V6"],
+    )
+    check_eq(
+        "checks: 真空布尔与代号解耦,旧 vacuum 字段也认",
+        codes({"grade_code": "L1E", "vacuum": True}),
+        ["V6"],
+    )
 
     # 端到端:build 出来的行直接喂给 validate,字段要能对上
     streams = [
@@ -852,6 +1138,33 @@ def test_material_scope() -> None:
 
     check_eq("材质: 预置牌号走显式映射", pipe_data.material_code_for("S30408"), ("E", "explicit"))
     check_eq("材质: 321 按前缀判为不锈钢", pipe_data.material_code_for("S32168"), ("E", "prefix"))
+    check_eq(
+        "材质: 新国标超低碳 022Cr19Ni10 按前缀判为不锈钢",
+        pipe_data.material_code_for("022Cr19Ni10"),
+        ("E", "prefix"),
+    )
+    check_eq(
+        "材质: 新国标超低碳 022Cr17Ni12Mo2 按前缀判为不锈钢",
+        pipe_data.material_code_for("022Cr17Ni12Mo2"),
+        ("E", "prefix"),
+    )
+    # 铬钼耐热钢必须前置识别:否则 1Cr5Mo/9Cr1Mo 会被不锈钢短式 0?[0-9]Cr\d 静默判 E
+    for _g in ("12Cr1MoV", "15CrMo", "1Cr5Mo", "9Cr1Mo", "5CrMo"):
+        check_eq(
+            f"材质: 铬钼耐热钢 {_g} 归入待确认(heat_resistant)",
+            pipe_data.material_code_for(_g),
+            (None, "heat_resistant"),
+        )
+    check_eq(
+        "材质: 含 Ni 的 1Cr18Ni9Ti 仍是不锈钢",
+        pipe_data.material_code_for("1Cr18Ni9Ti"),
+        ("E", "prefix"),
+    )
+    check_eq(
+        "材质: 06Cr19Ni10 仍按原分支判为不锈钢",
+        pipe_data.material_code_for("06Cr19Ni10"),
+        ("E", "prefix"),
+    )
     check_eq("材质: Q235 按前缀判为碳钢", pipe_data.material_code_for("Q235B"), ("B", "prefix"))
     check_eq(
         "材质: Q345R 按前缀判为低合金钢", pipe_data.material_code_for("Q345R"), ("C", "prefix")
@@ -1027,6 +1340,96 @@ def test_std_versioning() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
+def test_design_wall_contract() -> None:
+    """统一壁厚函数:材质路由 / PN 保护 / R1E / 真空焊接管 / 最小壁厚覆盖。"""
+    from app.design import pipe as pc
+    from app.design.pipe import data as pdata
+
+    walls = {108.0: (1.4, 1.6, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 6.0)}
+    # 工艺最小壁厚:DN100 承压只要 0.4 mm,也必须托到 3.0 mm
+    base = pc.design_wall_for_od(
+        108.0,
+        1.0,
+        dn=100,
+        material="20#",
+        sigma=130.0,
+        design_temp_c=60.0,
+        c2_mm=0.0,
+        od_to_walls=walls,
+        min_wall_map={100: 3.0},
+    )
+    check_eq("wall: 工艺下限托到 3.0", base["wall_mm"], 3.0)
+
+    # PN 整档保护:9 MPa 落在 PN10(R),壁厚不能只按 9 MPa 算
+    guarded = pc.design_wall_for_od(
+        108.0,
+        9.0,
+        dn=100,
+        material="20#",
+        sigma=130.0,
+        design_temp_c=60.0,
+        c2_mm=0.0,
+        od_to_walls=walls,
+        min_wall_map={100: 3.0},
+    )
+    check_eq("wall: 9 MPa 取 PN10(R)", guarded["pn_code"], "R")
+    check("wall: PN 整档保护抬高壁厚", guarded["wall_mm"] >= 4.3, str(guarded))
+
+    # R1E:自然落 R 的 S31603 走 §17.8 公式,不吃 PN 整档保护
+    r1e = pc.design_wall_for_od(
+        108.0,
+        6.5,
+        dn=100,
+        material="S31603",
+        sigma=130.0,
+        design_temp_c=200.0,
+        c2_mm=0.0,
+        hp_c_mm=1.0,
+        od_to_walls=walls,
+        min_wall_map={100: 3.0},
+    )
+    check("wall: S31603 6.5 MPa 自然落 R1E", r1e["hp_formula"] is True)
+    check("wall: R1E 壁厚有值", r1e["wall_mm"] is not None, str(r1e))
+
+    # R1E 厚壁越界:不是「公式无解」,而是超出薄壁圆筒适用范围,文案要能指导后续动作。
+    thick = pc.design_wall_for_od(
+        100.0,
+        10.0,
+        dn=100,
+        material="S31603",
+        sigma=20.0,
+        design_temp_c=200.0,
+        hp_c_mm=1.0,
+        od_to_walls=walls,
+        min_wall_map={100: 3.0},
+    )
+    check_eq("wall: R1E 厚壁越界不给壁厚", thick["wall_mm"], None)
+    check(
+        "wall: R1E 厚壁越界文案指向薄壁公式适用范围",
+        "超出薄壁圆筒公式适用范围（t_c ≥ D_o/6），需另行校核" in (thick["note"] or ""),
+        thick["note"],
+    )
+
+    # DN>600 没录表时用焊接管序列兜底;真空下限与工艺下限取大
+    welded = pc.design_wall_for_od(
+        711.0,
+        0.1,
+        dn=700,
+        material="20#",
+        sigma=130.0,
+        design_temp_c=60.0,
+        vacuum=True,
+        od_to_walls={},
+        min_wall_map={1000: 10.0},
+    )
+    check("wall: DN700 用焊接管序列", welded["welded"] is True)
+    check("wall: 真空 DN700 壁厚不小于 10 mm", welded["wall_mm"] >= 10.0, str(welded))
+
+    # MIN_WALL_BY_DN 必须覆盖当前 DN_TO_OD 的全部档位
+    missing = sorted(dn for dn in pdata.DN_TO_OD if pdata.minimum_wall(dn) is None)
+    check_eq("wall: 每个 DN 都有最小壁厚下限", missing, [])
+
+
 def test_hydraulics() -> None:
     """hydraulics:Re / λ / Σhf。用设计算例 P0216 反算,口径见 pump-selection-plan §3.1。
 
@@ -1077,6 +1480,12 @@ def test_hydraulics() -> None:
     check_eq("粘度: cP 原样", reader_mod._to_cp("1.23", "cP"), 1.23)
     check_eq("粘度: Pa·s 换算", reader_mod._to_cp(0.00123, "Pa-s"), 1.23)
     check_eq("粘度: mPa·s 原样", reader_mod._to_cp(0.5, "mPa-s"), 0.5)
+    check_close("粘度: lb/(ft·hr) 按 0.4133789 折算", reader_mod._to_cp(1.0, "lb/ft-hr"), 0.4133789)
+    check_close(
+        "粘度: lb/(ft·s) 按 1488.16394 折算(带括号同样认)",
+        reader_mod._to_cp(1.0, "lb/(ft·s)"),
+        1488.16394,
+    )
     check_eq("粘度: 认不出的单位返回 None", reader_mod._to_cp("1.2", "kgf/m2"), None)
     check_eq("粘度: 非数字返回 None", reader_mod._to_cp("abc", "cP"), None)
 
@@ -1127,4 +1536,314 @@ def test_hydraulics() -> None:
             base + r"\VISC",
         ),
         (None, ""),
+    )
+
+
+def test_pipe_followup_guards() -> None:
+    """收尾修复:DN1000 动态容差 / R1E 只升不降 / 压力缺值 / 外压 C2 / 退化选档。"""
+    from app.design import pipe as pc
+    from app.design.pipe.step_wall import design_wall_for_od
+
+    base_stream = {
+        "name": "0101",
+        "stream_type": "MATERIAL",
+        "vol_flow_m3h": 10.0,
+        "pressure_bar": 5.0,
+        "temperature_c": 25.0,
+        "vap_frac": 0.0,
+    }
+
+    # 1) Pd>10:操作绝压仍在 4.7–6.4 MPa 时也不能强制 R(否则 S→R 反向降档)
+    check_eq(
+        "follow: P_d=10.5 不强制 R",
+        pc.hp_stainless_force_code("S30408", 5000.0, design_mpa=10.5),
+        None,
+    )
+    check_eq(
+        "follow: P_d=9.5 仍强制 R",
+        pc.hp_stainless_force_code("S30408", 5000.0, design_mpa=9.5),
+        "R",
+    )
+    forced = pc.build(
+        [{**base_stream, "pressure_bar": 50.0}],
+        tables=SYNTH_TABLES,
+        options={"pressure_factor": 2.4},
+    )["rows"][0]
+    check(
+        "follow: 高压自然 S 不降 R", str(forced["grade_code"]).startswith("S"), forced["grade_code"]
+    )
+    check("follow: 壁厚路径不标 R1E 升档", forced["hp_ss_upgraded"] is False)
+    check("follow: 壁厚不写 R1E 公式说明", not any("R1E 公式口径" in w for w in forced["warnings"]))
+
+    # 2) DN1000 动态容差:Φ1016×20 的实际内径 976,Di 980 不应成为死区
+    big_dn = dict(SYNTH_TABLES["dn_to_od"])
+    big_dn[1000] = 1016.0
+    big_walls = dict(SYNTH_TABLES["od_to_walls"])
+    big_walls[1016.0] = (20.0,)
+    big_tables = {
+        "dn_to_od": big_dn,
+        "od_to_walls": big_walls,
+        "od_to_walls_sst": big_walls,
+        "stress": SYNTH_TABLES["stress"],
+    }
+    q980 = math.pi * (980.0 / 1000.0) ** 2 / 4.0 * 15.0 * 3600.0
+    s980 = pc.build(
+        [{**base_stream, "name": "0301", "vol_flow_m3h": q980, "vap_frac": 1.0}],
+        tables=big_tables,
+    )["rows"][0]
+    check_eq("follow: 厚壁 DN1000 Di=980 选 DN1000", s980["dn"], 1000)
+    check_eq("follow: 厚壁 DN1000 壁厚 20", s980["wall_mm"], 20.0)
+    check_eq("follow: 厚壁 DN1000 标记容差", s980["oversize_tolerated"], True)
+    check(
+        "follow: 超径备注用实际内径 976",
+        any("Φ1016×20→976.0mm" in w for w in s980["warnings"]),
+        str(s980["warnings"]),
+    )
+    check_close(
+        "follow: 相对实际内径超径约 0.41%",
+        pc.dn1000_oversize_pct(980.0, base_inner_mm=976.0),
+        0.41,
+        tol=0.02,
+    )
+    q1030 = math.pi * (1030.0 / 1000.0) ** 2 / 4.0 * 15.0 * 3600.0
+    bad1030 = pc.build(
+        [{**base_stream, "name": "0302", "vol_flow_m3h": q1030, "vap_frac": 1.0}],
+        tables=big_tables,
+    )
+    check_eq("follow: 超过 1.05×976 不选型", bad1030["rows"], [])
+
+    # 3) 无壁厚/无许用应力:按该 DN 最小壁厚退化,且继续屏蔽 DN65/DN125
+    series = pc.usable_dn_series({100: 108.0, 125: 133.0, 150: 159.0})
+    fallback = pc.select_dn(
+        105.0,
+        series,
+        {},
+        lambda od: None,
+        min_wall_for={100: 3.0, 125: 4.0, 150: 5.0}.get,
+    )
+    check_eq("follow: 退化选档跳过 DN125 选 DN150", fallback["dn"], 150)
+    check_eq("follow: 退化选档不冒充实际壁厚", fallback["wall_mm"], None)
+
+    # 4) 压力缺失/非法:不给 H1E/V1E 假结论,壁厚留空,V15 报 error
+    for label, pressure in (("缺压力", None), ("压力为 0", 0.0), ("压力为负", -1.0)):
+        row = pc.build(
+            [{**base_stream, "name": "0201", "pressure_bar": pressure}], tables=SYNTH_TABLES
+        )["rows"][0]
+        check_eq(f"follow: {label} design_mpa", row["design_pressure_mpa"], None)
+        check_eq(f"follow: {label} wall_mm", row["wall_mm"], None)
+        check_eq(f"follow: {label} grade_code", row["grade_code"], None)
+        check(f"follow: {label} 仍给几何 DN", row["dn"] is not None, str(row))
+        check(f"follow: {label} 有 pressure_error", bool(row["pressure_error"]), str(row))
+        findings = pc.validate([row])["findings"]
+        check(
+            f"follow: {label} V15 error",
+            any(f["code"] == "V15" and f["level"] == "error" for f in findings),
+            str(findings),
+        )
+
+    # 5) 缺温度:保持几何 DN,壁厚为空,只留一条清晰提示
+    temp_row = pc.build(
+        [{**base_stream, "name": "0202", "temperature_c": None}], tables=SYNTH_TABLES
+    )["rows"][0]
+    check_eq("follow: 缺温度仍给几何 DN", temp_row["wall_mm"], None)
+    check("follow: 缺温度有 DN", temp_row["dn"] is not None, str(temp_row))
+    check(
+        "follow: 缺温度文案",
+        temp_row["warnings"].count("缺操作温度，无法计算设计温度与壁厚") == 1,
+        str(temp_row["warnings"]),
+    )
+    check(
+        "follow: 缺温度不重复缺许用应力",
+        "缺许用应力" not in ";".join(temp_row["warnings"]),
+        str(temp_row["warnings"]),
+    )
+
+    # 5b) R1E 路径缺操作温度:不能拿 None 去格式化超温说明;按普通缺温退化,
+    # 仍给几何 DN,壁厚/T_req/许用应力/min_wall 全空,且只留一条缺温提示。
+    r1e_temp = pc.build(
+        [
+            {
+                **base_stream,
+                "name": "0206",
+                "pressure_bar": 50.0,
+                "temperature_c": None,
+            }
+        ],
+        tables=SYNTH_TABLES,
+    )
+    r1e_temp_row = r1e_temp["rows"][0]
+    check_eq("follow: R1E 缺温度不抛异常(有行)", bool(r1e_temp_row), True)
+    check("follow: R1E 缺温度仍给几何 DN", r1e_temp_row["dn"] is not None, str(r1e_temp_row))
+    check_eq("follow: R1E 缺温度 wall_mm 为空", r1e_temp_row["wall_mm"], None)
+    check_eq("follow: R1E 缺温度 min_wall_mm 为空", r1e_temp_row["min_wall_mm"], None)
+    check_eq("follow: R1E 缺温度 t_required_mm 为空", r1e_temp_row["t_required_mm"], None)
+    check_eq("follow: R1E 缺温度 stress_mpa 为空", r1e_temp_row["stress_mpa"], None)
+    check(
+        "follow: R1E 缺温度与普通缺温行结构一致",
+        set(r1e_temp_row) == set(temp_row),
+        f"R1E={sorted(r1e_temp_row)} / 普通={sorted(temp_row)}",
+    )
+    check(
+        "follow: R1E 缺温度只留一条缺温提示",
+        r1e_temp_row["warnings"].count("缺操作温度，无法计算设计温度与壁厚") == 1,
+        str(r1e_temp_row["warnings"]),
+    )
+
+    # >350 ℃ 仍应进 missing:设计温度是有限数值,R1E 许用应力表越界。
+    over_temp = pc.build(
+        [
+            {
+                **base_stream,
+                "name": "0207",
+                "pressure_bar": 50.0,
+                "temperature_c": 400.0,
+            }
+        ],
+        tables=SYNTH_TABLES,
+    )
+    check_eq("follow: R1E 超温不生成输出行", over_temp["rows"], [])
+    check(
+        "follow: R1E 超温进 missing 并说明 350 ℃ 上限",
+        bool(over_temp["missing"])
+        and "R1E 许用应力表范围" in over_temp["missing"][0]["reason"]
+        and "350 ℃" in over_temp["missing"][0]["reason"],
+        str(over_temp["missing"]),
+    )
+
+    # 6) 缺汽化率 / 两相缺质量流量
+    vap_row = pc.build([{**base_stream, "name": "0203", "vap_frac": None}], tables=SYNTH_TABLES)[
+        "rows"
+    ][0]
+    check(
+        "follow: 缺汽化率有 warn",
+        "缺汽化率，暂按液相选型，请复核" in vap_row["warnings"],
+        str(vap_row),
+    )
+    two_row = pc.build(
+        [{**base_stream, "name": "0204", "vap_frac": 0.3, "mass_flow_kgh": None}],
+        tables=SYNTH_TABLES,
+    )["rows"][0]
+    check(
+        "follow: 两相缺质量流量有 warn",
+        "缺质量流量，未执行两相动压头（ρv²≤2000 Pa）限速校核" in two_row["warnings"],
+        str(two_row),
+    )
+
+    # 7) Pd>22:保留行、按设计压力算壁厚、等级号 None + 专项设计文案
+    high = pc.build([{**base_stream, "name": "0205", "pressure_bar": 230.0}], tables=SYNTH_TABLES)[
+        "rows"
+    ][0]
+    check("follow: Pd>22 保留行", high["wall_mm"] is not None, str(high))
+    check_eq("follow: Pd>22 等级号 None", high["grade_code"], None)
+    check(
+        "follow: Pd>22 未吃 PN 保护文案",
+        any("超出 PN 代号表，未吃 PN 保护，需专项设计" in w for w in high["warnings"]),
+        str(high["warnings"]),
+    )
+
+    # 8) 真空外压:C2 并入 t_req,负偏差后仍够;外压控制时不误打 wall_floored
+    ext = design_wall_for_od(
+        219.0,
+        0.1,
+        dn=200,
+        material="20#",
+        sigma=130.0,
+        design_temp_c=30.0,
+        c2_mm=1.0,
+        vacuum=True,
+        wall_grade="S1",
+        od_to_walls={219.0: (4.0, 5.0, 6.0)},
+        min_wall_map={200: 2.0},
+    )
+    need = ext["ext_wall_mm"] + 1.0
+    check_close("follow: 外压 t_req=t_ext+C2", ext["t_required_mm"], need, tol=1e-9)
+    c1 = 0.75
+    check("follow: S−C1 仍够外压所需", ext["wall_mm"] - c1 >= need - 1e-9)
+    check("follow: 外压控制不误标工艺托底", ext["floored"] is False)
+    vac_row = {
+        "stream": "0206",
+        "dn": 200,
+        "od_mm": 219.0,
+        "wall_mm": ext["wall_mm"],
+        "t_required_mm": ext["t_required_mm"],
+        "c1_mm": c1,
+        "design_pressure_mpa": 0.1,
+        "vacuum": True,
+        "external_wall_mm": ext["ext_wall_mm"],
+    }
+    check(
+        "follow: 外压 t_req 不触发 V3",
+        not any(f["code"] == "V3" for f in pc.validate([vac_row])["findings"]),
+        str(pc.validate([vac_row])["findings"]),
+    )
+
+
+def test_pipe_tag_grade_placeholder() -> None:
+    """等级号缺失时管路编号不能拼出字面 -None。"""
+    from app.design import pipe as pc
+    from app.export import pipe_schedule
+
+    base_stream = {
+        "name": "0101",
+        "stream_type": "MATERIAL",
+        "vol_flow_m3h": 10.0,
+        "temperature_c": 25.0,
+        "vap_frac": 0.0,
+    }
+    for label, pressure in (("缺压力", None), ("P_d > 22 MPa", 230.0)):
+        row = pc.build(
+            [{**base_stream, "pressure_bar": pressure}],
+            tables=SYNTH_TABLES,
+        )["rows"][0]
+        check_eq(f"tag: {label} grade_code 为空", row["grade_code"], None)
+        tag = pipe_schedule._pipe_tag(row)
+        check(
+            f"tag: {label} 用待确认占位",
+            tag.endswith("-待确认"),
+            tag,
+        )
+        check(f"tag: {label} 不含字面 -None", "-None" not in tag, tag)
+        check(f"tag: {label} 仍保留介质/流股/DN", tag.startswith("PL-0101-"), tag)
+
+
+def test_pipe_r1e_missing_reason_by_material() -> None:
+    """R1E 超许用应力范围时,S30408 与表 B.1 材质分别给出对应文案。"""
+    from app.design import pipe as pc
+
+    base_stream = {
+        "name": "0207",
+        "stream_type": "MATERIAL",
+        "vol_flow_m3h": 10.0,
+        "pressure_bar": 50.0,
+        "temperature_c": 400.0,
+        "vap_frac": 0.0,
+    }
+    s30408 = pc.build([base_stream], tables=SYNTH_TABLES)["missing"][0]["reason"]
+    check_eq(
+        "reason: S30408 保留 R1E 350 ℃ 文案",
+        s30408,
+        "设计温度 420 ℃ 超出 R1E 许用应力表范围(S30408 只到 350 ℃)，需人工给 [σ]^t 后再选型(§17.8)",
+    )
+
+    stress = {
+        **SYNTH_TABLES["stress"],
+        "S31603": {20: 150.0, 100: 140.0, 200: 130.0, 300: 120.0},
+    }
+    tables = {**SYNTH_TABLES, "stress": stress}
+    s31603_res = pc.build(
+        [{**base_stream, "name": "0208"}],
+        tables=tables,
+        options={"material_for_stream": {"0208": "S31603"}},
+    )
+    check_eq("reason: S31603 超温不生成输出行", s31603_res["rows"], [])
+    reason = s31603_res["missing"][0]["reason"]
+    check(
+        "reason: S31603 走表 B.1 文案",
+        "表 B.1 许用应力范围" in reason and "S30408 只到 350" not in reason,
+        reason,
+    )
+    check_eq(
+        "reason: S31603 文案完整",
+        reason,
+        "设计温度 420 ℃ 超出表 B.1 许用应力范围，需人工给 [σ]^t 后再选型(§17.8)",
     )

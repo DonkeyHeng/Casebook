@@ -206,7 +206,8 @@ CREATE TABLE IF NOT EXISTS blocks (
     dp_bar        REAL,   -- ⚠️ 来自 ASPEN 的 IN_PRES:实测是**压升 ΔP**,不是进口压力
     rho_kgm3      REAL,   -- RHO_LIQ × MW_LIQ,质量密度 kg/m³
     pump_vap_frac REAL,   -- 进口汽化率;>0 视为两相,NPSHₐ 不计算
-    motor_kw      REAL,   -- 建议电机功率(按默认裕量取的档位值)
+    power_source  TEXT,   -- BRAKE_POWER / ELEC_POWER;电功率回退时先 ×0.95 折回轴功率再选档
+    motor_kw      REAL,   -- 建议电机功率(轴功率 ÷ 传动效率 × 默认裕量 后取的档位值)
     pv_bar        REAL,   -- 饱和蒸气压 bar:读工况时自动取进口流股泡点压力,取不到可由用户手填
     pv_source     TEXT,   -- p_v 来源:aspen(进口流股泡点压力)/ manual(用户手填)
     -- 设备进出口流股温度(所有设备通用;数据来自 connections + streams,不读块上的 B_TEMP):
@@ -301,6 +302,7 @@ _BLOCK_ADDED_COLUMNS = (
     ("dp_bar", "REAL"),
     ("rho_kgm3", "REAL"),
     ("pump_vap_frac", "REAL"),
+    ("power_source", "TEXT"),
     ("motor_kw", "REAL"),
     # 饱和蒸气压 bar:读取工况时自动取进口流股的泡点压力(Aspen 现算值);
     # 读不到才留空,页面可逐台手填 —— 程序自己不做估算
@@ -507,8 +509,9 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                             rho_kgm3, pump_vap_frac, mu_cp, motor_kw, pv_bar, pv_source,
                             inlet_temp_c, outlet_temp_c, cold_in_temp_c, cold_out_temp_c,
                             outlet_vap_frac, cond_duty_kw, reb_duty_kw,
-                            dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json,
+                            power_source)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -548,6 +551,7 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 (b.get("balance") or {}).get("balance_state"),
                 (b.get("balance") or {}).get("balance_note"),
                 json.dumps(b.get("raw", {}), ensure_ascii=False),
+                b.get("power_source"),
             )
             for b in case.get("blocks", [])
         ],

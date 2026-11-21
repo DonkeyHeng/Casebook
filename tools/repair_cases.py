@@ -129,7 +129,7 @@ def repair_case(conn, case, apply: bool) -> dict:
         # 密度口径与 reader 一致:单相优先用进口流股的 m/V,拿不到才退回泵块 RHO_LIQ×MW
         vap = inlet.get("vap_frac") if inlet else None
         rho_from_flow = None
-        if inlet and (vap is None or float(vap) <= 0.001):
+        if inlet and (vap is None or float(vap) <= pump_rules.TWO_PHASE_VAP_LIMIT):
             mass, vol = inlet.get("mass_flow_kgh"), inlet.get("vol_flow_m3h")
             if mass and vol:
                 rho_from_flow = float(mass) / float(vol)

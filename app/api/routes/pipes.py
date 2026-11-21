@@ -119,7 +119,7 @@ class PipeRoutes:
                     "pump_inlet": _f("pump_inlet", base["velocity"]["pump_inlet"], 0.01, 100.0),
                 },
                 # §17.1/§17.2 口径:压力系数 1.15(原 1.1),DN 上限 1000(原 600)
-                "pressure_factor": _f("factor", base["pressure_factor"], 0.5, 10.0),
+                "pressure_factor": _f("factor", base["pressure_factor"], 1.0, 10.0),
                 "pressure_add_mpa": float(base.get("pressure_add_mpa", 0.15)),
                 "pressure_floor_mpa": _f("floor", base["pressure_floor_mpa"], 0.0, 100.0),
                 "max_dn": int(_f("max_dn", base["max_dn"], 1, 10000)),
@@ -159,6 +159,10 @@ class PipeRoutes:
             self._json(payload, 409)
             return
 
+        runs, _run_sources = db.pipe_runs_for(
+            conn, case_id, [str(r.get("stream")) for r in result.get("rows") or []]
+        )
+        result["rows"] = pipe_calc.apply_pipe_run_overrides(result["rows"], runs, options)
         result["validation"] = pipe_calc.validate(result["rows"], options)
         result["options"] = options
         result["options_source"] = options_source

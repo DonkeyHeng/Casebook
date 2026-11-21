@@ -407,6 +407,7 @@ PUMP_HEADERS = [
     "效率%",
     "轴功率kW",
     "建议电机kW",
+    "电机功率口径",
     "进口压力bar",
     "出口压力bar",
     "压升bar",
@@ -434,9 +435,12 @@ def _pumps_csv(pumps, lines_by_block: dict | None = None) -> bytes:
     """泵参数(只有 Pump 块)。
 
     两个值必须标清楚是**算的**,不能让读包的 AI 当成 Aspen 实测:
-      * 建议电机kW = 轴功率 ÷ 0.95 × 1.10 后取标准档位;
+      * 建议电机kW = **设计扬程口径**的 ρ·Q·H_设计·g/(3.6×10⁶·η) 为基准,
+        两侧管段齐全且非两相时优先用它;否则回退 Aspen 轴功率
+        (BRAKE_POWER;ELEC_POWER 回退时先 ×0.95 折回轴功率);
+        基准功率再 ÷ 传动效率 × **分段裕量**(<22 kW 1.25;22–55 kW 1.15;>55 kW 1.10);
       * NPSHa m  = (进口压力 − p_v)×10⁵ ÷ (ρ·g),**只在有 p_v 时才有值**;
-      * NPSHa修正 m = 装置值 − ΔZ_吸 − Σhf_吸,三态判据用它;
+      * NPSHa修正 m = 进口基准值 − ΔZ_吸 − Σhf_吸,三态判据用它;
       * 吸入/排出 DN 与 Σhf 来自与管道页共享的管段记录。
     空 = 没算,不是"不会汽蚀"。
     """
@@ -445,12 +449,17 @@ def _pumps_csv(pumps, lines_by_block: dict | None = None) -> bytes:
     lines_by_block = lines_by_block or {}
     rows = []
     for b in pumps:
-        npsh = pump_rules.npsh_available_m(b["p_in_bar"], b["pv_bar"], b["rho_kgm3"])
+        npsh = pump_rules.npsh_available_m(
+            b["p_in_bar"], b["pv_bar"], b["rho_kgm3"], b["pump_vap_frac"]
+        )
         lines = lines_by_block.get(b["name"]) or {}
         npsh_corrected = (lines.get("npsh") or {}).get("corrected_m")
         hf_total = (lines.get("totals") or {}).get("hf_m")
+        motor = (lines.get("totals") or {}).get("motor") or {}
         suction = _line_cells(lines, "suction")
         discharge = _line_cells(lines, "discharge")
+        warns = (lines.get("totals") or {}).get("warnings") or []
+        message = "；".join(x for x in [b["message"], *warns] if x)
         rows.append(
             [
                 b["name"],
@@ -459,7 +468,8 @@ def _pumps_csv(pumps, lines_by_block: dict | None = None) -> bytes:
                 _num(b["head_m"]),
                 _num(None if b["pump_eff"] is None else round(b["pump_eff"] * 100, 1)),
                 _num(b["power_kw"]),
-                _num(b["motor_kw"]),
+                _num(motor.get("kw") if motor else b["motor_kw"]),
+                (motor.get("power_source") or "") if motor else "Aspen轴功率（历史建议值）",
                 _num(b["p_in_bar"]),
                 _num(b["p_out_bar"]),
                 _num(b["dp_bar"]),
@@ -474,7 +484,7 @@ def _pumps_csv(pumps, lines_by_block: dict | None = None) -> bytes:
                 discharge[0],
                 discharge[1],
                 _num(hf_total),
-                b["message"] or "",
+                message,
             ]
         )
     return _csv_bytes(PUMP_HEADERS, rows)
@@ -664,7 +674,13 @@ def _readme_fields(w, blocks, composition, connections) -> None:
         w("| 扬程m | 泵块 `HEAD_CAL`,Aspen 原值;**反向工况为负** |")
         w("| 效率% | 泵块 `CEFF` × 100 |")
         w("| 轴功率kW | `BRAKE_POWER`,Aspen 原值(反向工况为负) |")
-        w("| 建议电机kW | **算的**:轴功率 ÷ 0.95 × 1.10 后向上取标准档位;功率 ≤ 0 时留空 |")
+        w(
+            "| 建议电机kW | **算的**:设计扬程口径轴功率优先(两侧管段齐全且非两相),"
+            "否则回退 Aspen 轴功率(ELEC_POWER ×0.95);"
+            "基准功率 ÷ 传动效率(直联 1.0)× 分段裕量后向上取标准档位;"
+            "分段裕量 <22 kW 1.25、22–55 kW 1.15、>55 kW 1.10;功率 ≤ 0 或反向工况留空 |"
+        )
+        w("| 电机功率口径 | 写明建议电机依据的是「设计扬程口径」还是「Aspen压升口径」及缺项原因 |")
         w("| 进口压力bar / 出口压力bar | 取自泵的**进口 / 出口流股**,不是泵块的 `IN_PRES` |")
         w(
             "| 压升bar | 泵块 `IN_PRES`。⚠️ 名字叫 IN_PRES,实测是**压升**:"
@@ -921,8 +937,11 @@ def _readme(
 # ---------------------------------------------------------------- 总入口
 
 
-def _pipe_result(streams, blocks, connections):
-    """管路选型结果;标准表没录全时返回 (None, None),不硬造数据。"""
+def _pipe_result(streams, blocks, connections, runs=None):
+    """管路选型结果;标准表没录全时返回 (None, None),不硬造数据。
+
+    人工 `pipe_run` 覆盖在 validate 之前合并,AI 包与页面、Excel、Word 同口径。
+    """
     from app.design import pipe as pipe_calc
 
     try:
@@ -933,11 +952,14 @@ def _pipe_result(streams, blocks, connections):
         return None, None
     except Exception:  # 选型出问题不该拖垮整个分析包
         return None, None
+    res["rows"] = pipe_calc.apply_pipe_run_overrides(res["rows"], runs)
     return res, pipe_calc.validate(res["rows"])
 
 
 def _pipe_csv(rows, checks) -> bytes:
     """管路选型表:一行一条流股,校验码写在一列里。"""
+    from app.design import pipe as pipe_calc
+
     hit: dict[str, list[str]] = {}
     for f in checks["findings"]:
         hit.setdefault(f["stream"], []).append(f["code"])
@@ -970,7 +992,7 @@ def _pipe_csv(rows, checks) -> bytes:
                 r["phase"],
                 r["medium_code"],
                 _num(r["vol_flow_m3h"]),
-                r["dn"],
+                pipe_calc.pipe_dn_text(r),
                 _num(r["od_mm"]),
                 _num(r["wall_mm"]),
                 r["material"],
@@ -1072,7 +1094,8 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
         files.append(("column_profiles.csv", _profiles_csv(stages_by_block)))
     if comp_rows:
         files.append(("composition.csv", _composition_csv(comp_rows, cas_map)))
-    pipe_res, pipe_checks = _pipe_result(streams, blocks, connections)
+    pipe_runs, _pipe_run_sources = db.pipe_runs_for(conn, case_id, [s["name"] for s in streams])
+    pipe_res, pipe_checks = _pipe_result(streams, blocks, connections, pipe_runs)
     if pipe_res:
         files.append(("pipe_schedule.csv", _pipe_csv(pipe_res["rows"], pipe_checks)))
     files.append(
