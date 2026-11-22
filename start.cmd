@@ -1,5 +1,5 @@
 @echo off
-rem Casebook launcher: check env -> start server -> wait for port -> open browser
+rem Casebook launcher: check env -> start server -> wait for server -> open browser
 chcp 65001 >nul
 setlocal
 cd /d "%~dp0"
@@ -32,7 +32,11 @@ if errorlevel 1 (
 )
 
 rem ---------- 3) already running -> just open the page ----------
-%PY% -c "import socket,sys; sys.exit(0 if socket.socket().connect_ex(('127.0.0.1',8000))==0 else 1)" >nul 2>nul
+rem Ask the PID file, not the port: on machines with a network filter driver
+rem (antivirus / firewall), connecting to a closed local port returns no RST and
+rem connect_ex blocks for ~2 s on every launch. The server writes this file
+rem right after it binds, so "file + live process" means the port is usable.
+%PY% "%~dp0tools\server_state.py" --port 8000 --quiet >nul 2>nul
 if not errorlevel 1 (
   echo Service already running, opening the page.
   start "" http://127.0.0.1:8000
@@ -42,13 +46,12 @@ if not errorlevel 1 (
 rem ---------- 4) start the server ----------
 start "Casebook server" cmd /k %PY% -m app.api --port 8000
 
-rem wait for the port (max 15 s). ping is used instead of timeout:
-rem Git Bash / MSYS ships a GNU timeout that shadows the Windows one.
+rem wait for the server (max ~18 s). The helper polls the PID file and sleeps
+rem inside, so no ping-based timer is needed here.
 set /a tries=0
 :wait
-ping -n 2 127.0.0.1 >nul 2>nul
 set /a tries+=1
-%PY% -c "import socket,sys; sys.exit(0 if socket.socket().connect_ex(('127.0.0.1',8000))==0 else 1)" >nul 2>nul
+%PY% "%~dp0tools\server_state.py" --port 8000 --wait 1 --quiet >nul 2>nul
 if not errorlevel 1 goto up
 if %tries% lss 15 goto wait
 

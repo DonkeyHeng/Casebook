@@ -28,6 +28,7 @@
 | `check_render.mjs` | 前端渲染回归（197 条）+ 模块依赖静态检查（import 可达、无漏 import）：Node + DOM 桩跑真实前端模块的泵悬浮窗 / 两侧管段 / 流股表 / 首页 / 家族页签 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底，挡住「模板读 state 缺字段 → 整块静默空白」；`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
+| `server_state.py` | 判断服务是否已在运行(**读 `data/server.pid`,不连端口**);`start.cmd` 用它代替 `connect_ex` 探测 —— 装了网络过滤驱动的机器上连未监听端口要等 2 s | ❌ | 只读 |
 | `ui_sweep.py` | 界面回归自检:无头浏览器过 7 个页签(浅色 + 深色),截图并收集 JS 异常 / `console.error` / 失败请求;需服务已启动 + 本机 Chrome/Edge | ❌ | 写 `data/preview/ui-check/`(不入库) |
 | `make_icon.py` | 源图 → `.ico`(圆形抠底 + 6 个尺寸) | ❌ | 写 `assets/` |
 | `check_public_safe.py` | 提交 / 发布前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
