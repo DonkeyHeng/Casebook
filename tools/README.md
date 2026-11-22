@@ -10,12 +10,13 @@
 | `probe_aspen.py` | COM 诊断:注册表、附着、字段全名(`--attach --deep`) | ✅ | 写 `--out` 指定目录 |
 | `probe_pump.py` | 泵字段探测:泵块 Output 全节点、进出口流股的蒸气压/密度、Input 里的曲线 | ✅ | 只打印(`--save` 写 `probe_out/`) |
 | `probe_pv.py` | 蒸气压 p_v 探测:逐台泵进口流股试候选节点、扫子树、按数值反查,定 p_v 到底在哪个节点 | ✅ 模型已打开且跑过 | 只打印(`--save` 写 `probe_out/`) |
+| `probe_pv.bat` | **双击入口**:同上,参数固定 | ✅ 同上 | 同上 |
 | `probe_components.py` | 组分字典探测:打印 `\Data\Components` 树与各候选父路径命中情况,判断这版 COM 树有没有组分属性层(CAS 读取路径的依据) | ✅ | 只打印 |
 | `probe_viscosity.py` | 粘度节点探测:打印流股 `Output\STRM_UPP` 下的子节点(`PL` / `PBUB` / `MUMX`)与候选路径读到的值+单位;加 `--leaves` 列出 5 层内所有有值叶子 | ✅ | 只打印 |
 | `probe_blocks.bat` / `probe_blocks.py` | **双击入口**:探测塔的冷凝器/再沸器负荷节点、换热器面积节点(Output 与 Input 都扫) | ✅ 模型已打开且跑过 | 只打印(`--save` 写 `probe_out/`) |
 | `dump_fixture.py` | 把当前打开的模型导出成**脱敏节点树夹具**(流股名/设备名自动改写),写 `tools/fixtures/<case>/tree.json` | ✅ 模型已打开且跑过 | 写 `tools/fixtures/` |
 | `fake_session.py` | 回放夹具的假 COM session:`read_case()` 不连 Aspen 也能跑;带 `drop_subtree` / `as_leaf` / `patch` 变异,用来守版本差异与单点故障 | ❌ | 只读夹具 |
-| `fixtures/` | 脱敏节点树夹具(JSON),给 `selftest.py` 的 `test_reader_fixture()` 用;格式与约定见 `fixtures/README.md` | ❌ | 只读 |
+| `fixtures/` | 脱敏节点树夹具(JSON),给 `selftest.py` 的 `test_reader_fixture()` 用;分 `v11-pump` / `v15-real` / `v15-typical` 三套,格式与约定见 `fixtures/README.md` | ❌ | 只读 |
 | `build_sample.py` | 从当前打开的模型重读一份工况,生成**脱敏**的公开示例库 `samples/case-23-error.db`;`--from-db data/cases.db --case N` 可改成从已读工况复制(不用 Aspen) | ✅ 模型已打开(用 `--from-db` 时不用) | 写 `samples/` |
 | `build_sample.bat` | **双击入口**:同上,必须在桌面会话跑(DSH 沙箱里 ROT 为空) | ✅ | 同上 |
 | `bench.py` | 性能基准:COM 调用成本与规模曲线 | ✅ | 只打印 |
@@ -24,7 +25,7 @@
 | `balance_report.py` | 批量生成《物料与能量衡算报告》.docx:`python -m tools.balance_report --case 40 [--blocks …] [--families …]`;与网页「衡算报告」页同一套代码 | ❌ | 写 `data/preview/`(或 `--out`) |
 | `selftest.py` | 回归自测的**薄入口**,用例正文在 `tests/`(pytest);判定 / 单位 / 焓平衡 / 管路选型 / 泵 / HTTP,拿真实工况当固定样本;含 `test_reader_fixture()` 用 `fixtures/` 回放整棵 COM 节点树 | ❌ | 只读库 |
 | `make_pipe_schedule.py` | 命令行生成《管道选型一览表》.docx(与网页导出同一套代码):`python -m tools.make_pipe_schedule --case 55 [--audit] [--out …]` | ❌ | 写 `data/preview/`(或 `--out`) |
-| `check_render.mjs` | 前端渲染回归（193 条）+ 模块依赖静态检查（import 可达、无漏 import）：Node + DOM 桩跑真实前端模块的泵悬浮窗 / 两侧管段 / 流股表 / 首页 / 家族页签 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底，挡住「模板读 state 缺字段 → 整块静默空白」；`node --check` 查不出这类问题 | ❌ | 只打印 |
+| `check_render.mjs` | 前端渲染回归（197 条）+ 模块依赖静态检查（import 可达、无漏 import）：Node + DOM 桩跑真实前端模块的泵悬浮窗 / 两侧管段 / 流股表 / 首页 / 家族页签 / λ 口径 / 对比页 / 报告勾选 / 缺字段兜底，挡住「模板读 state 缺字段 → 整块静默空白」；`node --check` 查不出这类问题 | ❌ | 只打印 |
 | `repair_cases.py` | 按最新规则 / 单位表回算历史工况,**不用回 Aspen 重读** | ❌ | `--apply` 时写库 |
 | `stop.py` | 按端口停服务:`python tools/stop.py 8000` | ❌ | 停进程 |
 | `ui_sweep.py` | 界面回归自检:无头浏览器过 7 个页签(浅色 + 深色),截图并收集 JS 异常 / `console.error` / 失败请求;需服务已启动 + 本机 Chrome/Edge | ❌ | 写 `data/preview/ui-check/`(不入库) |
@@ -32,6 +33,13 @@
 | `check_public_safe.py` | 提交 / 发布前自检:密钥、隐私、本机路径、内网、误入库;`--all` 连全历史一起查 | ❌ | 只打印 |
 | `build_exe.py` | 用 PyInstaller 打包：默认单文件浏览器版，`--desktop --onedir` 出桌面壳目录版（需要 `pip install pyinstaller`） | ❌ | 写 `data/preview/{dist,build}` |
 | `make_release.py` | 打源码 zip 与 Windows 桌面 zip 两个发布包，打印大小与 SHA-256 | ❌ | 写 `data/preview/dist` |
+| `make_calc_manuals.py` | 两册《计算说明书》的入口：兼容旧调用，实际转调 md 渲染器。**正文改动请改 `docs/*.md`** | ❌ | 写 `docs/*.docx` |
+| `make_calc_manuals_from_md.py` | 从 `docs/casebook-*-calc-manual.md` 渲染 docx（md 是正文唯一来源），复用排版层；目录是 Word 域，生成后需刷新 | ❌ | 写 `docs/*.docx` |
+| `calc_manual_math.py` | 说明书公式与上下标符号 → Word 原生公式（OMML，经 pandoc）；正文保持纯文本写法 | ❌ | 只读（渲染器调用） |
+| `manual_facts.py` | 从源码抽「事实基线」：节点路径、单位换算系数、真实符号名与边界值，供内容自检比对 | ❌ | 只读 |
+| `manual_appendix_b.py` | 两册附录 B（版本记录）的唯一数据源，条目按 `[管路册]` / `[泵册]` / `[两册]` 标注 | ❌ | 只读 |
+| `check_manual_refs.py` | 校验说明书 md 的章节 / 表格交叉引用是否全部落地 | ❌ | 只打印 |
+| `check_manual_content.py` | 内容级自检：路径段、单位系数、符号名与 `app/` 源码逐条比对，抓「句子合法但描述不对」 | ❌ | 只打印 |
 
 ## 常见用途
 
@@ -44,6 +52,7 @@
   `fixtures/`,再跑 `selftest.py`:夹具会拦住"新路径拼错 / 版本少了一层"这类静默变空
 - 改了 `app/web/static/` 下任意 JS 的渲染逻辑 → `node --check` 查语法,再 `node tools/check_render.mjs` 查静默空白
 - 改了前端 / CSS 且服务已起来 → `python -m tools.ui_sweep`(无头浏览器过 7 页 × 两主题,抓控制台报错);脚本不会自己启动服务,截图不入库
+- 改两册《计算说明书》 → 只改 `docs/casebook-*-calc-manual.md`,再 `python -m tools.make_calc_manuals`(转调 md 渲染),最后 `python -m tools.check_manual_content` 查描述与代码是否一致
 - 读完工况、想给整份工况补组成(导出样本 / 离线分析)→ `fill_composition.py --case N`,要趁 Aspen 还开着
 - 读得太慢 → `bench.py`
 - 提交前 / 发布前 → `check_public_safe.py --all`

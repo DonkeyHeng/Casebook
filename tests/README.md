@@ -9,7 +9,7 @@ python -m tools.selftest                    # 不装 pytest 时的薄入口（�
 python -m tools.selftest --db samples/case-23-error.db  # 追加库一致性检查
 ```
 
-2026-11-21 实测：`pytest tests/ -q` 为 73 passed；`tools.selftest` 为 1191 条断言（新增说明书一致性用例）。
+2026-11-22 实测：`pytest tests/ -q` 为 75 passed；`tools.selftest` 为 1245 条断言；`node tools/check_render.mjs` 为 197 条。
 
 ## 文件
 
@@ -21,7 +21,7 @@ python -m tools.selftest --db samples/case-23-error.db  # 追加库一致性检�
 | `test_aspen.py` | 单位表、COM 节点树夹具回放、组成替换、组分字典 CAS / 中文名 |
 | `test_balance.py` | 焓平衡、物料衡算、能量衡算与宽表 |
 | `test_report.py` | 衡算报告导出、勾选设备、报错波及范围 |
-| `test_pipe.py` | 管路十步选型、V1–V15 校核(V14 预留)、标准表导入 / 版本化、管道等级表、Re / λ / Σhf |
+| `test_pipe.py` | 管路十步选型、V1–V13 校核(V1 为历史校验、V14 未实现)、标准表导入 / 版本化、管道等级表、Re / λ / Σhf |
 | `test_pump.py` | 泵派生量、p_v 读取 / 存储 / 沿用、设备表泵列、分类导出、选泵提示词 |
 | `test_pump_line.py` | 泵两侧管段：L / Σζ / ΔZ / 管件 → Σhf、缺项与三态、修正 NPSHₐ，以及 `pipe_run` / `pipe_setting` 的读写与版本冲突 |
 | `test_calc_manuals_consistency.py` | 计算说明书与 `app/design` 常量、两册公共阈值的一致性；复用 `tools/check_manual_refs.py` 检查全部交叉引用死链 |

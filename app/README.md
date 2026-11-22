@@ -14,6 +14,7 @@ app/
     reader.py     读流股 / 组成 / 设备 / 收敛 / 塔剖面;judge() 是唯一的判定入口
     units.py      单位归一(℃ / bar / kg·h⁻¹ / kW);不认识的单位留空并计数
     balance.py    焓平衡自检 ΔH vs 热负荷 / 轴功率(纯函数,可回算)
+    bkp_components.py 从模型文件(.bkp / .apw)纯文本解析组分字典与 CAS,不需要 Aspen 在跑
   store/   只碰本地数据,不连 Aspen
     db.py         SQLite 工况库:cases / streams / stream_components / blocks / column_stages / connections,
                   以及管路与泵的持久化记录 pipe_run / pipe_setting / pump_selection / pump_design
@@ -38,13 +39,22 @@ app/
                    页面、Excel、AI 包与自测共用,避免同一根管子两个数
     pump_prompt.py 选泵提示词正文(唯一来源,三个出口都读它)
     pipe/         管路选型(改一处要一起看的三块,放在一个包里)
-      calc.py     十步选型:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → [σ] → 壁厚 →
-                  圆整(含负偏差)→ 等级号;外加校验 V1–V15(V14 预留)
-      data.py     标准数据表(表 8/9 壁厚偏差、Y 值、PN/材质代号、DN→外径)+ 运行时加载
-                  表 1 / 表 4 / 表 B.1 的 CSV(`data/preview/std/docx/`,不入库)+ 管道等级表(用户配置)
-      prompt.py   「复制填写提示词」的正文:文件名/必需列取自 STD_FILES,
-                  示例行取自 samples/pipe-standards-template/(唯一来源)
+      calc.py       十步选型主流程:相态 → 流速 → 内径 → 选 DN → 设计压力/温度 → [σ] →
+                    壁厚 → 圆整(含负偏差)→ 等级号;单步实现拆在同目录
+      step_phase.py / step_dn.py / step_design.py / step_wall.py / step_grade.py
+                    十步里各步的独立函数:相态与目标流速、选 DN(含 DN1000 容差)、
+                    设计压力/温度/σ、壁厚与圆整、PN 与等级号
+      data.py       标准数据表(表 8/9 壁厚偏差、Y 值、PN/材质代号、DN→外径、R1E 参数)
+                    + 运行时加载表 1 / 表 4 / 表 B.1 的 CSV(版本化目录
+                    `data/preview/std/versions/`,老位置 `preview/std/docx/` 兜底,均不入库)
+                    + 管道等级表(用户配置)
+      overrides.py  人工覆盖(DN,或自定义外径 + 壁厚)与自动选档的合并层:页面、Word/Excel
+                    导出与 validate() 都走它;自动原值另存 auto_dn / auto_od_mm / auto_wall_mm
+      validate.py   校验 V1–V13(V1 为历史校验、无产出方;V14 未实现)
+      prompt.py     「复制填写提示词」的正文:文件名/必需列取自 STD_FILES,
+                    示例行取自 samples/pipe-standards-template/(唯一来源)
   export/  数据 → 文件字节(.docx / .xlsx / zip);不认 HTTP,网页与命令行共用同一套
+    docx_kit.py       两份 Word 共用的版式骨架(封面、页眉页脚、三线表、公式域)
     report.py         衡算报告 .docx(物料 + 能量,三线表;python-docx 懒导入)
     pipe_schedule.py  管道选型一览表 .docx(复用 report 的封面 / 页眉 / 三线表骨架)
     family_xlsx.py    按设备分类导出 .xlsx(设备页「导出 Excel」)
@@ -70,6 +80,7 @@ app/
   web/     零构建前端(原生 ES Module):index.html + static/
     app.js       入口:事件绑定与 init;页面实现在 views/
     pipe.js      管道页(单独一个模块:进页才拉数据)
+    download.js  导出的落盘端:浏览器交给下载栏,桌面壳改由主进程写 data/exports/
     lib/core.js  请求封装与数字格式化(全部页面共用)
     lib/store.js 共享页面状态(state 是唯一数据源,字段归属表见文件头)
     lib/ui.js    界面外壳公用件:主题、提示条、徽章、判定条

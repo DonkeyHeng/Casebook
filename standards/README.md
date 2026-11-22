@@ -22,5 +22,6 @@
 
 ## 能不能删
 
-能,程序启动与运行都不读这里。删掉只是查表时要重新准备一份原文;
-已经导入的标准表 CSV 存在 `data/preview/std/docx/`,与这些 PDF 无关(见 [`data/README.md`](../data/README.md))。
+能，程序启动与运行都不读这里。删掉只是查表时要重新准备一份原文；
+已经导入的标准表 CSV 存在 `data/preview/std/versions/<时间戳>/`（`current.txt` 指向当前生效版本，
+老位置 `data/preview/std/docx/*.csv` 仍作兜底），与这些 PDF 无关（见 [`data/README.md`](../data/README.md)）。
