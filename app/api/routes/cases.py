@@ -245,9 +245,21 @@ class CaseRoutes:
         blocks = [dict(row) for row in db.read_blocks(conn, case_id)]
         streams = [dict(row) for row in db.read_streams(conn, case_id)]
         connections = [dict(row) for row in db.read_connections(conn, case_id)]
-        rows = []
+        # 家族先算一遍:下面要按家族挑泵,不能让同一台设备算两次
         for item in blocks:
             item["family"] = block_family.family_of_block(item)
+
+        # 全表选型只跑一次给所有泵共用。每台泵各跑一遍是 27 × 27 ms ≈ 0.9 s
+        # (实测 #67 有 27 台泵时 /blocks 0.80–0.90 s);设备表本来就不该为同一份
+        # 结果算 27 次。
+        pipe_table = None
+        if any(item["family"] == "pump" for item in blocks):
+            pipe_table = pump_line_context.pipe_table_for(
+                conn, case_id, blocks=blocks, streams=streams, connections=connections
+            )
+
+        rows = []
+        for item in blocks:
             if item["family"] == "pump":
                 try:
                     lines = pump_line_context.lines_for(
@@ -257,6 +269,7 @@ class CaseRoutes:
                         blocks=blocks,
                         streams=streams,
                         connections=connections,
+                        pipe_table=pipe_table,
                     )
                     motor = (lines.get("totals") or {}).get("motor") or {}
                     item["motor_suggested_kw"] = motor.get("kw")

@@ -426,6 +426,83 @@ def test_pump_line_selection_corrected():
     check("台账: 余量 0 不标成默认值", zero_view["margin_is_default"] is False)
 
 
+def test_pump_line_context_shared_table():
+    """设备表一次请求里多台泵共用一次全表选型(27 次 → 1 次),结果必须一模一样。
+
+    回归点:`/api/cases/{id}/blocks` 给每台泵补建议电机功率时,以前每台泵各跑
+    一遍 `pipe.build()`(选的是**全表**流股,和第几台泵无关)。#67 有 27 台泵,
+    实测 0.80–0.90 s;改成一次算好共用后 0.13 s。这里把"共用"钉住,
+    并逐字段比对共用结果与单台自己算的结果 —— 只快、数字变了也不行。
+    """
+    import json
+
+    from app.design import pump_line_context
+    from app.store import db
+
+    conn = db.open_db(":memory:")
+    conn.execute(
+        "INSERT INTO cases (id, model_path, model_name, model_hash, read_at) "
+        "VALUES (1, 'm.apw', 'M', 'hash-1', '2026-01-01 00:00:00')"
+    )
+    for name in ("S1", "S2"):
+        conn.execute(
+            "INSERT INTO streams (case_id, name, vol_flow_m3h, mass_flow_kgh, vap_frac) "
+            "VALUES (1, ?, 100.0, 100000.0, 0.0)",
+            (name,),
+        )
+    conn.execute("INSERT INTO blocks (case_id, name, type) VALUES (1, 'P1', 'Pump')")
+    conn.execute("INSERT INTO blocks (case_id, name, type) VALUES (1, 'P2', 'Pump')")
+    insert_conn = "INSERT INTO connections (case_id, block, direction, stream) VALUES (1, ?, ?, ?)"
+    for block in ("P1", "P2"):
+        conn.execute(insert_conn, (block, "in", "S1"))
+        conn.execute(insert_conn, (block, "out", "S2"))
+    conn.commit()
+
+    blocks = [dict(r) for r in db.read_blocks(conn, 1)]
+    streams = [dict(r) for r in db.read_streams(conn, 1)]
+    conns = [dict(r) for r in db.read_connections(conn, 1)]
+
+    # 选型本身有标准表依赖:这里只数"跑了几次",不关心算出来的具体行
+    calls = {"n": 0}
+    original = pump_line_context._pipe_rows
+
+    def fake_pipe_rows(*_args, **_kwargs):
+        calls["n"] += 1
+        return _rows(), [], ""
+
+    pump_line_context._pipe_rows = fake_pipe_rows
+    try:
+        table = pump_line_context.pipe_table_for(
+            conn, 1, blocks=blocks, streams=streams, connections=conns
+        )
+        check_eq("共用表:全表选型只跑一次", calls["n"], 1)
+
+        shared = [
+            pump_line_context.lines_for(
+                conn, 1, b, blocks=blocks, streams=streams, connections=conns, pipe_table=table
+            )
+            for b in blocks
+        ]
+        check_eq("共用表:两台泵不再各跑一遍", calls["n"], 1)
+
+        alone = [
+            pump_line_context.lines_for(
+                conn, 1, b, blocks=blocks, streams=streams, connections=conns
+            )
+            for b in blocks
+        ]
+        check_eq("不传表:每台泵各跑一次", calls["n"], 3)
+        check(
+            "共用与单台计算的结果逐字段一致",
+            json.dumps(shared, sort_keys=True, default=str)
+            == json.dumps(alone, sort_keys=True, default=str),
+        )
+        check_eq("共用表带上了同一组管道页参数", shared[0]["options"], table["options"])
+    finally:
+        pump_line_context._pipe_rows = original
+        conn.close()
+
+
 def test_line_http_roundtrip():
     """POST /lines/{stream} 真跑一遍:首次写入 200、旧版本 409、未知流股 404。
 

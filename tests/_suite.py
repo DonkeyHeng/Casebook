@@ -93,6 +93,7 @@ CASES: list[tuple[str, object]] = [
     ("电机分段裕量(API 610)", test_pump.test_pump_motor_margin_segments),
     ("建议电机设计扬程优先", test_pump_line.test_pump_line_motor_design_first_and_fallback),
     ("管道页参数校验", test_pump_line.test_pipe_options_validate),
+    ("设备表共用一次全表选型", test_pump_line.test_pump_line_context_shared_table),
     ("管段记录 HTTP 往返", test_pump_line.test_line_http_roundtrip),
     (
         "计算说明书常量与引用一致",

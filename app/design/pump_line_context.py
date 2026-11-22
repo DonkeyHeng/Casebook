@@ -6,6 +6,11 @@
 
 `pipe.build()` 必须带**该模型存下来的管道页参数**;旧实现没传 options,
 泵面板用的是默认流速,和管道页顶栏参数不一致(同一根管子两个 DN)。
+
+一次请求里有多台泵时,`pipe.build()` 只该跑一次:它选的是**全表**流股,
+和第几台泵无关。设备表给 27 台泵各跑一遍,实测 `/blocks` 要 0.80–0.90 s;
+改走 `pipe_table_for()` 一次算好、`lines_for(..., pipe_table=...)` 共用,
+同一份结果从 27 次降到 1 次。单个泵面板只有一个 block,走默认路径即可。
 """
 
 from __future__ import annotations
@@ -63,6 +68,40 @@ def _pipe_rows(conn, case_id: int, *, blocks, streams, connections, options):
         return [], [], f"管道选型失败:{exc}"
 
 
+def pipe_table_for(
+    conn, case_id: int, *, blocks=None, streams=None, connections=None, options: dict | None = None
+) -> dict:
+    """跑**一次**全表管道选型,结果给同一次请求里的多台泵共用。
+
+    `pipe.build()` 选的是全表流股,和第几台泵无关;每台泵各跑一遍纯属重复劳动
+    (27 台泵 × 27 ms ≈ 0.9 s,实测设备表 0.80–0.90 s)。返回值原样传给
+    `lines_for(..., pipe_table=...)` 即可,数字与单台自己算完全一致。
+
+    返回 `{options, rows, missing, error}`。`error` 是标准表没录全时的中文原因,
+    此时 rows 为空,由 `lines_for` 按"表格给不出规格"照常展示。
+    """
+    from app.store import db
+
+    streams = [
+        dict(s) for s in (streams if streams is not None else db.read_streams(conn, case_id))
+    ]
+    blocks = [dict(b) for b in (blocks if blocks is not None else db.read_blocks(conn, case_id))]
+    connections = [
+        dict(c)
+        for c in (connections if connections is not None else db.read_connections(conn, case_id))
+    ]
+    options = _merge_options(options if options is not None else options_for(conn, case_id))
+    rows, missing, error = _pipe_rows(
+        conn,
+        case_id,
+        blocks=blocks,
+        streams=streams,
+        connections=connections,
+        options=options,
+    )
+    return {"options": options, "rows": rows, "missing": missing, "error": error}
+
+
 def lines_for(
     conn,
     case_id: int,
@@ -73,8 +112,13 @@ def lines_for(
     connections=None,
     options: dict | None = None,
     saved: dict | None = None,
+    pipe_table: dict | None = None,
 ) -> dict:
-    """一台泵的两侧管段视图(含合计、修正 NPSHₐ、三态)。"""
+    """一台泵的两侧管段视图(含合计、修正 NPSHₐ、三态)。
+
+    `pipe_table` 传 `pipe_table_for()` 的结果时不再自己跑选型 —— 同一次请求里
+    多台泵共用一份,数字不变,只是不再重复计算。
+    """
     from app.store import db
 
     block = dict(block)
@@ -86,7 +130,15 @@ def lines_for(
         dict(c)
         for c in (connections if connections is not None else db.read_connections(conn, case_id))
     ]
-    options = _merge_options(options if options is not None else options_for(conn, case_id))
+    table = (
+        pipe_table
+        if pipe_table is not None
+        else pipe_table_for(
+            conn, case_id, blocks=blocks, streams=streams, connections=connections, options=options
+        )
+    )
+    options = table["options"]
+    rows, missing, tables_error = table["rows"], table["missing"], table["error"]
 
     key = db.model_key(conn, case_id)
     picks = db.read_pump_stream_pick(conn, key, block["name"])
@@ -97,14 +149,6 @@ def lines_for(
     )
     runs, run_sources = db.pipe_runs_for(conn, case_id, names)
 
-    rows, missing, tables_error = _pipe_rows(
-        conn,
-        case_id,
-        blocks=blocks,
-        streams=streams,
-        connections=connections,
-        options=options,
-    )
     if tables_error:
         # 表格给不出规格时仍返回两侧流股与状态,只把原因说清楚
         missing = [{"stream": s, "reason": tables_error} for s in names]

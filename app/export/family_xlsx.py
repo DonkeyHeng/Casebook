@@ -183,6 +183,10 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
         streams = db.read_streams(conn, case_id)
         connections = db.read_connections(conn, case_id)
         all_blocks = db.read_blocks(conn, case_id)
+        # 与整本 Excel / AI 包同一口径:全表选型一次,所有泵共用
+        table = pump_line_context.pipe_table_for(
+            conn, case_id, blocks=all_blocks, streams=streams, connections=connections
+        )
         lines_by_block = {
             b["name"]: pump_line_context.lines_for(
                 conn,
@@ -191,6 +195,7 @@ def build_family_workbook(conn, case_id: int, family: str) -> tuple[bytes, str, 
                 blocks=all_blocks,
                 streams=streams,
                 connections=connections,
+                pipe_table=table,
             )
             for b in blocks
         }

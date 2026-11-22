@@ -188,6 +188,10 @@ def build_workbook(conn, case_id: int) -> bytes:
         from app.design import pump as pump_rules
         from app.design import pump_line_context
 
+        # 全表选型一次算好给所有泵共用:每台泵各跑一遍等于把同一份结果算 27 次
+        table = pump_line_context.pipe_table_for(
+            conn, case_id, blocks=blocks, streams=streams, connections=connections
+        )
         lines_by_block = {
             b["name"]: pump_line_context.lines_for(
                 conn,
@@ -196,6 +200,7 @@ def build_workbook(conn, case_id: int) -> bytes:
                 blocks=blocks,
                 streams=streams,
                 connections=connections,
+                pipe_table=table,
             )
             for b in pumps
         }

@@ -1073,6 +1073,10 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     if pumps:
         from app.design import pump_line_context
 
+        # 全表选型一次算好,所有泵共用(与设备表、Excel 导出同一口径)
+        table = pump_line_context.pipe_table_for(
+            conn, case_id, blocks=blocks, streams=streams, connections=connections
+        )
         lines_by_block = {
             b["name"]: pump_line_context.lines_for(
                 conn,
@@ -1081,6 +1085,7 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
                 blocks=blocks,
                 streams=streams,
                 connections=connections,
+                pipe_table=table,
             )
             for b in pumps
         }
