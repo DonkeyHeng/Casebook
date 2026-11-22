@@ -279,16 +279,17 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
     t_req = float(wall_res["t_required_mm"]) if wall_res["t_required_mm"] is not None else None
     welded = bool(wall_res["welded"])
     if welded:
+        walls_disp = " / ".join(f"{value:g}" for value in pipe_data.welded_wall_series(od))
         _add_warning(
-            f"DN{dn} 属大口径焊接管:壁厚按 {pipe_data.WELDED_WALL_SERIES} 常用序列圆整,"
-            "需按 GB/T 3091 / GB/T 9711 复核"
+            f"DN{dn} 属大口径焊接管:壁厚按 HG/T 20553-2011 表 2.0.2-2 Ia 系列 "
+            f"{walls_disp} mm 圆整,需按采购规格复核"
         )
     ext_wall_mm = wall_res["ext_wall_mm"]
     if pd["vacuum"]:
         if ext_wall_mm is not None:
             _add_warning(
                 f"真空流股:内压按最小壁厚,外压失稳筛查 t_min={ext_wall_mm:.2f} mm(§17.1),"
-                "真实支撑跨距需按 GB/T 20801.3 复核"
+                "真实支撑跨距需按 GB/T 20801.1-2025 6.6.1.3 与 GB/T 150.3 复核"
             )
         else:
             _add_warning("真空流股:外压失稳最小壁厚未算出,需专项复核")
@@ -319,8 +320,8 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
                 )
     if hp_formula:
         warnings.append(
-            f"R1E 公式口径:t={t_req:.2f} mm(按 [σ]^t 插值、C=1.0、÷0.875),"
-            "圆整到该外径标准壁厚(§17.8)"
+            f"R1E 项目专用非标准公式(不声称标准符合性):t={t_req:.2f} mm"
+            "(按 [σ]^t 插值、C=1.0、÷0.875),圆整到该外径标准壁厚(§17.8)"
         )
     pipe_type = "无缝" if dn <= DN_SEAMLESS_MAX else "焊接"
     return dn, od, w, wall, min_wall_mm, t_req, pipe_type, ext_wall_mm
@@ -650,7 +651,7 @@ def _select_stream(
         mcode = "E"
         if msource == "heat_resistant":
             warnings.append(
-                f"材质 {material!r} 疑似铬钼耐热钢:本工具未设耐热合金钢代号 D,"
+                f"材质 {material!r} 疑似铬钼耐热钢:本工具未设合金钢代号 D,"
                 "等级号末字母按 E 暂记,待人工确认"
             )
         else:

@@ -106,6 +106,10 @@ def test_pump() -> None:
         "÷ 1" in pump.pick_motor(140.0)[1],
         pump.pick_motor(140.0)[1],
     )
+    small_kw, small_note = pump.pick_motor(1.0)
+    check_eq("泵:1 kW 仍按工程档位选 1.5 kW", small_kw, 1.5)
+    check("泵:低于 4 kW 给出标准提示", "最小可接受值 4 kW" in small_note, small_note)
+    check("泵:低于 4 kW 提示买方批准", "买方批准" in small_note, small_note)
 
 
 def test_pump_motor_margin_segments() -> None:

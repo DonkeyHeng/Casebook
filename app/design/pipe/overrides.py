@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -21,15 +22,26 @@ from .step_wall import design_wall_for_od
 from .validate import actual_velocity
 
 
-def _num(value) -> float | None:
+def _finite(value) -> float | None:
+    """接受任意有限数；设计与工艺字段中的 0、负温度不能当成缺值。"""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     value = float(value)
-    return value if value > 0 else None
+    return value if math.isfinite(value) else None
+
+
+def _positive(value) -> float | None:
+    value = _finite(value)
+    return value if value is not None and value > 0 else None
+
+
+def _nonnegative(value) -> float | None:
+    value = _finite(value)
+    return value if value is not None and value >= 0 else None
 
 
 def _dn_num(value) -> int | None:
-    value = _num(value)
+    value = _positive(value)
     return int(value) if value is not None else None
 
 
@@ -53,8 +65,8 @@ def _recompute_wall(
     custom: bool = False,
 ) -> dict | None:
     """按生效外径重算标准壁厚;自定义规格时只算 `t_required` 供 V3 用。"""
-    pressure = _num(row.get("design_pressure_mpa"))
-    sigma = _num(row.get("stress_mpa"))
+    pressure = _nonnegative(row.get("design_pressure_mpa"))
+    sigma = _positive(row.get("stress_mpa"))
     if pressure is None or sigma is None:
         return None
     return design_wall_for_od(
@@ -63,11 +75,11 @@ def _recompute_wall(
         dn=dn,
         material=str(row.get("material") or ""),
         sigma=sigma,
-        design_temp_c=_num(row.get("design_temp_c")),
-        c2_mm=_num(row.get("c2_mm")) or 0.0,
+        design_temp_c=_finite(row.get("design_temp_c")),
+        c2_mm=_nonnegative(row.get("c2_mm")) or 0.0,
         vacuum=bool(row.get("is_vacuum", row.get("vacuum"))),
         hot_vacuum=bool(row.get("hot_vacuum")),
-        hp_c_mm=_num(row.get("r1e_c_mm")),
+        hp_c_mm=_nonnegative(row.get("r1e_c_mm")),
         force_pn_code="R" if row.get("hp_ss_upgraded") else None,
         options=options,
     )
@@ -86,8 +98,8 @@ def apply_pipe_run_overrides(
         row = dict(source)
         run = runs.get(str(row.get("stream"))) or {}
         dn_override = _dn_num(run.get("dn_override"))
-        od_override = _num(run.get("od_override_mm"))
-        wall_override = _num(run.get("wall_override_mm"))
+        od_override = _positive(run.get("od_override_mm"))
+        wall_override = _positive(run.get("wall_override_mm"))
         warnings = list(row.get("warnings") or [])
 
         if od_override and wall_override:
@@ -181,7 +193,7 @@ def pipe_dn_text(row: Mapping[str, Any]) -> str:
     dn = row.get("dn")
     if dn is not None and str(dn).strip():
         return str(int(dn))
-    od = _num(row.get("od_mm"))
+    od = _positive(row.get("od_mm"))
     if od is not None and str(row.get("spec_source") or "") == "custom":
         return f"Φ{od:g}"
     return ""

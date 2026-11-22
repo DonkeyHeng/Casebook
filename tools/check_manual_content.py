@@ -312,6 +312,11 @@ def check_docx(kind: str, text: str) -> list[Issue]:
         if key and key not in compact:
             issues.append(Issue(name, 0, "docx", f"docx 缺少路径 {raw}"))
 
+    # 目录是 TOC 域，条目由 Word 打开后更新（F9）生成；占位未消除即视为发布产物未完成。
+    if any("目录将在 Word 中更新" in part for part in parts):
+        issues.append(Issue(name, 0, "docx-toc", "目录仍为占位提示，未在 Word 中更新域"))
+        return issues
+
     toc = [part.rsplit("\t", 1)[0] for part in parts if re.search(r"\t\d+$", part) and part.strip()]
     toc_titles = {_norm(title) for title in toc}
     headings = {

@@ -8,7 +8,7 @@
 * `step_design.py` —— 5–7 设计压力 / 温度 / 许用应力
 * `step_wall.py` —— 8–9 壁厚
 * `step_grade.py` —— 10 等级号
-* `validate.py` —— 结果校验 V1–V14
+* `validate.py` —— 结果校验 V1–V15(V14 预留)
 * `selection.py` —— 批量编排
 
 保留本文件是为了让既有 `from app.design.pipe.calc import X`（以及

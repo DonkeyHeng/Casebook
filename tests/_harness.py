@@ -17,6 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 PASSED: list[str] = []
 FAILED: list[tuple[str, str]] = []
+SKIPPED: list[str] = []
 
 
 def check(label: str, cond: bool, detail: str = "") -> None:
@@ -26,6 +27,16 @@ def check(label: str, cond: bool, detail: str = "") -> None:
         return
     FAILED.append((label, detail))
     raise AssertionError(f"{label}" + (f" — {detail}" if detail else ""))
+
+
+def skip(label: str, reason: str = "") -> None:
+    """记一条本机条件不具备、没跑的用例。
+
+    标准壁厚序列(T2)、许用应力表(T3)是 GB/T 原文数据,不随仓库分发。干净克隆上
+    缺表时,依赖它们的比较只能跳过 —— 必须留痕并计入跳过条数,不能悄悄当通过。
+    """
+    SKIPPED.append(label + (f" — {reason}" if reason else ""))
+    print(f"  ~ 跳过:{label}" + (f"({reason})" if reason else ""))
 
 
 def frontend_js() -> str:

@@ -39,7 +39,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-v", "--verbose", action="store_true", help="逐条打印通过的用例")
     args = parser.parse_args(argv)
 
-    from tests._harness import FAILED, PASSED
+    from tests._harness import FAILED, PASSED, SKIPPED
     from tests._suite import CASES, verify_coverage
     from tests.test_store import check_db
 
@@ -58,6 +58,10 @@ def main(argv: list[str] | None = None) -> int:
             fn()
         except AssertionError as exc:
             print(f"  ✗ {exc}")
+        except Exception as exc:  # noqa: BLE001 —— 用例抛非断言异常(fixture 缺失等)
+            # 也要记成一条不通过并继续跑下一组,否则一条崩掉整趟,后面几十组全不跑。
+            FAILED.append((f"{name} 异常中断", f"{type(exc).__name__}: {exc}"))
+            print(f"  ✗ {name} 异常中断:{type(exc).__name__}: {exc}")
 
     if args.db:
         print(f"\n[库内一致性 {args.db}]")
@@ -71,13 +75,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  ok   {label}")
 
     print()
+    total = len(PASSED) + len(FAILED)
     if FAILED:
-        print(f"✗ {len(FAILED)} 条不通过(共 {len(PASSED) + len(FAILED)} 条):")
+        print(f"✗ {len(FAILED)} 条不通过(共 {total} 条通过/不通过,另有跳过 {len(SKIPPED)} 条):")
         for label, detail in FAILED:
             print(f"  - {label}")
             if detail:
                 print(f"      {detail}")
+        if SKIPPED:
+            print("\n跳过(本机缺标准表,不算通过也不算失败):")
+            for item in SKIPPED:
+                print(f"  - {item}")
         return 1
+    if SKIPPED:
+        print(f"✓ 全部通过:{len(PASSED)} 条,跳过 {len(SKIPPED)} 条:")
+        for item in SKIPPED:
+            print(f"  - {item}")
+        return 0
     print(f"✓ 全部通过:{len(PASSED)} 条")
     return 0
 

@@ -122,6 +122,7 @@ def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3, vap_frac=None) -> float | None
     进口两相(vap_frac > 1e-4)同样不计算:两相进口已含气相,单相汽蚀余量公式
     （净正吸入压头全部由液相提供）的前提不成立,不是换一个混合密度就能修好。
     p_in 还必须有限且 > 0:0 / 负绝压是物理非法值,不能代入 `(p_in − p_v)`。
+    p_v 同样必须有限且 > 0:0 / 负值按缺 p_v 处理,不能当零蒸气压算出偏大的 NPSHₐ。
     门禁放在这里而不是页面,页面 / Excel / AI 包 / 报告四条出口才会同值。
     """
     if vap_frac is not None:
@@ -136,9 +137,12 @@ def npsh_available_m(p_in_bar, p_v_bar, rho_kgm3, vap_frac=None) -> float | None
         p_in = float(p_in_bar)
         if not math.isfinite(p_in) or p_in <= 0:
             return None
+        p_v = float(p_v_bar)
+        if not math.isfinite(p_v) or p_v <= 0:
+            return None
         if float(rho_kgm3) <= 0:
             return None
-        value = (p_in - float(p_v_bar)) * 1e5 / (float(rho_kgm3) * G)
+        value = (p_in - p_v) * 1e5 / (float(rho_kgm3) * G)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
     # 泡点进料(p_v ≈ p_in)时差值只有浮点噪声;按显示精度(2 位小数)归零,

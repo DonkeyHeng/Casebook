@@ -416,6 +416,15 @@ def test_pump_line_selection_corrected():
     check(view["npsh_state"] in ("ok", "bad", "unknown"), "三态只能这三值")
     check_eq("设计扬程同源", view["design_head_m"], lines["totals"]["design_head_m"])
 
+    # 用户明确填 0 是合法余量,视图不能把它改写成建议值 0.5。
+    zero_lines = {
+        **lines,
+        "npsh": {**lines["npsh"], "margin_used_m": 0.0, "margin_is_default": False},
+    }
+    zero_view = pump_selection.compute_view(_block(), None, {}, lines=zero_lines)
+    check_eq("台账: 明确填写余量 0 原样展示", zero_view["margin_used_m"], 0.0)
+    check("台账: 余量 0 不标成默认值", zero_view["margin_is_default"] is False)
+
 
 def test_line_http_roundtrip():
     """POST /lines/{stream} 真跑一遍:首次写入 200、旧版本 409、未知流股 404。

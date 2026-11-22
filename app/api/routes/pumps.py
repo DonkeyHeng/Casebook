@@ -91,8 +91,8 @@ class PumpRoutes:
             except (TypeError, ValueError):
                 self._error("pv_bar 必须是数字")
                 return
-            if not 0.0 <= pv <= 500.0:
-                self._error("pv_bar 超出合理范围(0~500 bar)")
+            if not 0.0 < pv <= 500.0:
+                self._error("pv_bar 须在 0~500 bar 之间且大于 0")
                 return
         conn = db.open_db(self.db_path)
         try:

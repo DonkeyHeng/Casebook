@@ -74,6 +74,9 @@ MOTOR_RULE = (
     "建议电机 = 基准功率 ÷ 传动效率(直联 1.0) × 分段裕量"
     "(<22 kW 1.25;22–55 kW 1.15;>55 kW 1.10),向上取标准档位"
 )
+#: GB/T 3215-2025 7.1.4 规定的最小可接受电动机额定功率;低于此值且项目执行该标准时,需买方批准。
+#: 这里只用于展示提示,不强行抬高选档,避免把历史工况的工程口径静默改掉。
+MOTOR_STANDARD_MIN_KW = 4.0
 
 
 def mass_density_kgm3(rho_molar_kmol_m3, mw_kg_kmol):
@@ -153,8 +156,14 @@ def pick_motor(
         return None, "传动效率或裕量不合法"
     for kw in MOTOR_KW:
         if need <= kw:
-            return kw, (
+            note = (
                 f"{power:.2f} ÷ {transmission_eff:g} × {used_margin:g} = "
                 f"{need:.2f} kW → 取 {kw} kW 档"
             )
+            if kw < MOTOR_STANDARD_MIN_KW:
+                note += (
+                    f"；如项目执行 GB/T 3215-2025 需买方批准"
+                    f"（7.1.4 最小可接受值 {MOTOR_STANDARD_MIN_KW:g} kW）"
+                )
+            return kw, note
     return None, f"需 {need:.1f} kW,超出档位表上限({MOTOR_KW[-1]} kW)"

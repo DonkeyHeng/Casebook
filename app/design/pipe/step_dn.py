@@ -99,6 +99,14 @@ def select_dn(
             dn = max(dn_to_od)
             od = float(dn_to_od[dn])
             wall = wall_for(od)
-            if wall is not None and (od - 2.0 * wall) * (1.0 + oversize_tol) >= inner_d_mm - 1e-9:
-                return {"dn": dn, "od_mm": od, "wall_mm": wall, "tolerated": True}
+            if wall is not None:
+                usable_id = od - 2.0 * wall
+                if usable_id * (1.0 + oversize_tol) >= inner_d_mm - 1e-9:
+                    return {"dn": dn, "od_mm": od, "wall_mm": wall, "tolerated": True}
+            else:
+                fallback = min_wall_for(dn) if min_wall_for is not None else None
+                if fallback is not None:
+                    usable_id = od - 2.0 * float(fallback)
+                    if usable_id * (1.0 + oversize_tol) >= inner_d_mm - 1e-9:
+                        return {"dn": dn, "od_mm": od, "wall_mm": None, "tolerated": True}
     return {"dn": None, "od_mm": None, "wall_mm": None}

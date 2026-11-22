@@ -18,6 +18,7 @@ from docx.shared import Cm, Pt
 
 from app.export import docx_kit as kit
 from app.version import __version__
+from tools import calc_manual_math as cmm
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs"
@@ -90,12 +91,49 @@ def _write_text_with_symbols(
     font_name="宋体",
     color=None,
     eastasia=None,
+    math=True,
 ):
-    """把 D_i/P_d/T_d/t_c/t_req/H_pr/H_sel 写成带真下标的 Word run。
+    """把正文里的变量写成 Word 原生公式（行内 OMML）。
 
-    全局统一,不只服务 11.1;代码片段(反引号内)不进入这里,字段名保持原样。
+    表格传 math=False：9–13 列宽表用行内公式会被撑高，且字段名与变量在表里
+    本来就混排，保持原下标文本更稳。代码片段（反引号内）也不进入这里。
     """
     position = 0
+    if math and cmm.has_inline_math(text):
+        for match in cmm.inline_matches(text):
+            if match.start() > position:
+                _add_run(
+                    para,
+                    text[position : match.start()],
+                    size,
+                    bold,
+                    font_name,
+                    color,
+                    eastasia=eastasia,
+                )
+            if not cmm.add_math(para, cmm.inline_latex(match.group(1)), size):
+                _add_run(
+                    para,
+                    match.group(1),
+                    size,
+                    bold,
+                    font_name,
+                    color,
+                    eastasia=eastasia,
+                )
+            position = match.end()
+        if position < len(text):
+            _add_run(
+                para,
+                text[position:],
+                size,
+                bold,
+                font_name,
+                color,
+                eastasia=eastasia,
+            )
+        return
+
     for match in _SYMBOL_RE.finditer(text):
         if match.start() > position:
             _add_run(
@@ -141,6 +179,7 @@ def _write_inline(
     font_name="宋体",
     color=None,
     eastasia=None,
+    math=True,
 ):
     """把成对反引号解析成 Word 行内代码;奇数个反引号时整段退化为普通文本。
 
@@ -149,7 +188,7 @@ def _write_inline(
     """
     text = str(text).replace("**", "")
     if "`" not in text:
-        _write_text_with_symbols(para, text, size, bold, font_name, color, eastasia)
+        _write_text_with_symbols(para, text, size, bold, font_name, color, eastasia, math)
         return
     parts = text.split("`")
     if len(parts) % 2 == 0:
@@ -161,6 +200,7 @@ def _write_inline(
             font_name,
             color,
             eastasia,
+            math,
         )
         return
     for index, part in enumerate(parts):
@@ -184,6 +224,7 @@ def _write_inline(
                 font_name,
                 color,
                 eastasia,
+                math,
             )
 
 
@@ -202,7 +243,8 @@ def _format_inline_paragraph(para):
     text = para.text
     for run in runs:
         run._element.getparent().remove(run._element)
-    _write_inline(para, text, size, bold, font_name, color)
+    # 表格内不做行内公式：10–13 列宽表会被 OMML 撑高，字段名也容易被误认成变量
+    _write_inline(para, text, size, bold, font_name, color, math=False)
 
 
 def _write_mono_symbols(para, text, size):
@@ -215,7 +257,16 @@ def _page_setup(doc):
     kit._setup(doc, {})
 
 
-def _cover(doc, kind: str, title: str, book: str, rows, note: str = ""):
+def _cover(
+    doc,
+    kind: str,
+    title: str,
+    book: str,
+    rows,
+    note: str = "",
+    tagline: str = "面向需要复算与核对的使用者 · 口径以本工具当前版本的实际计算为准",
+    stamp: str | None = None,
+):
     meta = kit.kind_meta(kind)
     kit.activate(kind)
     kit._band(doc, [(meta["accent"], 0.30), (meta["light"], 0.07)])
@@ -258,7 +309,7 @@ def _cover(doc, kind: str, title: str, book: str, rows, note: str = ""):
     kit._gap(doc, 6)
     kit._para(
         doc,
-        "面向需要复算与核对的使用者 · 口径以本仓库代码为准",
+        tagline,
         Pt(9),
         False,
         WD_ALIGN_PARAGRAPH.CENTER,
@@ -271,7 +322,7 @@ def _cover(doc, kind: str, title: str, book: str, rows, note: str = ""):
     kit._gap(doc, 48)
     stamp = kit._para(
         doc,
-        f"版本 v{__version__}　·　{datetime.now().strftime('%Y-%m-%d')}　·　Casebook",
+        stamp or f"版本 v{__version__}　·　{datetime.now().strftime('%Y-%m-%d')}　·　Casebook",
         Pt(8.5),
         False,
         WD_ALIGN_PARAGRAPH.CENTER,
@@ -457,17 +508,43 @@ def bullets(doc, items, size: float = 10.5):
 
 
 def formula(doc, text: str, note: str = ""):
-    para = doc.add_paragraph()
-    para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    para.paragraph_format.space_before = Pt(6)
-    para.paragraph_format.space_after = Pt(2 if note else 8)
-    _write_inline(para, text, 11.0, False, "Cambria Math", eastasia="宋体")
-    if note:
-        cap = doc.add_paragraph()
-        cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        cap.paragraph_format.space_after = Pt(8)
-        _write_inline(cap, note, 8.5, False, "宋体", "7F7F7F")
-    return para
+    """正式公式：能匹配到 LaTeX 的走 Word 原生公式（OMML）；匹配不到才回退文本。
+
+    一个块里有多行推导时（如 t_c → t → t_req,nom），逐行居中排，避免一行过宽。
+    """
+    parts = cmm.formula_parts(text)
+    if not parts:
+        para = doc.add_paragraph()
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        para.paragraph_format.space_before = Pt(6)
+        para.paragraph_format.space_after = Pt(2 if note else 8)
+        _write_inline(para, text, 11.0, False, "Cambria Math", eastasia="宋体")
+        if note:
+            cap = doc.add_paragraph()
+            cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cap.paragraph_format.space_after = Pt(8)
+            _write_inline(cap, note, 8.5, False, "宋体", "7F7F7F")
+        return para
+
+    last = None
+    for index, (latex, trailing) in enumerate(parts):
+        para = doc.add_paragraph()
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        para.paragraph_format.space_before = Pt(6 if index == 0 else 0)
+        para.paragraph_format.space_after = Pt(0)
+        if not cmm.add_math(para, latex, 11.0, display=True):
+            _write_inline(para, latex, 11.0, False, "Cambria Math", eastasia="宋体")
+        last = para
+        if trailing:
+            cap = doc.add_paragraph()
+            cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cap.paragraph_format.space_before = Pt(2)
+            cap.paragraph_format.space_after = Pt(0)
+            _write_inline(cap, trailing, 8.5, False, "宋体", "7F7F7F")
+            last = cap
+    if last is not None:
+        last.paragraph_format.space_after = Pt(8)
+    return last
 
 
 def note(doc, text: str):
@@ -981,7 +1058,8 @@ def build_pipe(doc):
         "此时才回到 996–1045.8 mm 的口径（1.05×996 = 1045.8）。"
         "容差判据只在最后一档使用；更大内径判「需并联或专项设计」。"
         "外径 `D_o > 630 mm`（对应标准档 DN > 600）且表里没有该外径的壁厚数据时，"
-        "用焊接管兜底序列 6/8/10/12/14/16/18/20 mm 并提示复核。",
+        "用 HG/T 20553-2011 表 2.0.2-2 的 Ia 采购档 6.3 / 7.1 / 8 / 8.8 / 10 / 11 / "
+        "12.5 / 14.2 / 16 / 17.5 / 20 mm 兜底（DN1000 无 6.3、7.1）并提示复核。",
     )
 
     h(doc, "4　设计压力、设计温度与材质", 1)
@@ -1086,10 +1164,12 @@ def build_pipe(doc):
     )
     p(
         doc,
-        "Y = 0.4 适用于铁素体钢 T_d ≤ 482 ℃、奥氏体不锈钢 T_d ≤ 510 ℃；"
-        "超出适用温度只由 V7 告警提示，代码不会自动改 Y，也不把超温工况当成仍可用同一公式。"
-        "V7 在 T_d > 450 ℃ 即保守告警，已覆盖 482 ℃ 与 510 ℃ 两个公式适用上限；"
-        "不论材料类别，超过 450 ℃ 都先按 V7 复核。",
+        "按 GB/T 20801.1—2025 表 27（`t < D_o/6` 时的 `Y` 值），`Y = 0.4` 的温度档是："
+        "铁素体钢 `T_d ≤ 482 ℃`，奥氏体钢 `T_d ≤ 566 ℃`；再往上铁素体钢 510 ℃ 档取 0.5、"
+        "538 ℃ 起取 0.7，奥氏体钢 593 ℃ 档取 0.5、621 ℃ 起取 0.7，两列之间可按 6.6.1.1 的规定内插。"
+        "本工具不按温度切换 `Y`，一律取 0.4：`Y` 位于分母且为加项，取小值只会得到更厚的壁厚，"
+        "属保守简化；超出上述温度档的工况仍由 V7 提示复核，结果不能当作符合表 27 取值的结果。"
+        "V7 在 `T_d > 450 ℃` 即保守告警，早于上述各档，超温工况一律先按 V7 复核。",
     )
     p(
         doc,

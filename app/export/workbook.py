@@ -417,10 +417,12 @@ def build_workbook(conn, case_id: int) -> bytes:
                     r.get("min_wall_mm"),
                     r["wall_mm"],
                     (
-                        pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
-                        if r["wall_mm"]
-                        else None
-                    ),
+                        r["c1_mm"]
+                        if r.get("c1_mm") is not None
+                        else pipe_calc.pipe_data.negative_deviation(r["od_mm"], r["wall_mm"])
+                    )
+                    if r["wall_mm"]
+                    else None,
                     "是" if r.get("wall_floored") else "",
                     r["grade_code"],
                     " ".join(hit_by_stream.get(r["stream"], [])),

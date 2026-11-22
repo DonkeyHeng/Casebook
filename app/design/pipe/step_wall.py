@@ -40,7 +40,8 @@ def external_pressure_min_wall(
 
     长圆筒弹性屈曲:`P_cr = 2E/(1−ν²)·(t/D_o)³`,取外压 0.1 MPa、安全系数 SF,
     反解 `t_min = D_o·(SF·P/(2E/(1−ν²)))^(1/3)`。只作筛查下限,与内压壁厚取大;
-    真实支撑跨距、初始椭圆度、材料温度折减需另按 GB/T 20801.3 外压章节复核。
+    真实支撑跨距、初始椭圆度、材料温度折减需另按 GB/T 20801.1-2025 6.6.1.3
+    与 GB/T 150.3 外压章节复核。
 
     这些系数都在 `pipe_data` 里,可经 options 覆盖;不返回 None 除非缺外径。
     """
@@ -176,7 +177,7 @@ def design_wall_for_od(
       * S30408/S31603 的 R1E 高压公式（含 3 mm 小管下限、负偏差已含）；
       * 真空外压失稳筛查与高温真空下限；
       * 工艺最小壁厚 `MIN_WALL_BY_DN`；
-      * DN>600 未录标准壁厚时按 `WELDED_WALL_SERIES` 兜底。
+      * DN>600 未录标准壁厚时按该外径的 `welded_wall_series`（HG/T 20553 Ia）兜底。
 
     `od_to_walls` 由调用方给时可传入本次标准表快照（selection 用）；
     不传则按材质从 `data` 的当前快照里选表。返回 `wall_mm`、`t_required_mm`、
@@ -218,7 +219,7 @@ def design_wall_for_od(
     walls = walls_table.get(od) if walls_table else None
     welded = False
     if not walls and od > 630.0:
-        walls = pipe_data.WELDED_WALL_SERIES
+        walls = pipe_data.welded_wall_series(od)
         welded = True
 
     t_calc = calc_wall_thickness(p_mpa, od, sigma or 0.0)

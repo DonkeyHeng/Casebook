@@ -63,7 +63,9 @@ def compute_view(
         state = str(npsh.get("state") or "unknown")
         reason = str(npsh.get("reason") or "")
         threshold = _num(npsh.get("threshold_m"))
-        margin = _num(npsh.get("margin_used_m")) or NPSH_MARGIN_SUGGESTED
+        margin = _num(npsh.get("margin_used_m"))
+        if margin is None:
+            margin = NPSH_MARGIN_SUGGESTED
         margin_default = bool(npsh.get("margin_is_default"))
     else:
         d = design or {}

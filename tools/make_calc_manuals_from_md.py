@@ -11,11 +11,16 @@ md 是这两份说明书的唯一正文源；本脚本只做版式渲染，不�
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from pathlib import Path
 
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
+from tools import calc_manual_math as cmm
 from tools import make_calc_manuals as mcm
+from tools import manual_appendix_b as mab
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -26,7 +31,7 @@ BOOKS = {
         "book": "管路专业 · 计算册",
         "rows": [
             ("适用功能", "管道页 · 每条流股的管径、壁厚与等级号"),
-            ("计算依据", "GB/T 20801.1—2025 承压公式 · GB/T 17395-2024 尺寸与偏差"),
+            ("计算依据", "GB/T 20801.1-2025 承压公式 · GB/T 17395-2024 尺寸与偏差"),
             ("数据来源", "Aspen 工况快照 + 用户导入的国标 CSV + 人工参数"),
             ("复算方式", "按本文公式、常数与顺序逐项复算"),
         ],
@@ -45,7 +50,7 @@ BOOKS = {
             ("数据来源", "Aspen 工况快照 + pipe_run 管段记录 + 人工参数"),
             ("复算方式", "按本文公式、常数与顺序逐项复算"),
         ],
-        "note": "本说明书解释算法口径，不替代标准原文与工程设计审核",
+        "note": "本说明书解释算法口径，不替代厂家型谱与工程设计审核",
     },
 }
 
@@ -86,7 +91,24 @@ def _widths(headers: list[str], rows: list[list[str]]) -> list[float]:
         floors.append(max(2.3, token * 0.21))
     spare = WIDTH_TOTAL_CM - sum(floors)
     if spare <= 0:
-        return floors
+        # 列数多时「每列至少 2.3 cm」会超过版心（如 10 列 ×2.3 = 23 cm），
+        # 表格会越出右边距、末列被裁掉。此时按内容长度重新分配：
+        # 长文本列多给，短数字列少给，总宽强制回到版心内。
+        classes = []
+        for column in range(len(headers)):
+            texts = [headers[column]] + [row[column] for row in rows]
+            longest_text = max(sum(2 if ord(ch) > 127 else 1 for ch in text) for text in texts)
+            classes.append(
+                3.2
+                if longest_text >= 24
+                else 2.4
+                if longest_text >= 14
+                else 1.5
+                if longest_text >= 6
+                else 1.1
+            )
+        scale = WIDTH_TOTAL_CM / sum(classes)
+        return [value * scale for value in classes]
     weights = [max(0.0, value - floor) for value, floor in zip(raw, floors, strict=True)]
     total = sum(weights) or 1.0
     return [floor + spare * weight / total for floor, weight in zip(floors, weights, strict=True)]
@@ -102,7 +124,38 @@ def _render_table(doc, block: list[str], caption: str) -> None:
         cells += [""] * (len(headers) - len(cells))
         fixed.append(cells)
     widths = _widths(headers, fixed)
-    mcm.table(doc, headers, fixed, widths, caption=caption)
+    # 9 列以上的宽表降到 7.5 pt：10 列表均宽只有 1.5 cm 左右，8.5 pt 会把数字拆行
+    font_pt = 7.5 if len(headers) >= 9 else 8.5
+    mcm.table(doc, headers, fixed, widths, caption=caption, font_pt=font_pt)
+
+
+_VERSION_RE = re.compile(r"^-\s*版本\s*v([0-9.]+)\s*·\s*(\d{4}-\d{2}-\d{2})")
+
+
+def _cover_texts(lines: list[str]) -> tuple[str, str, str, str]:
+    """从 md 头部取版本行、说明行与口径行，封面与页眉不再吃脚本里的旧版本号/旧文案。"""
+    version, date = "", ""
+    tagline = ""
+    note = ""
+    for line in lines[:15]:
+        match = _VERSION_RE.match(line.strip())
+        if match and not version:
+            version, date = match.group(1), match.group(2)
+            continue
+        if not note and line.strip().startswith("- 说明："):
+            note = line.strip().split("：", 1)[1].strip()
+            continue
+        if not tagline and line.strip().startswith(">"):
+            body = line.strip().lstrip(">").strip()
+            if body.startswith("面向需要复算"):
+                tagline = body
+    if not version:
+        version = mcm.__version__
+    if not date:
+        date = datetime.now().strftime("%Y-%m-%d")
+    if not tagline:
+        tagline = "面向需要复算与核对的使用者 · 口径以本工具当前版本的实际计算为准"
+    return f"版本 v{version}　·　{date}　·　Casebook", tagline, note, version
 
 
 def render(kind: str, md_path: Path) -> Path:
@@ -110,11 +163,26 @@ def render(kind: str, md_path: Path) -> Path:
     text = md_path.read_text(encoding="utf-8")
     lines = text.splitlines()
 
+    stamp, tagline, note, version = _cover_texts(lines)
+
     doc = Document()
+    # 打开文档时让 Word 自动更新 TOC 域，避免目录页只显示「按 F9」的提示
+    update = OxmlElement("w:updateFields")
+    update.set(qn("w:val"), "true")
+    doc.settings.element.append(update)
     mcm._page_setup(doc)
-    mcm._cover(doc, kind, book["title"], book["book"], book["rows"], note=book["note"])
+    mcm._cover(
+        doc,
+        kind,
+        book["title"],
+        book["book"],
+        book["rows"],
+        note=note or book["note"],
+        tagline=tagline,
+        stamp=stamp,
+    )
     mcm._toc(doc, kind)
-    mcm._body(doc, kind, f"v{mcm.__version__}　{book['title']}")
+    mcm._body(doc, kind, f"v{version}　{book['title']}")
 
     index = 0
     # 封面与目录由样式层生成：跳过 md 的标题块，直到「## 目录」及其条目结束。
@@ -129,6 +197,19 @@ def render(kind: str, md_path: Path) -> Path:
             index += 1
             while index < len(lines) and not lines[index].startswith("## "):
                 index += 1
+            continue
+
+        if stripped == mab.MARKER:
+            # 附录 B 表由 tools/manual_appendix_b.py 统一下发：两册条目、顺序恒等。
+            # 反引号在表格里按旧渲染口径去掉，与正文表格的 `代码` 处理保持一致。
+            rows = [[cell.replace("`", "") for cell in row] for row in mab.ROWS]
+            mcm.table(
+                doc,
+                list(mab.COLUMNS),
+                rows,
+                _widths(list(mab.COLUMNS), rows),
+            )
+            index += 1
             continue
 
         if stripped.startswith("```"):
@@ -162,16 +243,31 @@ def render(kind: str, md_path: Path) -> Path:
             while index < len(lines) and lines[index].strip().startswith(">"):
                 quote.append(lines[index].strip()[1:].strip())
                 index += 1
-            joined = [row for row in quote if row]
-            if not joined:
-                continue
-            body = " ".join(joined)
-            if body.lstrip("*").startswith("注：") or body.startswith("**注："):
-                mcm.note(doc, body)
-            elif re.search(r"[=≈]", body) and "：" not in body.split("=")[0][-6:]:
-                mcm.formula(doc, "\n".join(joined))
-            else:
-                mcm.note(doc, body)
+            # `>` 空行是块内分段：公式与下方说明各成一段，不能拼成一行
+            segments: list[list[str]] = []
+            current: list[str] = []
+            for row in quote:
+                if row:
+                    current.append(row)
+                elif current:
+                    segments.append(current)
+                    current = []
+            if current:
+                segments.append(current)
+            for segment in segments:
+                body = " ".join(segment)
+                if body.lstrip("*").startswith("注：") or body.startswith("**注："):
+                    mcm.note(doc, body)
+                    continue
+                formula_line = next((row for row in segment if cmm.formula_parts(row)), None)
+                if formula_line:
+                    mcm.formula(doc, formula_line)
+                    rest = [row for row in segment if row != formula_line]
+                    if rest:
+                        mcm.note(doc, " ".join(rest))
+                else:
+                    # 含等号但未登记为正式公式的，多为口径说明；按注文排，不强行居中当公式
+                    mcm.note(doc, body)
             continue
 
         if stripped.startswith("- "):

@@ -42,6 +42,8 @@ CASES: list[tuple[str, object]] = [
     ("收尾: DN1000/R1E/缺值/外压", test_pipe.test_pipe_followup_guards),
     ("管路编号等级号占位", test_pipe.test_pipe_tag_grade_placeholder),
     ("R1E 缺许用应力文案按材质", test_pipe.test_pipe_r1e_missing_reason_by_material),
+    ("管路边界: DN1000 与人工零/负值", test_pipe.test_pipe_boundary_regressions),
+    ("大口径 Ia 壁厚序列", test_pipe.test_pipe_welded_wall_series),
     ("选型校验 validate() V1–V15", test_pipe.test_pipe_checks),
     ("标准表补录说明 setup_guide()", test_pipe.test_pipe_setup),
     ("标准表导入 import_standards()", test_pipe.test_std_import),
