@@ -122,6 +122,11 @@ def main(argv: list[str] | None = None) -> int:
         # 标准表格式模板(只有表头与虚构示例值):「下载 CSV 模板」与填写提示词要读它
         "--add-data",
         f"{ROOT / 'samples' / 'pipe-standards-template'}{sep}samples/pipe-standards-template",
+        # 两册《计算说明书》:管道页 / 泵页的「导出计算书」直接下发这两份 Word
+        "--add-data",
+        f"{ROOT / 'docs' / 'casebook-pipe-calc-manual.docx'}{sep}docs",
+        "--add-data",
+        f"{ROOT / 'docs' / 'casebook-pump-calc-manual.docx'}{sep}docs",
         "--paths",
         str(ROOT),
         "--distpath",

@@ -237,6 +237,7 @@ Casebook/
 ### Documentation Index
 - **Getting Started**: [`docs/install.md`](docs/install.md) (Installation & Troubleshooting) · [`docs/README.md`](docs/README.md) (Documentation Index)
 - **Engineering Methods**: [`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md) (Pipe Sizing) · [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md) (Pump & $\text{NPSH}_a$) · [`docs/balance-report.md`](docs/balance-report.md) (Balance Reports)
+- **Calculation Manuals**: `docs/casebook-pipe-calc-manual.docx` (Pipe Sizing Manual) · `docs/casebook-pump-calc-manual.docx` (Pump Manual) — each rendered from the same-named `.md` beside it. In the app, **Export Manual** on the Pipes / Pumps page serves these two Word files directly (bundled in the desktop build; `GET /api/manuals/pipe.docx`, `GET /api/manuals/pump.docx`)
 - **Standards & Interfaces**: [`docs/pipe-class-codes.md`](docs/pipe-class-codes.md) (HG/T 20519.6 Codes) · [`docs/aspen-field-map.md`](docs/aspen-field-map.md) (Aspen Field Paths) · [`docs/api.md`](docs/api.md) (Local HTTP API)
 - **Contributor Guides**: [`app/README.md`](app/README.md) (Module Layering) · [`docs/ui-style.md`](docs/ui-style.md) (UI Guidelines) · [`docs/conventions.md`](docs/conventions.md) (Project Conventions)
 

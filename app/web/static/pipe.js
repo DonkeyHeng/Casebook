@@ -299,18 +299,13 @@ function bindPipeEvents() {
   const clear = document.getElementById("pipeClassClear");
   if (clear) clear.addEventListener("click", clearPipeClass);
 
-  // ---- 管道计算说明(纯文字弹窗,不依赖接口数据) ----
-  const docOpen = document.getElementById("pipeDocOpen");
-  if (docOpen) docOpen.addEventListener("click", openPipeDoc);
-  const docClose = document.getElementById("pipeDocClose");
-  if (docClose) docClose.addEventListener("click", closePipeDoc);
-  const docModal = document.getElementById("pipeDocModal");
-  if (docModal) {
-    // 点遮罩关闭;点内容区(含表格里的文字)不关
-    docModal.addEventListener("click", (e) => {
-      if (e.target === docModal) closePipeDoc();
-    });
-  }
+  // ---- 导出计算书:直接给 docs/ 里那本 Word 说明书 ----
+  const calcDoc = document.getElementById("pipeCalcDoc");
+  if (calcDoc) calcDoc.addEventListener("click", async () => {
+    const url = "/api/manuals/pipe.docx";
+    if (await saveFromUrl(url)) return;   // 桌面壳:主进程落盘
+    window.location.href = url;
+  });
 
   // ---- 标准表导入(三张国标表格的 CSV) ----
   const stdOpen = document.getElementById("pipeStdOpen");
@@ -346,7 +341,7 @@ function bindPipeEvents() {
   }
 }
 
-/* ------------------------------------------------------------ 管道计算说明 */
+/* ------------------------------------------------------------ 弹窗焦点(共用) */
 
 /* 弹窗的键盘与焦点行为(三个弹窗共用):
    打开时把焦点移进弹窗、记住是哪个按钮打开的,关闭时还回去。
@@ -366,25 +361,6 @@ function restoreModalFocus() {
   const t = modalFocus.trigger;
   modalFocus.trigger = null;
   if (t && typeof t.focus === "function") t.focus();
-}
-
-function openPipeDoc() {
-  const modal = document.getElementById("pipeDocModal");
-  if (!modal) return;
-  modal.classList.remove("hidden");
-  focusIntoModal(modal);
-  document.addEventListener("keydown", pipeDocEsc);
-}
-
-function closePipeDoc() {
-  const modal = document.getElementById("pipeDocModal");
-  if (modal) modal.classList.add("hidden");
-  document.removeEventListener("keydown", pipeDocEsc);
-  restoreModalFocus();
-}
-
-function pipeDocEsc(e) {
-  if (e.key === "Escape") closePipeDoc();
 }
 
 /* ------------------------------------------------------------ 管道等级表弹窗 */
@@ -424,7 +400,7 @@ function closePipeClass() {
   restoreModalFocus();
 }
 
-/* 等级表弹窗原来没有 Esc:计算说明和标准表导入都有,只有它要摸鼠标去点 ✕ */
+/* 等级表弹窗原来没有 Esc:标准表导入有,只有它要摸鼠标去点 ✕ */
 function pipeClassEsc(e) {
   if (e.key === "Escape") closePipeClass();
 }

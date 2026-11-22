@@ -237,7 +237,7 @@ Casebook/
 ### 核心文档导航
 - **新手必读**：[`docs/install.md`](docs/install.md)（安装排错） · [`docs/README.md`](docs/README.md)（文档总索引）
 - **计算口径**：[`docs/pipe-selection-plan.md`](docs/pipe-selection-plan.md)（管路选型） · [`docs/pump-selection-plan.md`](docs/pump-selection-plan.md)（选泵与 $\text{NPSH}_a$） · [`docs/balance-report.md`](docs/balance-report.md)（物能衡算报告）
-- **计算说明书**：[`docs/casebook-pipe-calc-manual.md`](docs/casebook-pipe-calc-manual.md)（管路选型，同名 `.docx` 为可交付版） · [`docs/casebook-pump-calc-manual.md`](docs/casebook-pump-calc-manual.md)（泵，同名 `.docx` 为可交付版）
+- **计算说明书**：`docs/casebook-pipe-calc-manual.docx`（《管路选型计算说明书》） · `docs/casebook-pump-calc-manual.docx`（《泵计算说明书》）—— 正文源是同目录同名 `.md`，`.docx` 由它渲染；**应用内管道页 / 泵页的「导出计算书」直接下发这两份 Word**（打包版已随包携带，接口为 `GET /api/manuals/pipe.docx`、`GET /api/manuals/pump.docx`）
 - **规范与接口**：[`docs/pipe-class-codes.md`](docs/pipe-class-codes.md)（HG/T 20519.6 等级号） · [`docs/aspen-field-map.md`](docs/aspen-field-map.md)（Aspen 字段路径） · [`docs/api.md`](docs/api.md)（本地 HTTP API） · [`docs/vacuum-external-pressure-check.md`](docs/vacuum-external-pressure-check.md)（真空外压校核依据）
 - **开发规范**：[`app/README.md`](app/README.md)（代码分层） · [`docs/ui-style.md`](docs/ui-style.md)（UI 规范） · [`docs/conventions.md`](docs/conventions.md)（项目约定）
 

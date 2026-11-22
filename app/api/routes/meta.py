@@ -5,10 +5,37 @@
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 from app import paths, version
 from app.api import read_job
 from app.api.serialize import row_to_dict
 from app.store import db
+
+#: 两册《计算说明书》:页面上的「导出计算书」就下发这两份 Word,不另排一份
+MANUALS: dict[str, dict[str, str]] = {
+    "pipe": {
+        "file": "casebook-pipe-calc-manual.docx",
+        "title": "管路选型计算说明书",
+        "ascii": "Casebook-pipe-calc-manual.docx",
+    },
+    "pump": {
+        "file": "casebook-pump-calc-manual.docx",
+        "title": "泵计算说明书",
+        "ascii": "Casebook-pump-calc-manual.docx",
+    },
+}
+
+_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _attachment(name: str, ascii_name: str) -> str:
+    """附件头:中文名走 RFC 5987,再给一个纯 ASCII 兜底名。
+
+    `send_header` 只认 latin-1,中文直接写进 filename= 会在编码时抛错;
+    `filename*=UTF-8''…` 由浏览器与桌面壳(desktop.Api._name_from)按 UTF-8 解回来。
+    """
+    return f"attachment; filename*=UTF-8''{quote(name)}; filename=\"{ascii_name}\""
 
 
 class MetaRoutes:
@@ -177,6 +204,35 @@ class MetaRoutes:
             )
         finally:
             conn.close()
+
+    def get_manual_docx(self, m, query):
+        """GET /api/manuals/{pipe|pump}.docx —— 两册《计算说明书》的 Word 原件。
+
+        管道页 / 泵页的「导出计算书」下发的就是这两份文件(不按工况现算):
+        正文源是同名 `.md`,由 `tools/make_calc_manuals.py` 渲染成 docx;
+        打包版靠 `tools/build_exe.py` 的 `--add-data` 带进 `_MEIPASS/docs`。
+        """
+        kind = (m.groupdict() or {}).get("kind")
+        manual = MANUALS.get(str(kind or ""))
+        if manual is None:
+            self._error("没有这本计算书", 404)
+            return
+        path = paths.resource_root() / "docs" / manual["file"]
+        try:
+            data = path.read_bytes()
+        except OSError:
+            self._error(f"当前安装里没有 docs/{manual['file']},重装一次或拉一份仓库即可", 404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", _DOCX)
+        self.send_header(
+            "Content-Disposition",
+            _attachment(f"Casebook-{manual['title']}.docx", manual["ascii"]),
+        )
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
 
     def get_health(self, m, query):
         """GET /api/health —— 健康检查。"""

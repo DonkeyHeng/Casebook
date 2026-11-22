@@ -230,6 +230,14 @@ function bindEvents() {
     window.open(ZHONGLIAN_URL, "_blank", "noopener,noreferrer");
   });
 
+  // 泵页「导出计算书」:下载 docs/ 里那本《泵计算说明书》Word(与工况无关)
+  const pumpCalcDoc = document.getElementById("pumpCalcDoc");
+  if (pumpCalcDoc) pumpCalcDoc.addEventListener("click", async () => {
+    const url = "/api/manuals/pump.docx";
+    if (await saveFromUrl(url)) return;   // 桌面壳:主进程落盘
+    window.location.href = url;
+  });
+
   document.getElementById("readBtn").addEventListener("click", startRead);
 
   // 导出 Excel:给人看

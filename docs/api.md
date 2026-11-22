@@ -35,6 +35,7 @@
 | POST | `/api/cases/{id}/sections` | 保存工段边界(写 `data/config/sections.json`,按工况 id;不碰工况库) |
 | GET | `/api/cases/{id}/balance-report.docx?blocks=&families=` | 物料与能量衡算报告(Word);`blocks` / `families` 取并集,不给就是全部设备 |
 | GET | `/api/cases/{id}/pipes.docx` | 管道选型一览表(Word);九列与设计院附录二对齐,版式与衡算报告同一套骨架(封面 / 页眉页脚 / 三线表),分册主题色为墨绿 |
+| GET | `/api/manuals/pipe.docx`、`/api/manuals/pump.docx` | 两册《计算说明书》的**原件**:直接下发仓库 `docs/casebook-{pipe,pump}-calc-manual.docx`(不按工况现算);管道页 / 泵页「导出计算书」就走这里。附件名用 RFC 5987 的 `filename*=UTF-8''…` 给中文名,并带一个 ASCII 兜底名 |
 
 ## 流股组成 `/api/cases/{id}/streams/{流股}/composition`
 

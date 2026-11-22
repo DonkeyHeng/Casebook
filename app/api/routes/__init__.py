@@ -48,6 +48,13 @@ ROUTES: list[Route] = [
     route("POST", r"/api/sample/install", "post_sample_install", "载入内置示例工况"),
     route("GET", r"/api/compare", "get_compare", "两个工况并排对比"),
     route("GET", r"/api/block-families", "get_block_families", "设备类型 → 家族"),
+    # ---- 两册《计算说明书》:不依赖工况,页面「导出计算书」直接下发 ----
+    route(
+        "GET",
+        r"/api/manuals/(?P<kind>pipe|pump)\.docx",
+        "get_manual_docx",
+        "管路 / 泵计算说明书 Word",
+    ),
     # ---- 标准表与管道等级表:不依赖工况 ----
     route("GET", r"/api/pipe-tables", "get_pipe_tables", "三张标准录到什么程度"),
     route("GET", r"/api/pipe-standards", "get_pipe_standards", "标准表导入弹窗的状态"),

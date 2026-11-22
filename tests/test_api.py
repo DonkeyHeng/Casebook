@@ -95,6 +95,35 @@ def test_http_entry() -> None:
         for probe in ("/../data/cases.db", "/..%2Fdata%2Fcases.db"):
             check(f"HTTP:静态路径穿越被拒 {probe}", call("GET", probe) == 403)
         check("HTTP:首页仍可读", call("GET", "/") == 200)
+
+        # 两册《计算说明书》:管道页 / 泵页的「导出计算书」直接下发 docs 里的 Word 原件。
+        # 只认"是个能打开的 docx + 中文名解得回来",不卡字节数 —— 说明书一改版就变。
+        import urllib.parse
+
+        for kind, title in (
+            ("pipe", "Casebook-管路选型计算说明书.docx"),
+            ("pump", "Casebook-泵计算说明书.docx"),
+        ):
+            req = urllib.request.Request(
+                base + f"/api/manuals/{kind}.docx", headers={"X-Casebook-Client": "1"}
+            )
+            body: bytes = b""
+            disposition = ""
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    body = resp.read()
+                    disposition = resp.headers.get("Content-Disposition", "")
+            except Exception:
+                pass
+            check(
+                f"HTTP:计算书 {kind} 能下载",
+                body[:2] == b"PK"
+                and len(body) > 50_000
+                and title
+                == urllib.parse.unquote(disposition.split("filename*=UTF-8''")[-1].split(";")[0]),
+                f"bytes={len(body)} cd={disposition[:40]}",
+            )
+        check("HTTP:没有的计算书回 404", call("GET", "/api/manuals/pump.txt") == 404)
     finally:
         httpd.shutdown()
         httpd.server_close()
