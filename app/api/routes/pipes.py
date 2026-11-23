@@ -286,6 +286,8 @@ class PipeRoutes:
                 "rules": pipe_data.PIPING_CLASS_RULES,
                 "default": pipe_data.PIPING_CLASS_DEFAULT,
                 "grades": list(grades),
+                # 按母材类别分组(前缀相同),等级表弹窗的下拉用 optgroup 排
+                "groups": pipe_data.grade_groups(),
                 # 牌号 → 材质类别代号 + 来源(explicit / prefix / unknown);
                 # prefix 是"按牌号前缀推断",下拉里会标「·推断」提醒核对
                 "material_codes": {

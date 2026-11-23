@@ -68,14 +68,118 @@ MATERIAL_CODES = {
     "H": "衬里/内防腐",
 }
 
-#: 牌号 → 材质类别代号(本项目预置的五个,见 pipe-selection-plan.md §14.4)。
-#: 表 B.1 里其它牌号由 `material_code_for()` 按前缀给建议值,判不出来的才告警。
+#: 牌号 → 材质类别代号。表 B.1 的 104 个牌号已逐个确认(2026-11-23,依据用户逐行
+#: 判定),不再靠前缀猜;表外牌号仍由 `material_code_for()` 按前缀给建议值。
 MATERIAL_CODE_BY_GRADE = {
+    # A 铸铁(B 表里这几个的「母材类别」是「—」)
+    "HT200": "A",
+    "HT250": "A",
+    "HT300": "A",
+    "HT350": "A",
+    "KTH300-06": "A",
+    "KTH350-10": "A",
+    "QT400-18": "A",
+    "QT400-18L": "A",
+    # B 碳钢
     "20#": "B",
+    "20G": "B",
+    "20MnG": "B",
+    "25MnG": "B",
+    "A105": "B",
+    "CC60": "B",
+    "CC70": "B",
+    "CF370": "B",
+    "CF415": "B",
+    "CF415K": "B",
+    "L210/A (PSL1)": "B",
+    "L245/B (PSL1)": "B",
+    "L245/B (PSL2)": "B",
+    "LCB": "B",
+    "LCC": "B",
+    "LF415K1": "B",
+    "LF415K2": "B",
+    "Q215A": "B",
+    "Q215B": "B",
+    "Q235A": "B",
+    "Q235B": "B",
+    "Q245R": "B",
+    "WCA": "B",
+    "WCB": "B",
+    "WCC": "B",
+    # C 普通低合金钢
+    "10MnDG": "C",
+    "16MnDG": "C",
+    "CF485": "C",
+    "CF485K": "C",
+    "F290": "C",
+    "F360": "C",
+    "F415": "C",
+    "F450": "C",
+    "F485": "C",
+    "F555": "C",
+    "L290/X42 (PSL2)": "C",
+    "L360/X52 (PSL2)": "C",
+    "L415/X60 (PSL2)": "C",
+    "L450/X65 (PSL2)": "C",
+    "L485/X70 (PSL2)": "C",
+    "L555/X80 (PSL2)": "C",
+    "LF485K2": "C",
     "Q345A": "C",
     "Q345B": "C",
+    "Q345D": "C",
+    "Q345E": "C",
+    "Q345R": "C",
+    # D 合金钢(铬钼耐热钢)
+    "06Ni3MoDG": "D",
+    "06Ni9DG": "D",
+    "10Cr9Mo1VNbN": "D",
+    "10MoWVNb": "D",
+    "12Cr1Mo": "D",
+    "12Cr1MoV": "D",
+    "12Cr1MoVG": "D",
+    "12Cr2Mo": "D",
+    "12Cr2Mo1": "D",
+    "12Cr2MoG": "D",
+    "12Cr5Mo": "D",
+    "12Cr5MoI": "D",
+    "12Cr5MoNT": "D",
+    "12Cr9MoI": "D",
+    "12Cr9MoNT": "D",
+    "14Cr1Mo": "D",
+    "15CrMo": "D",
+    "15CrMoG": "D",
+    "AF5": "D",
+    "AF5G": "D",
+    "AF9": "D",
+    "AF9G": "D",
+    "AF91": "D",
+    "AF11": "D",
+    "AF11G": "D",
+    "AF12": "D",
+    "AF12G": "D",
+    "AF14": "D",
+    "AF22": "D",
+    "AF22G": "D",
+    "LC3": "D",
+    "LC9": "D",
+    "LF450K3": "D",
+    "LF680K4": "D",
+    "ZG10Cr9Mo1- VNbN": "D",
+    "ZG12Cr2Mo": "D",
+    "ZG14Cr1Mo": "D",
+    "ZG16Cr5Mo": "D",
+    # E 不锈钢
+    "06Cr17Ni12Mo2 (316)": "E",
+    "06Cr18Ni11Nb (347)": "E",
+    "07Cr17Ni12Mo2 (316H)": "E",
+    "07Cr18Ni11Nb (347H)": "E",
+    "07Cr19Ni10 (304H)": "E",
+    "07Cr19Ni11Ti (321H)": "E",
+    "08Cr18Ni11NbFG (347HFG)": "E",
+    "S30403": "E",
     "S30408": "E",
     "S31603": "E",
+    "S32168": "E",
 }
 
 #: 表 B.1 里的牌号写法 → 本项目叫法。同一牌号在标准表里常写成完整牌号
@@ -88,11 +192,11 @@ GRADE_ALIASES = {
     "06Cr18Ni11Ti(321)": "S32168",
 }
 
-#: 未预置牌号的材质类别**建议**规则(按牌号前缀)。只作建议:等级号末字母仍会在
-#: 行内警告里说明来源,真要改类别由用户在等级表里核对。
+#: 表 B.1 之外的牌号才走这里(前缀建议)。表内 104 个牌号已在
+#: `MATERIAL_CODE_BY_GRADE` 里逐个确认,不会再到这一步。
 #: 铬钼耐热钢(1Cr5Mo、9Cr1Mo、12Cr1MoV、5CrMo…)先于不锈钢规则识别:这些牌号
-#: 数字个数与 0?[0-9]Cr\d 短式重合,若不前置会被静默判成 E(不锈钢),而 HG/T 20519.6
-#: 的合金钢代号 D 本工具未设,只能落"待人工确认",不能装作判出来了。
+#: 数字个数与 0?[0-9]Cr\d 短式重合,若不前置会被静默判成 E(不锈钢)。表内铬钼钢
+#: 都已确认成 D;表外的落"待人工确认",不装作判出来了。
 HEAT_RESISTANT_GRADE_RULES: tuple[re.Pattern[str], ...] = (re.compile(r"^\d+Cr(\d+)?Mo", re.I),)
 
 MATERIAL_CODE_RULES: tuple[tuple[re.Pattern[str], str], ...] = (
@@ -168,12 +272,12 @@ DISALLOWED_DN = {65: 80, 125: 150}
 
 #: 设计温度裕量(℃)。规范给 15–30 ℃,默认取中值 20,且**永远往危险侧取**:
 #: 操作温度 ≥0 ℃ 时 T_d = t + 裕量,<0 ℃ 时 T_d = t − 裕量(偏冷侧)。
-#: 绝热代号按**设计温度**判:≥50 ℃ 追加 -H、≤0 ℃ 追加 -C(§17.4)。
+#: 绝热代号按**设计温度**判:≥65 ℃ 追加 -H、≤0 ℃ 追加 -C(§17.4)。
 #: 低温段若照旧 +20 ℃,整条低温管会被抬高 20 K,保冷 -C 与 V7 一起漏判。
 DESIGN_TEMP_MARGIN_C = 20.0
 DESIGN_TEMP_MARGIN_RANGE_C = (15.0, 30.0)
 
-#: 高压不锈钢升档:操作绝压落在 [4.7, 5.6] MPa、材质 S30408/S31603 的流股,
+#: 高压不锈钢升档:操作绝压落在 [4.7, 6.4] MPa、材质 S30408/S31603 的流股,
 #: 等级压力代号强制升到 R(10.0 MPa)并按 §17.8 公式重算壁厚 —— 防止高温段因
 #: 许用应力下降反而比低温段更薄(§17.3)。温度仅作佐证,不是硬门槛。
 #: 下限 4.7(原 4.8):把 4700 kPa 的 PG-0116/PL-0125 一并纳入,避免与 4800 kPa
@@ -718,10 +822,16 @@ def _load_od_to_walls(
 
 
 def project_grade(raw: str) -> str:
-    """表 B.1 里的牌号写法 → 本项目的牌号叫法(查 `GRADE_ALIASES`,不认识就原样)。"""
+    """表 B.1 里的牌号写法 → 本项目的牌号叫法(查 `GRADE_ALIASES`,不认识就原样)。
+
+    比对时忽略空格:全表里写的是「06Cr19Ni10 (304)」,别名表写的是
+    「06Cr19Ni10(304)」,只差括号前一个空格,不能因此漏掉归一。
+    """
     text = str(raw or "").strip()
+    squeezed = text.replace(" ", "")
     for alias, name in GRADE_ALIASES.items():
-        if text == alias or text.startswith(alias):
+        target = alias.replace(" ", "")
+        if squeezed == target or squeezed.startswith(target):
             return name
     return text
 
@@ -729,9 +839,9 @@ def project_grade(raw: str) -> str:
 def material_code_for(grade: str) -> tuple[str | None, str]:
     """牌号 → (HG/T 20519.6 材质类别代号, 来源)。
 
-    来源四种:`explicit`(预置映射)、`prefix`(按前缀推断)、`heat_resistant`
-    (铬钼耐热钢,代号 D 未设)、`unknown`(判不出来)。
-    判不出来时调用方按 E 暂记并告警,不在这里替用户拍板。
+    来源四种:`explicit`(已确认映射,表 B.1 的 104 个牌号都在这里)、
+    `prefix`(表外牌号按前缀推断)、`heat_resistant`(表外铬钼耐热钢,类别未确认)、
+    `unknown`(判不出来)。判不出来时调用方按 E 暂记并告警,不在这里替用户拍板。
     """
     text = str(grade or "").strip()
     if not text:
@@ -796,13 +906,14 @@ def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
 
     out: dict[str, dict[float, float]] = {}
 
-    # ① 预置牌号:固定取行规则优先
+    # ① 预置牌号:固定取行规则优先(牌号比对忽略空格,全表写法带「(304)」前的空格)
     for grade, (std, mark) in _STRESS_PICK.items():
+        target = mark.replace(" ", "")
         matched = [
             r
             for r in rows
             if r.get("标准") == std
-            and (mark in ("", "*") or str(r.get("牌号", "")).startswith(mark))
+            and (mark in ("", "*") or str(r.get("牌号", "")).replace(" ", "").startswith(target))
         ]
         if not matched:
             continue
@@ -829,13 +940,81 @@ def _stress_from_rows(rows: list[dict]) -> dict[str, dict[float, float]]:
     return out
 
 
+#: 牌号 → 表 B.1 的「母材类别」(Fe-1 / Fe-4 / Fe-5A …)。只用于下拉分组,
+#: 不参与壁厚计算;铸铁行的「母材类别」是「—」。
+GRADE_CATEGORY: dict[str, str] = {}
+CAST_IRON_CATEGORY = "—"
+
+
 def _load_stress(dir_: Path | None = None) -> dict[str, dict[float, float]]:
     """表 B.1 → {本项目牌号: {温度: 许用应力 MPa}}。"""
     global STRESS_ROWS
     base = Path(dir_) if dir_ else _CURATED_DIR
     rows = _read_csv(base / "t3-20801-tableB1.csv")
     STRESS_ROWS = rows
+    _refresh_grade_category(rows)
     return _stress_from_rows(rows)
+
+
+def _refresh_grade_category(rows: list[dict]) -> None:
+    """记录「牌号 → 母材类别」。同键多行时优先取有类别的(铸铁行是「—」)。"""
+    GRADE_CATEGORY.clear()
+    for row in rows:
+        grade = project_grade(row.get("牌号"))
+        if not grade:
+            continue
+        cat = (row.get("母材类别") or "").strip() or CAST_IRON_CATEGORY
+        if GRADE_CATEGORY.get(grade) in (None, CAST_IRON_CATEGORY):
+            GRADE_CATEGORY[grade] = cat
+    # 预置牌号里有的不是表里的写法(20# 取的是「GB/T 8163 + 20」那一行),
+    # 按 _STRESS_PICK 回查来源行补类别,否则下拉里会漏掉这些默认材质
+    for preset, (std, mark) in _STRESS_PICK.items():
+        if GRADE_CATEGORY.get(preset) not in (None, CAST_IRON_CATEGORY):
+            continue
+        for row in rows:
+            if (row.get("标准") or "").strip() != std:
+                continue
+            if (row.get("牌号") or "").strip() != mark:
+                continue
+            GRADE_CATEGORY[preset] = (row.get("母材类别") or "").strip() or CAST_IRON_CATEGORY
+            break
+
+
+def _category_sort_key(cat: str) -> tuple[int, int, str]:
+    """Fe-2 排在 Fe-11A 前面;铸铁/非钢管永远垫底。"""
+    if cat == CAST_IRON_CATEGORY:
+        return (1, 0, "")
+    m = re.match(r"Fe-(\d+)(.*)", cat)
+    if m:
+        return (0, int(m.group(1)), m.group(2))
+    return (0, 999, cat)
+
+
+def grade_groups() -> list[dict]:
+    """表 B.1 的牌号按母材类别分组,给前端下拉做 optgroup。
+
+    `steel=False` 的是铸铁/非钢管(表 B.1 里「母材类别」为空或「—」的那几行),
+    前端默认折叠,勾「显示全部牌号」才展开。
+    """
+    order: list[str] = []
+    for cat in GRADE_CATEGORY.values():
+        if cat not in order:
+            order.append(cat)
+    order.sort(key=_category_sort_key)
+    groups = []
+    for cat in order:
+        grades = sorted(g for g, c in GRADE_CATEGORY.items() if c == cat and g in ALLOWABLE_STRESS)
+        if not grades:
+            continue
+        groups.append(
+            {
+                "label": "铸铁/非钢管" if cat == CAST_IRON_CATEGORY else cat,
+                "category": cat,
+                "steel": cat != CAST_IRON_CATEGORY,
+                "grades": grades,
+            }
+        )
+    return groups
 
 
 OD_TO_WALLS: dict[float, tuple[float, ...]]

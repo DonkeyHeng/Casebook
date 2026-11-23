@@ -33,6 +33,8 @@ def pipe_table_status() -> dict:
         "stress": {
             "loaded": bool(pipe_data.ALLOWABLE_STRESS),
             "grades": stress_grades,
+            # 按母材类别分好组:前端下拉用 optgroup,默认只显示钢管(steel=true)
+            "groups": pipe_data.grade_groups(),
             "count": sum(len(v) for v in pipe_data.ALLOWABLE_STRESS.values()),
         },
         # 管道等级表:不填也能跑 —— 全部流股按页面上的默认材质

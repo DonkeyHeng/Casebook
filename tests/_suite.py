@@ -52,6 +52,8 @@ CASES: list[tuple[str, object]] = [
     ("管道等级表 piping-class", test_pipe.test_piping_class),
     ("标准表版本化", test_pipe.test_std_versioning),
     ("管路阻力 Re / λ / Σhf", test_pipe.test_hydraulics),
+    ("校核备注温度提示去重", test_pipe.test_check_remark_no_duplicate_temp_notes),
+    ("管材下拉按母材类别分组", test_pipe.test_grade_groups_and_csv_bom),
     ("内置示例库 install_sample()", test_tools.test_install_sample),
     ("设备家族 block_family", test_tools.test_block_family),
     ("塔剖面诊断 column_diag", test_tools.test_column_diag),

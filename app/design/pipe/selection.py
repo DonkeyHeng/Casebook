@@ -148,6 +148,27 @@ def _resolve_material(
     return material, cls, corrosion_c2, corrosion_source, od_to_walls_used, sigma
 
 
+def _stress_gap_reason(
+    material: str, design_c: float, stress: Mapping[str, Mapping[float, float]], ref: str = ""
+) -> str:
+    """[σ]^t 查不到时分清两种原因:牌号没录,还是设计温度超出该牌号范围。
+
+    两种情况的下一步动作不同:没录牌号要补标准表或换材质;超温要么降温,要么人工
+    给定 [σ]^t。混成一句「超出许用应力范围」会让人先去改流速,方向是错的。
+    """
+    table = dict((stress or {}).get(material) or {})
+    if not table:
+        return (
+            f"表 B.1 未录 {material} 牌号,查不到 [σ]^t;"
+            f"请补录该牌号或改用已录入材质{'(' + ref + ')' if ref else ''}"
+        )
+    top = max(float(t) for t in table)
+    return (
+        f"设计温度 {float(design_c):g} ℃ 超出表 B.1 中 {material} 的温度上限 "
+        f"{top:g} ℃,查不到 [σ]^t;需人工给定{'(' + ref + ')' if ref else ''}"
+    )
+
+
 def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列出便于单测
     ctx: _BuildContext,
     q: float,
@@ -273,7 +294,12 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
         w = calc_wall_thickness(pd["design_mpa"], od, sigma or 0.0)
         if not w["applicable"]:
             # 缺温度时不要把"缺许用应力"重复贴两遍;给一条能直接动手的提示。
-            _add_warning("缺操作温度，无法计算设计温度与壁厚" if design_c is None else w["note"])
+            if design_c is None:
+                _add_warning("缺操作温度，无法计算设计温度与壁厚")
+            elif sigma is None:
+                _add_warning(_stress_gap_reason(material, design_c, ctx.stress))
+            else:
+                _add_warning(w["note"])
 
     wall_res = _wall_result(od, dn)
     t_req = float(wall_res["t_required_mm"]) if wall_res["t_required_mm"] is not None else None
@@ -305,7 +331,12 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
     }
     if wall["wall_mm"] is None:
         if pd["design_mpa"] is not None:
-            _add_warning("缺操作温度，无法计算设计温度与壁厚" if design_c is None else wall["note"])
+            if design_c is None:
+                _add_warning("缺操作温度，无法计算设计温度与壁厚")
+            elif sigma is None:
+                _add_warning(_stress_gap_reason(material, design_c, ctx.stress))
+            else:
+                _add_warning(wall["note"])
     else:
         c1 = (
             pipe_data.negative_deviation(od, wall["wall_mm"], wall_grade) if not hp_formula else 0.0
@@ -319,9 +350,12 @@ def _size_pipe(  # noqa: PLR0913, PLR0917 —— 纯选型步骤,入参显式列
                     f"实际流速 {v_act:.2f} m/s 超出推荐 {lo:g}–{hi:g} m/s(负偏差 {c1:.2f} mm)"
                 )
     if hp_formula:
+        # 等级表给过 C 时按用户值算,没给才回退 hp_ss_corrosion_mm(1.0);
+        # 提示里的 C 必须报实际参与公式的那个,不能固定写 1.0。
+        c_used = float(hp_c_mm) if hp_c_mm is not None else pipe_data.HP_SS_CORROSION_MM
         warnings.append(
             f"R1E 项目专用非标准公式(不声称标准符合性):t={t_req:.2f} mm"
-            "(按 [σ]^t 插值、C=1.0、÷0.875),圆整到该外径标准壁厚(§17.8)"
+            f"(按 [σ]^t 插值、C={c_used:g} mm、÷0.875),圆整到该外径标准壁厚(§17.8)"
         )
     pipe_type = "无缝" if dn <= DN_SEAMLESS_MAX else "焊接"
     return dn, od, w, wall, min_wall_mm, t_req, pipe_type, ext_wall_mm
@@ -538,10 +572,7 @@ def _select_stream(
                     "需人工给 [σ]^t 后再选型(§17.8)"
                 )
             else:
-                reason = (
-                    f"设计温度 {td['design_c']:g} ℃ 超出表 B.1 许用应力范围，"
-                    "需人工给 [σ]^t 后再选型(§17.8)"
-                )
+                reason = _stress_gap_reason(material, td["design_c"], ctx.stress, "§17.8")
             return None, {"stream": name, "phase": phase, "reason": reason}
         if corrosion_source != "default" and abs(r1e_c_mm - default_r1e_c) > 1e-9:
             warnings.append(
@@ -594,11 +625,9 @@ def _select_stream(
         and float(op_temp) >= float(opts.get("high_temp_note_c", pipe_data.HIGH_TEMP_NOTE_C))
     )
     if low_temp:
-        warnings.append("低温工况:复核焊缝低温韧性及低温螺栓选型")
-        warnings.append("深冷工况:复核焊缝低温韧性及低温螺栓选型")
+        warnings.append("低温/深冷工况:复核焊缝低温韧性及低温螺栓选型")
     if high_temp:
-        warnings.append("高温管线:需做柔性应力分析(热膨胀补偿)")
-        warnings.append("高温管线(≥300℃):需做热膨胀柔性应力分析")
+        warnings.append("高温管线:需做热膨胀柔性应力分析(热膨胀补偿)")
 
     sized = _size_pipe(
         ctx,
@@ -647,11 +676,11 @@ def _select_stream(
         )
     )
     mcode, msource = pipe_data.material_code_for(material)
-    if mcode is None:  # 判不了材质:标"待人工确认",不硬猜一个代号
+    if mcode is None:  # 表外牌号判不了类别:标"待人工确认",不硬猜一个代号
         mcode = "E"
         if msource == "heat_resistant":
             warnings.append(
-                f"材质 {material!r} 疑似铬钼耐热钢:本工具未设合金钢代号 D,"
+                f"材质 {material!r} 疑似铬钼耐热钢但不在已确认映射内,"
                 "等级号末字母按 E 暂记,待人工确认"
             )
         else:

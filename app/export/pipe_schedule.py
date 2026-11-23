@@ -119,13 +119,11 @@ def _check_remark(row: dict) -> str:
         pct = pipe_calc.dn1000_oversize_pct(d_i, base_inner_mm=base)
         marks.append(f"流速略超上限(内径{d_i:.1f}mm),建议复核压降")
         marks.append(f"计算内径超DN1000实际内径(约{pct:.1f}%),需复核实际压降")
-    # §19.4 深冷 / 高温应力与韧性提示(按操作温度)。两组措辞都列出,避免漏读。
+    # §19.4 深冷 / 高温应力与韧性提示(按操作温度)。每档只出一条,与网页备注同源。
     if row.get("low_temp"):
-        marks.append("低温工况:复核焊缝低温韧性及低温螺栓选型")
-        marks.append("深冷工况:复核焊缝低温韧性及低温螺栓选型")
+        marks.append("低温/深冷工况:复核焊缝低温韧性及低温螺栓选型")
     if row.get("high_temp"):
-        marks.append("高温管线:需做柔性应力分析(热膨胀补偿)")
-        marks.append("高温管线(≥300℃):需做热膨胀柔性应力分析")
+        marks.append("高温管线:需做热膨胀柔性应力分析(热膨胀补偿)")
     for note in ("人工DN", "自定义规格"):
         if note in (row.get("warnings") or []):
             marks.append(note)

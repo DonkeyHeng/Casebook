@@ -521,6 +521,39 @@ def test_pipe_2026_rules() -> None:
         all(f["code"] != "V13" for f in pc.validate(hp_natural["rows"])["findings"]),
     )
 
+    # R1E 提示里的 C 必须报实际参与公式的值,不能固定写 1.0(等级表/选项给了就照给)
+    r1e_notes = [w for w in hp_row["warnings"] if w.startswith("R1E 项目专用")]
+    check(
+        "rules: R1E 提示的 C 与行内 r1e_c_mm 一致",
+        any(f"C={hp_row['r1e_c_mm']:g} mm" in w for w in r1e_notes),
+        str(r1e_notes),
+    )
+    hp_c_override = pc.build(
+        [
+            {
+                "name": "HP2",
+                "vol_flow_m3h": 50.0,
+                "temperature_c": 200.0,
+                "pressure_bar": 60.0,
+                "vap_frac": 0.0,
+            }
+        ],
+        options={"hp_ss_corrosion_mm": 2.5},
+        tables=SYNTH_TABLES,
+    )
+    override_row = hp_c_override["rows"][0]
+    override_notes = [w for w in override_row["warnings"] if w.startswith("R1E 项目专用")]
+    check(
+        "rules: 覆盖 C=2.5 时 R1E 提示同步",
+        any("C=2.5 mm" in w for w in override_notes),
+        str(override_notes),
+    )
+    check(
+        "rules: 覆盖 C 后不再写默认 1 mm",
+        all("C=1 mm" not in w for w in override_notes),
+        str(override_notes),
+    )
+
     # §17.8 R1E 公式化壁厚:t = PD/(2[σ]^t·E_j+P) + C 后 ÷0.875
     check_close("rules: [σ] 100 ℃ → 137", pc.hp_ss_allowable_stress(100.0), 137.0)
     check_close("rules: [σ] 125 ℃ 内插 → 130", pc.hp_ss_allowable_stress(125.0), 130.0)
@@ -701,15 +734,15 @@ def test_pipe_third_round() -> None:
     hrows = pc.build([hotter], tables=SYNTH_TABLES)["rows"]
     check("rules: 高温标记", hrows[0]["high_temp"] is True)
     hjoined = ";".join(hrows[0]["warnings"])
-    check("rules: 高温柔性应力备注", "高温管线:需做柔性应力分析(热膨胀补偿)" in hjoined)
-    check("rules: 高温 ≥300℃ 备注", "高温管线(≥300℃):需做热膨胀柔性应力分析" in hjoined)
+    check("rules: 高温柔性应力备注", "高温管线:需做热膨胀柔性应力分析(热膨胀补偿)" in hjoined)
+    check("rules: 高温备注不重复", sum("高温管线" in w for w in hrows[0]["warnings"]) == 1)
 
     cold = dict(base, name="0402", temperature_c=-25.0, pressure_bar=1.01325)
     crows = pc.build([cold], tables=SYNTH_TABLES)["rows"]
     check("rules: 深冷标记", crows[0]["low_temp"] is True)
     cjoined = ";".join(crows[0]["warnings"])
-    check("rules: 低温韧性备注", "低温工况:复核焊缝低温韧性及低温螺栓选型" in cjoined)
-    check("rules: 深冷韧性备注", "深冷工况:复核焊缝低温韧性及低温螺栓选型" in cjoined)
+    check("rules: 低温韧性备注", "低温/深冷工况:复核焊缝低温韧性及低温螺栓选型" in cjoined)
+    check("rules: 低温备注不重复", sum("复核焊缝低温韧性" in w for w in crows[0]["warnings"]) == 1)
 
     # §19.3 DN1000 容差:给一张含 DN1000 的合成表,计算内径 1008.4 / 1035.3
     big_dn = dict(SYNTH_TABLES["dn_to_od"])
@@ -1175,8 +1208,15 @@ def test_material_scope() -> None:
     )
     check("牌号: 表里新增的牌号也收进来", "S32168" in out, f"{sorted(out)}")
 
-    check_eq("材质: 预置牌号走显式映射", pipe_data.material_code_for("S30408"), ("E", "explicit"))
-    check_eq("材质: 321 按前缀判为不锈钢", pipe_data.material_code_for("S32168"), ("E", "prefix"))
+    check_eq("材质: 已确认牌号走显式映射", pipe_data.material_code_for("S30408"), ("E", "explicit"))
+    check_eq(
+        "材质: 321 已在表 B.1 里确认", pipe_data.material_code_for("S32168"), ("E", "explicit")
+    )
+    check_eq(
+        "材质: 06Cr19Ni10 仍按原分支判为不锈钢",
+        pipe_data.material_code_for("06Cr19Ni10"),
+        ("E", "prefix"),
+    )
     check_eq(
         "材质: 新国标超低碳 022Cr19Ni10 按前缀判为不锈钢",
         pipe_data.material_code_for("022Cr19Ni10"),
@@ -1187,10 +1227,14 @@ def test_material_scope() -> None:
         pipe_data.material_code_for("022Cr17Ni12Mo2"),
         ("E", "prefix"),
     )
-    # 铬钼耐热钢必须前置识别:否则 1Cr5Mo/9Cr1Mo 会被不锈钢短式 0?[0-9]Cr\d 静默判 E
-    for _g in ("12Cr1MoV", "15CrMo", "1Cr5Mo", "9Cr1Mo", "5CrMo"):
+    # 表 B.1 里的铬钼耐热钢已逐个确认成 D;表外的仍要前置拦截,不能被短式静默判 E
+    for _g in ("12Cr1MoV", "15CrMo", "12Cr2Mo1", "10Cr9Mo1VNbN"):
         check_eq(
-            f"材质: 铬钼耐热钢 {_g} 归入待确认(heat_resistant)",
+            f"材质: 表内铬钼钢 {_g} 已确认 D", pipe_data.material_code_for(_g), ("D", "explicit")
+        )
+    for _g in ("1Cr5Mo", "9Cr1Mo", "5CrMo"):
+        check_eq(
+            f"材质: 表外铬钼耐热钢 {_g} 归入待确认(heat_resistant)",
             pipe_data.material_code_for(_g),
             (None, "heat_resistant"),
         )
@@ -1199,17 +1243,32 @@ def test_material_scope() -> None:
         pipe_data.material_code_for("1Cr18Ni9Ti"),
         ("E", "prefix"),
     )
+    check_eq("材质: Q235 已在表内确认碳钢", pipe_data.material_code_for("Q235B"), ("B", "explicit"))
     check_eq(
-        "材质: 06Cr19Ni10 仍按原分支判为不锈钢",
-        pipe_data.material_code_for("06Cr19Ni10"),
-        ("E", "prefix"),
+        "材质: Q345R 已在表内确认低合金钢", pipe_data.material_code_for("Q345R"), ("C", "explicit")
     )
-    check_eq("材质: Q235 按前缀判为碳钢", pipe_data.material_code_for("Q235B"), ("B", "prefix"))
+    check_eq("材质: 铸铁 HT200 归 A", pipe_data.material_code_for("HT200"), ("A", "explicit"))
     check_eq(
-        "材质: Q345R 按前缀判为低合金钢", pipe_data.material_code_for("Q345R"), ("C", "prefix")
+        "材质: 低温镍钢 06Ni9DG 归 D", pipe_data.material_code_for("06Ni9DG"), ("D", "explicit")
+    )
+    check_eq(
+        "材质: 10MnDG 归普通低合金钢 C", pipe_data.material_code_for("10MnDG"), ("C", "explicit")
     )
     check_eq("材质: TA2 按前缀判为有色金属", pipe_data.material_code_for("TA2"), ("F", "prefix"))
     check_eq("材质: 判不出来的不硬猜", pipe_data.material_code_for("XYZ"), (None, "unknown"))
+
+    # 表 B.1 的 104 个牌号全部有确认代号,不再有"暂记 E"的兜底
+    unmapped = [
+        g for g in pipe_data.ALLOWABLE_STRESS if pipe_data.material_code_for(g)[1] != "explicit"
+    ]
+    check("材质: 表 B.1 全部牌号已确认", not unmapped, f"{unmapped}")
+    bad_codes = [
+        (g, c)
+        for g in pipe_data.ALLOWABLE_STRESS
+        for c, _src in [pipe_data.material_code_for(g)]
+        if c not in pipe_data.MATERIAL_CODES
+    ]
+    check("材质: 代号都在 A–H 表内", not bad_codes, f"{bad_codes}")
 
     check("牌号形状: 20# 像牌号", pipe_data.looks_like_grade("20#"))
     check("牌号形状: 06Cr19Ni10(304) 像牌号", pipe_data.looks_like_grade("06Cr19Ni10(304)"))
@@ -1226,6 +1285,28 @@ def test_material_scope() -> None:
             list(grades),
             sorted(pipe_data.ALLOWABLE_STRESS),
         )
+
+    # 全表导入:牌号写法带空格(「06Cr19Ni10 (304)」),归一与预置取行都不能被空格卡住
+    check_eq(
+        "空格牌号归一",
+        pipe_data.project_grade("06Cr19Ni10 (304)"),
+        "S30408",
+    )
+    spaced = pipe_data._stress_from_rows(
+        [
+            {
+                "标准": "GB/T 14976",
+                "牌号": "06Cr19Ni10 (304)",
+                "许用应力_40": "137",
+                "许用应力_100": "130",
+            }
+        ]
+    )
+    check(
+        "空格牌号仍走预置取行",
+        spaced.get("S30408") == {40.0: 137.0, 100.0: 130.0},
+        str(spaced),
+    )
 
     _, errors = pipe_data.validate_piping_classes(
         {"rules": [{"medium": ["PL"], "grade": "S30408"}]}
@@ -1880,14 +1961,26 @@ def test_pipe_r1e_missing_reason_by_material() -> None:
     check_eq("reason: S31603 超温不生成输出行", s31603_res["rows"], [])
     reason = s31603_res["missing"][0]["reason"]
     check(
-        "reason: S31603 走表 B.1 文案",
-        "表 B.1 许用应力范围" in reason and "S30408 只到 350" not in reason,
+        "reason: S31603 走表 B.1 超温文案",
+        "温度上限" in reason and "S30408 只到 350" not in reason,
         reason,
     )
     check_eq(
-        "reason: S31603 文案完整",
+        "reason: S31603 超温文案完整",
         reason,
-        "设计温度 420 ℃ 超出表 B.1 许用应力范围，需人工给 [σ]^t 后再选型(§17.8)",
+        "设计温度 420 ℃ 超出表 B.1 中 S31603 的温度上限 300 ℃,查不到 [σ]^t;需人工给定(§17.8)",
+    )
+
+    # 整表没录这个牌号时,要与"超温"分开说:补录标准表或换材质,不是降温。
+    missing_grade = pc.build(
+        [{**base_stream, "name": "0209", "temperature_c": 25.0}],
+        tables=SYNTH_TABLES,
+        options={"material_for_stream": {"0209": "S31603"}},
+    )["missing"][0]["reason"]
+    check(
+        "reason: S31603 缺牌号单独说明",
+        "未录 S31603 牌号" in missing_grade and "温度上限" not in missing_grade,
+        missing_grade,
     )
 
 
@@ -2008,3 +2101,43 @@ def test_pipe_welded_wall_series() -> None:
         dn1000,
         (8.0, 8.8, 10.0, 11.0, 12.5, 14.2, 16.0, 17.5, 20.0),
     )
+
+
+def test_check_remark_no_duplicate_temp_notes() -> None:
+    """管路一览表「校核备注」列:低温/高温各只出一条,不并列旧版两条。"""
+    from app.export import pipe_schedule
+
+    for label, row in (
+        ("低温", {"low_temp": True}),
+        ("高温", {"high_temp": True}),
+        ("冷热同命中", {"low_temp": True, "high_temp": True}),
+    ):
+        marks = pipe_schedule._check_remark(row).split(";")
+        low = [m for m in marks if "复核焊缝低温韧性" in m]
+        high = [m for m in marks if "高温管线" in m]
+        assert len(low) == int(row.get("low_temp") is True), (label, marks)
+        assert len(high) == int(row.get("high_temp") is True), (label, marks)
+        assert not any("需做柔性应力分析" in m for m in marks), (label, marks)
+
+
+def test_grade_groups_and_csv_bom() -> None:
+    """管材下拉按表 B.1 的「母材类别」分组;CSV 带 BOM,Excel 打开中文不乱码。"""
+    from app.api.serialize import pipe_table_status
+    from app.design.pipe import data as pipe_data
+
+    groups = pipe_data.grade_groups()
+    labels = [g["label"] for g in groups]
+    assert labels[-1] == "铸铁/非钢管", labels
+    assert labels[:3] == ["Fe-1", "Fe-3", "Fe-4"], labels  # 自然序,Fe-11A 不许排到前面
+    steel = {x for g in groups if g["steel"] for x in g["grades"]}
+    cast = {x for g in groups if not g["steel"] for x in g["grades"]}
+    assert {"20#", "S30408", "S31603"} <= steel
+    assert {"HT200", "QT400-18"} <= cast
+    flat = [x for g in groups for x in g["grades"]]
+    assert len(flat) == len(set(flat)), "牌号重复归组"
+    assert set(flat) == set(pipe_data.ALLOWABLE_STRESS), "有牌号没归组"
+    # API 带着分组返回,前端才画得出 optgroup
+    assert pipe_table_status()["stress"]["groups"] == groups
+    # 带 BOM 才能双击用 Excel 打开而不乱码
+    csv_path = pipe_data._CURATED_DIR / "t3-20801-tableB1.csv"
+    assert csv_path.read_bytes()[:3] == b"\xef\xbb\xbf", "表 B.1 CSV 缺 UTF-8 BOM"

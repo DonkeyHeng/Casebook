@@ -30,7 +30,7 @@ def grade_code(
     两个代号来自 options(§17):
       * `vacuum=True` → 压力代号默认 L(PN1.0,真空管按最低压力等级配级);
         真空判定由 `is_vacuum` 布尔单独承担,不靠代号字母反推;
-      * `force_pn_code` → 强制升档(高压不锈钢 4.8–5.6 MPa 升 R)。
+      * `force_pn_code` → 强制升档(高压不锈钢 4.7–6.4 MPa 升 R)。
     """
     opts = options or {}
     seq = str(opts.get("sequence_no", 1))
