@@ -250,6 +250,7 @@ class PipeRoutes:
         payload = {
             "ok": ok,
             "errors": errors,
+            "warnings": files.get("warnings", []),
             "dir": files["dir"],
             "files": files["files"],
             "status": pipe_table_status(),

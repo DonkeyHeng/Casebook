@@ -1046,6 +1046,17 @@ def test_std_import() -> None:
     check("std: 表 B.1 非数字被拒", any("有效数字" in e for e in errs), f"{errs}")
     errs, _ = pipe_data._validate_std_text(b1, b1_ok.replace(",20#,-", ",20#,1001"))
     check("std: 表 B.1 应力超区间被拒", any("超出" in e for e in errs), f"{errs}")
+    rising = "标准,牌号,许用应力_40,许用应力_65,许用应力_100\nGB/T 8163,20#,100,120,-\n"
+    errs, info = pipe_data._validate_std_text(b1, rising)
+    check_eq("std: 应力上升不拦导入", errs, [])
+    check(
+        "std: 应力上升给软告警",
+        any("上升" in w for w in info.get("warnings", [])),
+        f"{info.get('warnings')}",
+    )
+    gap = "标准,牌号,许用应力_40,许用应力_65,许用应力_100\nGB/T 8163,20#,-,100,-\n"
+    errs, info = pipe_data._validate_std_text(b1, gap)
+    check_eq("std: 缺值点没有相邻可比值", info.get("warnings"), [])
 
     base = tmp_root / "a" / "docx"
     ok, errs, status = pipe_data.import_standards(
@@ -1063,6 +1074,17 @@ def test_std_import() -> None:
     check_eq("std: 分号表能导入", (ok, errs), (True, []))
     written = (semi_base / "t1-17395-table1.csv").read_text(encoding="utf-8-sig")
     check("std: 落盘统一成逗号分隔", written.splitlines()[0] == "D_mm,S_mm", written[:40])
+
+    warn_base = tmp_root / "warn" / "docx"
+    ok, errs, status = pipe_data.import_standards(
+        {"files": {"t3-20801-tableB1.csv": rising}}, target_dir=warn_base, reload=False
+    )
+    check_eq("std: 软告警不拦导入", (ok, errs), (True, []))
+    check(
+        "std: 软告警随导入状态返回",
+        any("上升" in w for w in status.get("warnings", [])),
+        f"{status.get('warnings')}",
+    )
 
     # 一个文件不合格 → 一张都不写(别留半份)
     ok, errs, _ = pipe_data.import_standards(

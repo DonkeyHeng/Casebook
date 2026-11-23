@@ -1290,6 +1290,7 @@ def _check_std_stress(rows: list[dict]) -> tuple[list[str], dict]:
     if not stress_cols:
         return ["没有许用应力列(许用应力_<温度>),表 B.1 至少要一档"], {}
     errors: list[str] = []
+    warnings: list[str] = []
     grades: set[str] = set()
     for i, row in enumerate(rows, start=2):
         grade = str(row.get("牌号") or "").strip()
@@ -1297,6 +1298,7 @@ def _check_std_stress(rows: list[dict]) -> tuple[list[str], dict]:
             grades.add(grade)
         else:
             errors.append(f"第 {i} 行:牌号为空")
+        seq: list[tuple[int, float]] = []
         for col in stress_cols:
             raw = row.get(col)
             if _is_missing_cell(raw):
@@ -1304,11 +1306,29 @@ def _check_std_stress(rows: list[dict]) -> tuple[list[str], dict]:
             value = _parse_std_number(raw)
             if value is None:
                 errors.append(f"第 {i} 行 {col}:{str(raw).strip()!r} 不是有效数字")
-            elif not (_STRESS_RANGE_MPA[0] <= value <= _STRESS_RANGE_MPA[1]):
+                continue
+            if not (_STRESS_RANGE_MPA[0] <= value <= _STRESS_RANGE_MPA[1]):
                 errors.append(
                     f"第 {i} 行 {col}:{value:g} MPa 超出 1–1000 MPa,疑似把温度/压力抄进应力列"
                 )
-    return errors[:12], {"rows": len(rows), "grades": sorted(grades)[:12]}
+                continue
+            try:
+                seq.append((int(col.rsplit("_", 1)[1]), value))
+            except ValueError:
+                pass
+        # 软告警:许用应力随温度一般只会降不会升;缺值点已跳过,不参与比较
+        for (t0, v0), (t1, v1) in zip(seq, seq[1:], strict=False):
+            if v1 > v0 + max(1.0, 0.02 * abs(v0)):
+                warnings.append(
+                    f"第 {i} 行 {grade or '?'}:{t0} ℃ {v0:g} → {t1} ℃ {v1:g} MPa 上升,"
+                    "疑似串列/串行,建议复核"
+                )
+                break
+    return errors[:12], {
+        "rows": len(rows),
+        "grades": sorted(grades)[:12],
+        "warnings": warnings[:8],
+    }
 
 
 def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
@@ -1375,6 +1395,7 @@ def import_standards(
         return False, ["没有收到文件:先选要导入的 CSV 再点导入"], standards_status(base)
 
     errors: list[str] = []
+    warnings: list[str] = []
     accepted: dict[str, str] = {}
     for name, text in files.items():
         spec = std_file_spec(str(name))
@@ -1390,17 +1411,20 @@ def import_standards(
                 "按模板的列名填入真实数据后再导入"
             )
             continue
-        errs, _info = _validate_std_text(spec, text)
+        errs, info = _validate_std_text(spec, text)
         if errs:
             errors.extend(f"{name}:{e}" for e in errs)
             continue
+        warnings.extend(f"{name}:{w}" for w in info.get("warnings", []))
         accepted[spec["name"]] = _canonical_std_text(text)
     if errors:
         return False, errors, standards_status(base)
 
     # 自测走 target_dir:直接写那个临时目录,不建版本、不动指针
     if target_dir is not None:
-        return _import_into_dir(base, accepted, reload=reload)
+        ok, errs, status = _import_into_dir(base, accepted, reload=reload)
+        status["warnings"] = warnings
+        return ok, errs, status
 
     # 正式路径:先在 versions/ 下拼一份**完整**目录,试加载通过再原子切指针。
     # 以前是逐个 CSV 覆盖到生效目录:第二个文件失败时第一个已经生效,页面就会
@@ -1440,7 +1464,9 @@ def import_standards(
         _refresh_active_dir()
         shutil.rmtree(staging, ignore_errors=True)
         return False, [f"导入后加载失败,已回退:{exc}"], standards_status()
-    return True, [], standards_status()
+    status = standards_status()
+    status["warnings"] = warnings
+    return True, [], status
 
 
 def _import_into_dir(

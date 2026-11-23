@@ -212,7 +212,8 @@ Windows 包(exe,示例库已经打进程序里):双击 `Casebook.exe` 打开界�
 2. 整理成三个 CSV(文件名固定)
 3. 打开「管道」页右上角的 **「标准表」** 按钮 → 选文件 → 「导入并立即生效」,不用重启服务
 
-导入前会校验文件名、编码、必需列与行数;只要有一个文件不合格就整单不写,不会留下半份坏数据。
+导入时会自动认 Excel 常见的 UTF-8 / GBK / UTF-16 编码和逗号 / 分号 / Tab 分隔符,并校验文件名、
+必需列、行数与外径/壁厚/许用应力的物理区间;只要有一个文件不合格就整单不写,不会留下半份坏数据。
 想要一份"复制给 AI 让它帮着抄数"的提示词,见
 [`docs/pipe-standards-extract-prompt.md`](pipe-standards-extract-prompt.md);
 页码与分页结构见 [`docs/pipe-standards-index.md`](pipe-standards-index.md)。

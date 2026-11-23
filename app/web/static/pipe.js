@@ -519,6 +519,7 @@ function openPipeStd() {
   if (!modal) return;
   modal.classList.remove("hidden");
   showPipeStdError("");
+  showPipeStdWarn("");
   showPipeStdOk("");
   Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
   focusIntoModal(modal);
@@ -542,6 +543,14 @@ function pipeStdEsc(e) {
 
 function showPipeStdError(text) {
   const el = document.getElementById("pipeStdError");
+  if (!el) return;
+  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
+  el.classList.remove("hidden");
+  el.textContent = text;
+}
+
+function showPipeStdWarn(text) {
+  const el = document.getElementById("pipeStdWarn");
   if (!el) return;
   if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
   el.classList.remove("hidden");
@@ -721,6 +730,7 @@ async function doPipeStdImport() {
   const btn = document.getElementById("pipeStdImport");
   if (btn) { btn.disabled = true; btn.textContent = "导入中…"; }
   showPipeStdError("");
+  showPipeStdWarn("");
   showPipeStdOk("");
   try {
     const res = await fetch("/api/pipe-standards", {
@@ -739,6 +749,10 @@ async function doPipeStdImport() {
     }
     Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
     showPipeStdOk(`写入了 ${Object.keys(files).length} 个文件,标准表已重新加载 —— 关掉这个窗口就能看到管道表。`);
+    const warns = body.warnings || [];
+    if (warns.length) {
+      showPipeStdWarn(`已导入,但有 ${warns.length} 处需复核(不影响使用):\n${warns.join("\n")}`);
+    }
     // 状态变了:清掉缓存、重算管道表,下一次算就用新表
     pipeState.tables = null;
     pipeState.data = null;

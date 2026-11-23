@@ -2025,7 +2025,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .pipe-std-note code { overflow-wrap: anywhere; }
 .pipe-notice.ok { background: var(--ok-fill); border-color: var(--ok-line); color: var(--ok); }
 /* 服务端一次可能回好几种错误,一条一行 */
-#pipeStdError, #pipeStdOk { white-space: pre-line; }
+#pipeStdError, #pipeStdWarn, #pipeStdOk { white-space: pre-line; }
 .pipe-setup-cta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pipe-setup-cta .muted { font-size: var(--fs-sm); }
 
