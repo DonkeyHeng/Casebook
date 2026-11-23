@@ -24,6 +24,8 @@ TARGET = {
     "energy_flow": "kW",
     "length": "m",
     "molar_density": "kmol/m3",
+    "ua": "W/K",
+    "u_value": "W/(m2*K)",
 }
 
 # 每个量纲:{单位: (系数, 偏移)}   目标值 = 原值 * 系数 + 偏移
@@ -184,6 +186,26 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "gmmol/cc": (1000.0, 0.0),
         "lbmol/ft3": (16.018463, 0.0),
         "lbmol/cuft": (16.018463, 0.0),  # 实测 V15 ENG 的 RHO_LIQ 用 cuft,不是 ft3
+    },
+    # UA → W/K。实测 V15 HeatX:HX_UA = 5407.44 cal/sec-K。
+    "ua": {
+        "w/k": (1.0, 0.0),
+        "kw/k": (1000.0, 0.0),
+        "cal/sec-k": (4.1868, 0.0),
+        "cal/s-k": (4.1868, 0.0),
+        "kcal/hr-k": (1.163, 0.0),
+        "btu/hr-f": (0.527, 0.0),
+    },
+    # 传热系数 → W/(m²·K)。实测 V15 HeatX:HX_UAVD = 0.0203019 cal/sec-sqcm-K = 850 W/(m²·K)。
+    "u_value": {
+        "w/m2-k": (1.0, 0.0),
+        "w/m2k": (1.0, 0.0),
+        "w/sqcm-k": (10000.0, 0.0),
+        "cal/sec-sqcm-k": (41868.0, 0.0),
+        "cal/sec-cm2-k": (41868.0, 0.0),
+        "cal/sec-m2-k": (4.1868, 0.0),
+        "kcal/hr-m2-c": (1.163, 0.0),
+        "btu/hr-ft2-f": (5.678, 0.0),
     },
 }
 

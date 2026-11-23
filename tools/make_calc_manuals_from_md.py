@@ -52,6 +52,20 @@ BOOKS = {
         ],
         "note": "本说明书解释算法口径，不替代厂家型谱与工程设计审核",
     },
+    "hx": {
+        "title": "换热器选型计算说明书",
+        "book": "换热专业 · 计算册",
+        "rows": [
+            ("适用功能", "换热页 · 每台 HeatX / Heater 的 L1 工况、LMTD、反算 U 与型号编码"),
+            (
+                "计算依据",
+                "逆流 LMTD · GB/T 151 型号编码 · 经验 U 与污垢档 · EDR 输入清单（不做 rating）",
+            ),
+            ("数据来源", "Aspen 工况快照 + 公用工程节点 + 人工参数"),
+            ("复算方式", "按本文公式、常数与顺序逐项复算"),
+        ],
+        "note": "本说明书解释 L1 算法口径，不替代 EDR rating、GB/T 151 强度校核与工程设计审核",
+    },
 }
 
 WIDTH_TOTAL_CM = 15.6
@@ -299,6 +313,7 @@ def main() -> int:
     for kind, name in (
         ("pipe", "casebook-pipe-calc-manual.md"),
         ("pump", "casebook-pump-calc-manual.md"),
+        ("hx", "casebook-hx-calc-manual.md"),
     ):
         print(render(kind, DOCS / name).name, "written")
     return 0

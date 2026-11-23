@@ -46,6 +46,7 @@ const MODULES = [
   path.join(STATIC, "views", "report.js"),
   path.join(STATIC, "views", "table.js"),
   path.join(STATIC, "views", "pump.js"),
+  path.join(STATIC, "views", "heat.js"),
   path.join(STATIC, "views", "composition.js"),
   path.join(STATIC, "views", "read.js"),
   path.join(STATIC, "views", "flow.js"),

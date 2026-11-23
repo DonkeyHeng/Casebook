@@ -178,7 +178,7 @@ function fillPumpSwitch(current) {
 export function openPump(block) {
   const row = state.blocks.find((b) => b.name === block);
   if (!row) return;
-  ["columnPanel", "compPanel"].forEach((id) =>
+  ["columnPanel", "compPanel", "heatPanel"].forEach((id) =>
     document.getElementById(id).classList.add("hidden"));
   const panel = document.getElementById("pumpPanel");
   document.getElementById("pumpTitle").textContent = `泵参数 · ${block}`;

@@ -90,3 +90,4 @@ desktop.ini
 
 # DOCX 改版过程的本地工作目录(中间产物,不入库)
 .docx_*_work/
+data/probe_hx.txt

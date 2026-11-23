@@ -64,6 +64,21 @@ ENTHALPY_FIELDS = (
 BLOCK_DUTY_FIELDS = ("QCALC", "QNET", "HX_DUTY")  # cal/sec
 BLOCK_POWER_FIELDS = ("BRAKE_POWER", "ELEC_POWER")  # kW
 BLOCK_AREA_FIELDS = ("HX_AREAC", "HX_AREAC2", "HX_AREAP")  # sqm;实测前者常空,后两个有值
+# HeatX 的 L1 常用输出(实测 2026-11-23, V15, Shortcut 模式):
+#   HX_UA   cal/sec-K     -> W/K
+#   HX_DTLM °C            (Aspen 自己算的对数平均温差;含不含 F 未验证)
+#   HX_FMTD 无量纲         F 修正系数(Shortcut 单壳程恒 1.0)
+#   HX_UAVD cal/sec-cm²-K -> W/(m²·K)(实测恒 850,是设计假设 U,不是 rating 结果)
+# 取不到就是 None,绝不补 0 —— 面积来源判定要靠"有没有值"。
+HEATX_BLOCK_FIELDS = (
+    ("ua_wk", "HX_UA", "ua"),
+    ("hx_dtlm_c", "HX_DTLM", "temperature"),
+    ("hx_f_factor", "HX_FMTD", "fraction"),
+    ("hx_u_design_wm2k", "HX_UAVD", "u_value"),
+)
+HEATX_BLOCK_TYPES = ("HeatX", "MHeatX")
+# Heater / HeaterX 的公用工程引用(Input 侧的 UTILITY_ID,文本,如 'MS')
+UTILITY_BLOCK_TYPES = ("Heater", "HeaterX")
 # 塔的冷凝器 / 再沸器负荷(实测 2026-11-14:1 个塔一对,单位 cal/sec,冷凝为负)
 BLOCK_TOWER_DUTY_FIELDS = (("cond_duty_kw", ("COND_DUTY",)), ("reb_duty_kw", ("REB_DUTY",)))
 
@@ -704,6 +719,20 @@ def read_block(session, bid: str, node=None) -> dict:
     for key, fields in BLOCK_TOWER_DUTY_FIELDS:
         rec[key] = _first_converted(session, base, fields, "power", rec["raw"])
 
+    # 换热器特有线量:只有 HeatX 有;其它设备留 None(不是 0)
+    for key, _field, _quantity in HEATX_BLOCK_FIELDS:
+        rec[key] = None
+    if btype in HEATX_BLOCK_TYPES:
+        for key, field, quantity in HEATX_BLOCK_FIELDS:
+            rec[key] = _first_converted(session, base, (field,), quantity, rec["raw"])
+
+    # Heater 引用的公用工程名(文本)。空字符串归一成 None,免得下游把 '' 当可用
+    rec["util_id"] = None
+    if btype in UTILITY_BLOCK_TYPES:
+        value, _ = fetch(session, rf"{base}\Input\UTILITY_ID")
+        if isinstance(value, str) and value.strip():
+            rec["util_id"] = value.strip()
+
     # 理论级数
     nstage, _ = fetch(session, rf"{base}\Input\NSTAGE")
     rec["nstage"] = int(nstage) if isinstance(nstage, (int, float)) else None
@@ -725,6 +754,115 @@ def read_block(session, bid: str, node=None) -> dict:
     rec["status"], _ = fetch(session, rf"{base}\Output\BLKSTAT")
     rec["message"], _ = fetch(session, rf"{base}\Output\BLKMSG")
     return rec
+
+
+UTILITY_ROOT = r"\Data\Utilities"
+# 公用工程侧温度/流量(Output 标量)。UTL_DUTY 是标志位(实测读回 1 cal/sec),禁止参与计算。
+UTILITY_FIELDS = (
+    ("t_in_c", "UTL_IN_TEMP", "temperature"),
+    ("t_out_c", "UTL_OUT_TEMP", "temperature"),
+    ("t_bubble_c", "UTL_B_TEMP", "temperature"),
+    ("mass_flow_kgh", "UTL_TRATE", "mass_flow"),
+)
+# 公用工程类型代码的候选位置(不同版本落点不一致)
+UTILITY_TYPE_PATHS = (
+    r"Output\UTILITY_TYPE",
+    r"Input\UTILITY_TYPE",
+    r"Input\UTL_TYPE",
+)
+# 温度差小于这个值就当等温(℃)。饱和蒸汽冷凝、制冷剂蒸发都落在这里。
+UTILITY_ISOTHERMAL_DT = 1.0
+
+
+def read_utilities(session) -> dict:
+    r"""读 \Data\Utilities 下的全部公用工程,返回 {名字: 记录}。
+
+    只读,不推算:没有温度的(实测 LS / HS)就留 None,由预设或手填补足并标来源。
+    记录字段:
+        name / type / t_in_c / t_out_c / t_bubble_c / mass_flow_kgh
+        isothermal(两侧温度都读到且差 <= 1 ℃)
+        fluid(steam / water / electricity / fuel / air / unknown)
+    """
+    root = session.find(UTILITY_ROOT)
+    if root is None:
+        return {}
+    out = {}
+    for name in child_names(root):
+        base = f"{UTILITY_ROOT}\\{name}"
+        rec = {"name": name, "type": None, "isothermal": False, "fluid": "unknown"}
+        for key, field, quantity in UTILITY_FIELDS:
+            rec[key], _ = fetch_converted(session, f"{base}\\Output\\{field}", quantity)
+        for path in UTILITY_TYPE_PATHS:
+            value, _ = fetch(session, f"{base}\\{path}")
+            if isinstance(value, str) and value.strip():
+                rec["type"] = value.strip()
+                break
+        rec["fluid"] = _utility_fluid(rec["type"], name)
+        rec["isothermal"] = (
+            rec["t_in_c"] is not None
+            and rec["t_out_c"] is not None
+            and abs(rec["t_in_c"] - rec["t_out_c"]) <= UTILITY_ISOTHERMAL_DT
+        )
+        out[name] = rec
+    return out
+
+
+def _utility_fluid(type_code: str | None, name: str) -> str:
+    """把公用工程类型代码归一成粗分类,只为选口径用,不参与热力计算。"""
+    text = f"{type_code or ''} {name}".upper()
+    if (
+        "STEAM" in text
+        or text.startswith("MS ")
+        or text.startswith("LS ")
+        or text.startswith("HS ")
+    ):
+        return "steam"
+    if "WATER" in text:
+        return "water"
+    if "ELEC" in text:
+        return "electricity"
+    if "FUEL" in text:
+        return "fuel"
+    if "AIR" in text:
+        return "air"
+    return "unknown"
+
+
+def enrich_heat_utilities(blocks: list[dict], utilities: dict) -> None:
+    """把 Heater / HeaterX 引用的公用工程温度挂到块上,顺便标来源与相态。
+
+    utility_source:
+        aspen    —— 公用工程节点上读到了进出口温度
+        missing  —— 引用了公用工程但温度读不到(实测 LS / HS),要靠预设/手填
+        undefined —— 设备没有 UTILITY_ID(实测 B3 / E0403),连引用都没有
+    """
+    for block in blocks:
+        block.setdefault("util_type", None)
+        block.setdefault("util_t_in_c", None)
+        block.setdefault("util_t_out_c", None)
+        block.setdefault("util_isothermal", None)
+        block.setdefault("util_source", None)
+        if block.get("type") not in UTILITY_BLOCK_TYPES:
+            continue
+        uid = block.get("util_id")
+        if not uid:
+            block["util_source"] = "undefined"
+            continue
+        util = utilities.get(uid)
+        if util is None:
+            block["util_source"] = "missing"
+            continue
+        block["util_type"] = util.get("fluid")
+        block["util_t_in_c"] = util.get("t_in_c")
+        block["util_t_out_c"] = util.get("t_out_c")
+        block["util_isothermal"] = (
+            bool(util.get("isothermal")) if util.get("t_in_c") is not None else None
+        )
+        block["util_source"] = (
+            "aspen"
+            if util.get("t_in_c") is not None and util.get("t_out_c") is not None
+            else "missing"
+        )
 
 
 def _first_converted(session, base: str, fields, quantity: str, raw: dict):
@@ -1257,6 +1395,9 @@ def read_case(
     mark_empty(convergence, value_coverage(streams), convergence.get("run", {}).get("RUNID"))
     phase("读取连接关系")
     connections = read_connections(session, streams, blocks)
+    phase("读取公用工程")
+    utilities = read_utilities(session)
+    enrich_heat_utilities(blocks, utilities)
     phase("补设备进出温度")
     enrich_side_temperatures(streams, blocks, connections)
     phase("读取泵参数")
@@ -1288,6 +1429,7 @@ def read_case(
         "convergence": convergence,
         "streams": streams,
         "blocks": blocks,
+        "utilities": utilities,
         "columns": profiles,
         "connections": connections,
         "balance": results,

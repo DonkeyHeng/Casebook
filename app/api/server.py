@@ -49,6 +49,7 @@ from app.api.routes import (
     ROUTES,
     CaseRoutes,
     ExportRoutes,
+    HeatRoutes,
     LineRoutes,
     MetaRoutes,
     PipeRoutes,
@@ -151,6 +152,7 @@ class Handler(
     PipeRoutes,
     LineRoutes,
     ExportRoutes,
+    HeatRoutes,
     MetaRoutes,
     BaseHTTPRequestHandler,
 ):
@@ -286,7 +288,9 @@ class Handler(
             self._error(f"服务器内部错误:{type(exc).__name__}: {exc}", 500)
 
     def do_DELETE(self) -> None:  # noqa: N802
-        path = unquote(urlparse(self.path).path)
+        parsed = urlparse(self.path)
+        path = unquote(parsed.path)
+        query = parse_qs(parsed.query)
         try:
             if not self._guard(change=True):
                 return
@@ -294,7 +298,7 @@ class Handler(
             if found is None:
                 self._error("未知接口", 404)
                 return
-            getattr(self, found.handler)(m, {})
+            getattr(self, found.handler)(m, query)
         except BrokenPipeError:
             pass
         except BadQuery as exc:

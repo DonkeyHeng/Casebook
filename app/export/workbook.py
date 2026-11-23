@@ -308,6 +308,28 @@ def build_workbook(conn, case_id: int) -> bytes:
             ],
         )
 
+    # --- 换热器(L1 结果;口径与页面/Word 一致)---
+    from app.export import heat as heat_export
+    from app.export import hx_schedule
+
+    hx_rows = heat_export.collect(conn, case_id)
+    if hx_rows:
+        ws = wb.create_sheet("换热器")
+        headers = [h.replace("|", " ") for h in hx_schedule.HEADERS] + ["判定", "缺失项"]
+        fill_sheet(
+            ws,
+            headers,
+            [
+                [
+                    *hx_schedule._row_values(row),
+                    (row["case"].get("verdict") or ""),
+                    "/".join(str(m) for m in (row.get("model_code") or {}).get("missing") or []),
+                ]
+                for row in hx_rows
+            ],
+            [12, 20, 22, 12, 8, 10, 10, 9, 10, 14, 14, 7, 14, 26, 40, 10, 18],
+        )
+
     # --- 连接关系 ---
     ws = wb.create_sheet("连接")
     fill_sheet(

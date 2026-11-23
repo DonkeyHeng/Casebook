@@ -16,6 +16,63 @@ import { state } from "../lib/store.js";
 import { badge, blockBadge, renderBanner, withBusy } from "../lib/ui.js";
 
 
+const heatSummary = { caseId: null, map: null, loading: false };
+
+async function ensureHeatSummary() {
+  if (!state.current?.id || state.family !== "heat") return;
+  if (heatSummary.caseId === state.current?.id && heatSummary.map) return;
+  if (heatSummary.loading) return;
+  heatSummary.loading = true;
+  try {
+    const payload = await api(`/api/cases/${state.current.id}/heat`);
+    const rows = payload.rows || [];
+    const map = {};
+    for (const row of rows) {
+      map[row.block] = {
+        verdict: row.case.verdict,
+        area: row.case.provenance.area,
+        utility: row.case.provenance.utility,
+        utilitySource: row.case.utility ? row.case.utility.source : null,
+        warnings: row.case.warnings || [],
+      };
+    }
+    heatSummary.caseId = state.current?.id;
+    heatSummary.map = map;
+  } catch {
+    heatSummary.map = {};
+  } finally {
+    heatSummary.loading = false;
+    scheduleTableRender();
+  }
+}
+
+const HEAT_VERDICT = {
+  blocked: ["已拦截", "err"],
+  unknown: ["缺数据", "warn"],
+  reference: ["参考", "warn"],
+  pass: ["简捷通过", "ok"],
+};
+
+function heatBadgeFor(row) {
+  const info = heatSummary.map?.[row.name];
+  if (!info) return `<span class="muted">读取中…</span>`;
+  const [text, cls] = HEAT_VERDICT[info.verdict] || ["未判定", "warn"];
+  const parts = [];
+  if (info.area === "aspen") parts.push("Aspen简捷");
+  else if (info.area === "manual") parts.push("人工面积");
+  else if (info.area === "edr") parts.push("EDR校核");
+  else parts.push("缺面积");
+  if (row.type === "Heater" || row.type === "HeaterX") {
+    if (info.utilitySource === "aspen") parts.push("公用工程实测");
+    else if (info.utilitySource === "preset") parts.push("公用工程预设");
+    else if (info.utilitySource === "manual") parts.push("公用工程人工");
+    else parts.push("缺公用工程温度");
+  }
+  const tip = `判定 ${info.verdict};面积来源 ${info.area};公用工程 ${info.utility}`;
+  return `<span class="badge ${cls}" title="${esc(tip)}">${esc(text)}</span>`
+    + `<span class="hx-src">${esc(parts.join(" · "))}</span>`;
+}
+
 export const COMPARE_FIELDS = [
   { key: "temperature_c", label: "温度 ℃", digits: 2 },
   { key: "pressure_bar", label: "压力 bar", digits: 3 },
@@ -52,6 +109,7 @@ export const BLOCK_COLS = {
   ref:     { key: "ref_kw", label: "参照 kW", num: true, digits: 2 },
   balance: { key: "balance_state", label: "焓平衡", balance: true },
   area:    { key: "area_m2", label: "面积 m²", num: true, digits: 2 },
+  hx:      { key: "hx", label: "状态 / 来源", cls: "hx-cell" },
   nstage:  { key: "nstage", label: "级数", num: true, digits: 0 },
   top:     { key: "top_temp_c", label: "顶温 ℃", num: true, digits: 1 },
   bottom:  { key: "bottom_temp_c", label: "底温 ℃", num: true, digits: 1 },
@@ -83,7 +141,7 @@ export const FAMILY_COLS = {
   // 塔:只有级数与顶/底温是逐塔独有的;热负荷(塔是冷凝+再沸两块)、面积、ΔH 在塔上是恒定空列
   column: ["name", "status", "nstage", "top", "bottom", "cond", "reb", "message"],
   // 换热:面积=HX_AREAC/AREAC2/AREAP;冷/热侧进出口温度来自连接流股
-  heat:   ["name", "type", "status", "duty", "area", "inT", "outT", "coldIn", "coldOut",
+  heat:   ["name", "type", "status", "duty", "area", "hx", "inT", "outT", "coldIn", "coldOut",
            "dh", "ref", "balance", "note", "message"],
   // 分离:出口温度 + 出口汽化率(Flash/Decanter 最该看的量)
   flash:  ["name", "type", "status", "duty", "outT", "vapOut", "dh", "ref", "balance", "message"],
@@ -404,6 +462,7 @@ export function renderStreams() {
 export function renderBlocks() {
   ensureFamily();
   renderFamilyBar();
+  ensureHeatSummary();
   renderPumpBar();
   const cols = blockColumns();
   const rows = rowsForTab();
@@ -423,11 +482,16 @@ export function renderBlocks() {
     // 用后端下发的 family 判,不只看 type:位号 K 开头的透平 type 也是 "Pump",
     // 但它在「涡轮机」页签里,不该弹泵参数卡
     const isPump = row.family === "pump";
+    const isHeat = row.family === "heat";
     return `<tr data-block="${esc(row.name)}">${cols.map((c) => {
       if (c.status) return `<td>${blockBadge(row.status)}</td>`;
       if (c.balance) return `<td>${balanceBadge(row.balance_state)}</td>`;
+      if (c.key === "hx") return `<td class="hx-cell">${heatBadgeFor(row)}</td>`;
       if (c.key === "name" && isPump) {
         return `<td class="name"><a href="#" class="pump-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;
+      }
+      if (c.key === "name" && isHeat) {
+        return `<td class="name"><a href="#" class="heat-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;
       }
       if (c.key === "name" && isColumn) {
         return `<td class="name"><a href="#" class="col-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;

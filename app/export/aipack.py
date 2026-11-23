@@ -490,6 +490,136 @@ def _pumps_csv(pumps, lines_by_block: dict | None = None) -> bytes:
     return _csv_bytes(PUMP_HEADERS, rows)
 
 
+#: 换热器 CSV 用英文字段名:这份文件是给 AI/脚本直接读的,不跟界面中文列名绑定。
+HEAT_HEADERS = [
+    "block",
+    "type",
+    "service_name",
+    "model_code",
+    "area_nominal_m2",
+    "area_m2",
+    "area_required_m2",
+    "area_source",
+    "tube_count",
+    "tube_length_m",
+    "tube_od_mm",
+    "tube_passes",
+    "shell_id_mm",
+    "shell_material",
+    "tube_material",
+    "qty",
+    "std_code",
+    "u_back_calc_wm2k",
+    "u_design_wm2k",
+    "u_source",
+    "utility_source",
+    "utility_t_in_c",
+    "utility_t_out_c",
+    "tube_fluid",
+    "design_p_tube_bar",
+    "design_p_shell_bar",
+    "design_t_tube_c",
+    "design_t_shell_c",
+    "fouling_tube",
+    "fouling_shell",
+    "lmtd_self_c",
+    "lmtd_aspen_c",
+    "f_factor",
+    "verdict",
+    "missing",
+    "blockers",
+    "warnings",
+    "source_note",
+]
+
+
+def _heat_csv(rows: list[dict]) -> bytes:
+    """换热器 L1 结果 → CSV;空值是空串,不是 0,也不是 `—`。"""
+    out = []
+    for row in rows:
+        case = row.get("case") or {}
+        stored = row.get("design_row") or {}
+        selection = row.get("selection") or {}
+        code = row.get("model_code") or {}
+        area = case.get("area") or {}
+        u = case.get("u") or {}
+        lmtd = case.get("lmtd") or {}
+        hot = case.get("hot") or {}
+        cold = case.get("cold") or {}
+        utility = case.get("utility") or {}
+        design = case.get("design") or {}
+        length_mm = stored.get("geom_tube_length_mm")
+        out.append(
+            [
+                row.get("block"),
+                row.get("type"),
+                selection.get("service_name"),
+                code.get("code") or code.get("code_partial"),
+                stored.get("area_nominal_m2"),
+                area.get("used_m2"),
+                area.get("required_m2"),
+                area.get("source"),
+                stored.get("geom_tube_count"),
+                length_mm / 1000 if isinstance(length_mm, (int, float)) else None,
+                stored.get("geom_tube_od_mm"),
+                stored.get("geom_tube_passes"),
+                stored.get("geom_shell_id_mm"),
+                selection.get("shell_material"),
+                selection.get("tube_material"),
+                selection.get("qty") or 1,
+                selection.get("std_code"),
+                u.get("back_calc_wm2k"),
+                u.get("aspen_wm2k"),
+                u.get("source"),
+                utility.get("source"),
+                utility.get("t_in_c"),
+                utility.get("t_out_c"),
+                case.get("tube_fluid"),
+                (design.get("tube") or {}).get("p_design_bar"),
+                (design.get("shell") or {}).get("p_design_bar"),
+                (design.get("tube") or {}).get("t_design_c"),
+                (design.get("shell") or {}).get("t_design_c"),
+                (case.get("fouling") or {}).get("tube"),
+                (case.get("fouling") or {}).get("shell"),
+                lmtd.get("self_c"),
+                lmtd.get("aspen_c"),
+                lmtd.get("f"),
+                case.get("verdict"),
+                "/".join(str(m) for m in code.get("missing") or []),
+                "; ".join(str(b) for b in case.get("blockers") or []),
+                "; ".join(str(w) for w in case.get("warnings") or []),
+                f"面积 {area.get('source') or 'none'};公用工程 {utility.get('source') or 'none'};"
+                f"U {u.get('source') or 'none'};LMTD {lmtd.get('source') or 'none'};"
+                f"热侧 {hot.get('t_in_c')}->{hot.get('t_out_c')} ℃;"
+                f"冷侧 {cold.get('t_in_c')}->{cold.get('t_out_c')} ℃",
+            ]
+        )
+    return _csv_bytes(HEAT_HEADERS, out)
+
+
+HX_SELECTION_PROMPT = """# 换热器选型提示词(L1)
+
+你拿到的是 Casebook 从 Aspen 工况快照与人工输入拼出的换热器 L1 结果表
+`heat_exchangers.csv`。请只在这个范围内回答,不要假装做过 EDR rating。
+
+## 数据边界
+
+- `verdict` 只有 `reference` / `blocked` / `unknown`(Phase 1 不产出 pass/fail)。
+  `reference` 是"可参考的简捷结果",不是"合格"。
+- `area_source = aspen` 表示面积来自 Aspen 简捷设计里假设的 U 推算,不是 rating 结果。
+- `utility_source = aspen` 才是公用工程节点实测温度;`preset` / `manual` 是界面预设或手填。
+- 空单元格是"未取得",不是 0;不要用 0 代替,也不要自行补假设值。
+- `blocked` 行先解释 `blockers` 里的边界原因;`unknown` 行先列出缺哪些字段。
+
+## 回答格式
+
+1. 先按 `verdict` 分组,给出每台一句话结论(参考 / 缺数据 / 已拦截)。
+2. 给出面积、U、ΔTm、公用工程的来源,并明确指出哪些是假设值。
+3. 需要补的数据列成清单(对应 `missing` 与 `blockers`),不要编数值。
+4. 明确写出"下一步需要 EDR rating 才能给合格结论"。
+"""
+
+
 def _case_json(
     case,
     columns,
@@ -501,6 +631,7 @@ def _case_json(
     composition,
     connections,
     has_pipe: bool = False,
+    has_heat: bool = False,
 ) -> bytes:
     files = {
         "README.md": "说明书 + 数据字典(先读这个)",
@@ -522,6 +653,9 @@ def _case_json(
         files["composition.csv"] = "已读流股的逐组分摩尔分数"
     if has_pipe:
         files["pipe_schedule.csv"] = "管路选型(实时算,不写库;校验码见「校验码」列)"
+    if has_heat:
+        files["heat_exchangers.csv"] = "换热器 L1 结果(面积/公用工程/U/LMTD 均带来源;空值=未取得)"
+        files["hx_prompt.md"] = "换热器选型提示词(配合 heat_exchangers.csv 一起给 AI)"
 
     payload = {
         "generator": "Casebook",
@@ -1103,6 +1237,16 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
     pipe_res, pipe_checks = _pipe_result(streams, blocks, connections, pipe_runs)
     if pipe_res:
         files.append(("pipe_schedule.csv", _pipe_csv(pipe_res["rows"], pipe_checks)))
+    hx_rows = []
+    try:
+        from app.export import heat as heat_export
+
+        hx_rows = heat_export.collect(conn, case_id)
+    except Exception:  # 换热结果有问题不该拖垮整包
+        hx_rows = []
+    if hx_rows:
+        files.append(("heat_exchangers.csv", _heat_csv(hx_rows)))
+        files.append(("hx_prompt.md", HX_SELECTION_PROMPT.encode("utf-8")))
     files.append(
         (
             "case.json",
@@ -1117,6 +1261,7 @@ def build_zip(conn, case_id: int) -> tuple[bytes, str]:
                 composition,
                 connections,
                 has_pipe=bool(pipe_res),
+                has_heat=bool(hx_rows),
             ),
         )
     )

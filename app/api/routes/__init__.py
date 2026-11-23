@@ -18,6 +18,7 @@ from app.api.router import Route, route
 
 from .cases import CaseRoutes
 from .exports import ExportRoutes
+from .heat import HeatRoutes
 from .lines import LineRoutes
 from .meta import MetaRoutes
 from .pipes import PipeRoutes
@@ -28,6 +29,7 @@ __all__ = [
     "ROUTES",
     "CaseRoutes",
     "ExportRoutes",
+    "HeatRoutes",
     "LineRoutes",
     "MetaRoutes",
     "PipeRoutes",
@@ -51,7 +53,7 @@ ROUTES: list[Route] = [
     # ---- 两册《计算说明书》:不依赖工况,页面「导出计算书」直接下发 ----
     route(
         "GET",
-        r"/api/manuals/(?P<kind>pipe|pump)\.docx",
+        r"/api/manuals/(?P<kind>pipe|pump|hx)\.docx",
         "get_manual_docx",
         "管路 / 泵计算说明书 Word",
     ),
@@ -108,6 +110,22 @@ ROUTES: list[Route] = [
         "旧单一 Σhf 归属迁移",
     ),
     route("POST", _CASE + r"/components/cas", "post_case_component_cas", "手填组分 CAS"),
+    # ---- 换热器:配置(不依赖工况)与按工况写入 ----
+    route("GET", r"/api/heat-config", "get_heat_config", "换热器三份配置与来源"),
+    route("POST", r"/api/heat-config", "post_heat_config", "保存换热器配置(整体覆盖)"),
+    route("DELETE", r"/api/heat-config", "delete_heat_config", "删除覆盖、恢复内置默认"),
+    route(
+        "POST",
+        _CASE + r"/heat/(?P<block>[^/]+)/design",
+        "post_heat_design",
+        "保存换热器设计输入",
+    ),
+    route(
+        "POST",
+        _CASE + r"/heat/(?P<block>[^/]+)/selection",
+        "post_heat_selection",
+        "保存换热器选型台账",
+    ),
 ]
 
 CASE_ROUTES: list[Route] = [
@@ -148,4 +166,12 @@ CASE_ROUTES: list[Route] = [
     route("GET", _CASE + r"/pipes\.docx", "get_export_pipes_docx", "管道选型一览表 Word"),
     route("GET", _CASE + r"/export\.ai\.zip", "get_export_ai", "AI 分析包"),
     route("GET", _CASE + r"/balance-report\.docx", "get_export_report", "物料与能量衡算报告"),
+    route("GET", _CASE + r"/heat", "get_heat_table", "换热器选型 L1 一览"),
+    route(
+        "GET",
+        _CASE + r"/heat-edr\.xlsx",
+        "get_export_heat_edr_xlsx",
+        "EDR 输入参数清单 Excel",
+    ),
+    route("GET", _CASE + r"/heat\.docx", "get_export_heat_docx", "换热器选型一览表 Word"),
 ]

@@ -52,6 +52,14 @@ KINDS: dict[str, dict] = {
         "light": "DFEAE5",
         "zebra": "F6FAF8",
     },
+    # 换热册:暖铜。与管道墨绿并排打印时靠色带区分,避免装订后混册。
+    "hx": {
+        "title": "换热器选型一览表",
+        "book": "换热专业 · 选型册",
+        "accent": "8A5A2B",
+        "light": "F3E7D8",
+        "zebra": "FCF8F3",
+    },
 }
 
 

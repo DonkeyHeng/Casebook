@@ -24,6 +24,11 @@ MANUALS: dict[str, dict[str, str]] = {
         "title": "泵计算说明书",
         "ascii": "Casebook-pump-calc-manual.docx",
     },
+    "hx": {
+        "file": "casebook-hx-calc-manual.docx",
+        "title": "换热器选型计算说明书",
+        "ascii": "Casebook-hx-calc-manual.docx",
+    },
 }
 
 _DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

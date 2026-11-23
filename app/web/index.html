@@ -502,9 +502,40 @@
         </div>
       </section>
 
+      <!-- 换热器 L1:左侧只读结果(带来源),右侧人工决定。复用泵面板的双列滚动。 -->
+      <section id="heatPanel" class="column-panel pump-modal hidden" role="dialog"
+               aria-modal="true" aria-labelledby="heatTitle" tabindex="-1">
+        <header class="panel-head pump-modal-head">
+          <div class="pump-modal-title">
+            <h3 id="heatTitle">换热器选型</h3>
+            <span class="muted pump-modal-sub">L1 参考结果 · 未做 EDR rating</span>
+          </div>
+          <div class="pump-modal-actions">
+            <button id="heatConfigBtn" class="btn small" type="button" title="查看/编辑污垢、经验 U、公用工程预设">默认参数库</button>
+            <button id="closeHeat" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+          </div>
+        </header>
+        <div class="pump-panel-tools">
+          <p class="muted pump-panel-hint" id="heatHint">面积来源 / 公用工程来源逐项标注;假设值不会写成校核值。</p>
+        </div>
+        <div class="pump-panel-scroll">
+          <div class="pump-modal-col pump-modal-left">
+            <section class="pump-params pump-block">
+              <div class="pump-block-head"><span class="pump-block-title">工况与结果</span></div>
+              <div class="table-wrap small">
+                <table id="heatTable"><thead></thead><tbody></tbody></table>
+              </div>
+              <div id="heatBlockers" class="heat-blockers"></div>
+            </section>
+          </div>
+          <div class="pump-modal-col pump-modal-right">
+            <section id="heatForm" class="pump-design pump-block"></section>
+          </div>
+        </div>
+      </section>
+
       <section id="compPanel" class="column-panel comp-panel hidden" role="region"
-               aria-labelledby="compTitle" tabindex="-1">
-        <header class="panel-head">
+               aria-labelledby="compTitle" tabindex="-1">        <header class="panel-head">
           <h3 id="compTitle">流股组成</h3>
           <button id="closeComp" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
         </header>
@@ -545,5 +576,6 @@
   <!-- 单个模块入口:依赖关系由 import 决定,不再靠 <script> 的先后顺序。
        服务端对静态文件下发 Cache-Control: no-store,所以不需要 ?v= 这种手工缓存串。 -->
   <script type="module" src="/static/app.js"></script>
+  <div id="heatConfigPanel" class="heat-config hidden" role="dialog" aria-modal="true" aria-label="换热器默认参数库"></div>
 </body>
 </html>

@@ -224,6 +224,18 @@ CREATE TABLE IF NOT EXISTS blocks (
     ref_kind      TEXT,   -- duty / power / zero / hx_cold
     balance_state TEXT,   -- ok 通过 / bad 超差 / no_data 无法校验 / skip 不校验
     balance_note  TEXT,   -- 人话说明(含差值、容差、比值)
+    -- 换热器(第三期, L1):HeatX 的 Aspen 输出与 Heater 的公用工程引用。
+    -- 只有换热类设备才有值,其余设备 NULL;读不到也是 NULL,不补 0。
+    ua_wk             REAL,  -- HX_UA, W/K
+    hx_dtlm_c         REAL,  -- HX_DTLM,℃(是否含 F 修正未验证,按 Aspen 原值存)
+    hx_f_factor       REAL,  -- HX_FMTD,无量纲
+    hx_u_design_wm2k  REAL,  -- HX_UAVD,设计假设 U。实测恒 850,不得当 rating 结果
+    util_id           TEXT,  -- Heater 的 Input 侧 UTILITY_ID(如 MS / LWAT)
+    util_type         TEXT,  -- steam / water / electricity / fuel / air / unknown
+    util_t_in_c       REAL,  -- 公用工程进口温度;读不到 NULL(实测 LS / HS)
+    util_t_out_c      REAL,  -- 公用工程出口温度
+    util_isothermal   INTEGER, -- 1 等温相变 / 0 显热 / NULL 温度不全或非流体
+    util_source       TEXT,  -- aspen(节点读到) / missing(引用但无温度) / undefined(无引用)
     raw_json      TEXT,
     PRIMARY KEY (case_id, name)
 );
@@ -238,6 +250,101 @@ CREATE TABLE IF NOT EXISTS column_stages (
     vap_flow      REAL,
     duty_kw       REAL,
     PRIMARY KEY (case_id, block, stage)
+);
+
+-- 换热器设计输入(按模型身份 + 位号)。只存人工决定 / 覆盖 / 溯源声明;
+-- 面积、LMTD、U、几何候选、压降与判定一律实时算,不落库。
+-- 单位:压力 bar、温度 ℃、面积 m²、污垢 m²·K/W、U W/(m²·K)、几何长度 mm、裕量小数。
+CREATE TABLE IF NOT EXISTS hx_design (
+    model_key          TEXT NOT NULL,
+    block              TEXT NOT NULL,
+
+    utility_id         TEXT,
+    utility_mode       TEXT,   -- none / aspen / preset / manual
+    utility_key        TEXT,
+    utility_t_in_c     REAL,
+    utility_t_out_c    REAL,
+    utility_phase      TEXT,   -- liquid / vapor / condensing / boiling / unknown
+    tube_fluid         TEXT,   -- hot / cold / process / utility
+    tube_fluid_source  TEXT,   -- user / rule
+
+    p_design_tube_bar  REAL,
+    p_design_shell_bar REAL,
+    t_design_tube_c    REAL,
+    t_design_shell_c   REAL,
+    dp_allow_tube_bar  REAL,
+    dp_allow_shell_bar REAL,
+    t_design_offset_c  REAL,
+
+    fouling_tube       REAL,
+    fouling_shell      REAL,
+    fouling_tube_key   TEXT,
+    fouling_shell_key  TEXT,
+    u_assumed          REAL,
+    u_ref_key          TEXT,
+    margin             REAL,
+    f_correction       REAL,
+
+    area_source        TEXT,   -- aspen / manual / edr / none
+    area_manual_m2     REAL,
+    area_nominal_m2    REAL,
+
+    geom_tube_od_mm      REAL,
+    geom_tube_wall_mm    REAL,
+    geom_tube_length_mm  REAL,
+    geom_tube_passes     INTEGER,
+    geom_tube_pitch_mm   REAL,
+    geom_tube_count      INTEGER,
+    geom_arrangement     TEXT,
+    geom_shell_od_mm     REAL,
+    geom_shell_id_mm     REAL,
+    geom_baffle_type     TEXT,
+    geom_baffle_spacing_mm REAL,
+    geom_baffle_cut      REAL,
+    geom_baffle_orient   TEXT,
+    geom_source          TEXT,
+    std_row_key          TEXT,
+
+    nozzle_tube_in_mm    REAL,
+    nozzle_tube_out_mm   REAL,
+    nozzle_shell_in_mm   REAL,
+    nozzle_shell_out_mm  REAL,
+
+    head_code          TEXT,
+    shell_code         TEXT,
+    rear_code          TEXT,
+    bundle_grade       TEXT,
+    note               TEXT,
+    version            INTEGER NOT NULL DEFAULT 0,
+    updated_at         TEXT,
+    PRIMARY KEY (model_key, block)
+);
+
+-- 选型台账:只存人工确认的结果与材质/台数,不存计算值。
+CREATE TABLE IF NOT EXISTS hx_selection (
+    model_key      TEXT NOT NULL,
+    block          TEXT NOT NULL,
+    model_no       TEXT,
+    service_name   TEXT,
+    qty            INTEGER,
+    shell_material TEXT,
+    tube_material  TEXT,
+    std_code       TEXT,
+    note           TEXT,
+    updated_at     TEXT,
+    PRIMARY KEY (model_key, block)
+);
+
+-- 物性缓存(Phase 2 才写,Phase 1 先建表,避免以后重建)。
+CREATE TABLE IF NOT EXISTS hx_props (
+    case_id     INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    stream      TEXT NOT NULL,
+    mu_cp       REAL,
+    cp_jkgk     REAL,
+    k_wmk       REAL,
+    source      TEXT,
+    updated_at  TEXT,
+    PRIMARY KEY (case_id, stream)
 );
 
 CREATE INDEX IF NOT EXISTS idx_streams_case ON streams(case_id);
@@ -321,6 +428,18 @@ _BLOCK_ADDED_COLUMNS = (
     # 泵进口流股粘度 cP:算 Re 用。模型物性集里没挂 VISC 时读不到(NULL),页面手填
     ("mu_cp", "REAL"),
     ("reb_duty_kw", "REAL"),
+    # 换热器 L1:HeatX 的 UA/DTLM/F/U 与 Heater 的公用工程。老库补列后 NULL,
+    # 重读工况才有值(这些量拿不到离线回填,只能回 Aspen)
+    ("ua_wk", "REAL"),
+    ("hx_dtlm_c", "REAL"),
+    ("hx_f_factor", "REAL"),
+    ("hx_u_design_wm2k", "REAL"),
+    ("util_id", "TEXT"),
+    ("util_type", "TEXT"),
+    ("util_t_in_c", "REAL"),
+    ("util_t_out_c", "REAL"),
+    ("util_isothermal", "INTEGER"),
+    ("util_source", "TEXT"),
 )
 
 # pump_design 表后加的列(管路阻力半自动的人填输入)。
@@ -510,8 +629,12 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                             inlet_temp_c, outlet_temp_c, cold_in_temp_c, cold_out_temp_c,
                             outlet_vap_frac, cond_duty_kw, reb_duty_kw,
                             dh_kw, ref_kw, ref_kind, balance_state, balance_note, raw_json,
-                            power_source)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            power_source,
+                            ua_wk, hx_dtlm_c, hx_f_factor, hx_u_design_wm2k,
+                            util_id, util_type, util_t_in_c, util_t_out_c,
+                            util_isothermal, util_source)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,
+                ?,?,?,?,?,?,?,?,?,?)
         """,
         [
             (
@@ -552,6 +675,16 @@ def save_case(conn: sqlite3.Connection, case: dict) -> int:
                 (b.get("balance") or {}).get("balance_note"),
                 json.dumps(b.get("raw", {}), ensure_ascii=False),
                 b.get("power_source"),
+                b.get("ua_wk"),
+                b.get("hx_dtlm_c"),
+                b.get("hx_f_factor"),
+                b.get("hx_u_design_wm2k"),
+                b.get("util_id"),
+                b.get("util_type"),
+                b.get("util_t_in_c"),
+                b.get("util_t_out_c"),
+                b.get("util_isothermal"),
+                b.get("util_source"),
             )
             for b in case.get("blocks", [])
         ],
@@ -1458,6 +1591,155 @@ def save_legacy_split(
     )
     conn.commit()
     return True
+
+
+# ---------------------------------------------------------------- 换热器(L1/L2)
+
+_HX_DESIGN_COLUMNS = (
+    "utility_id",
+    "utility_mode",
+    "utility_key",
+    "utility_t_in_c",
+    "utility_t_out_c",
+    "utility_phase",
+    "tube_fluid",
+    "tube_fluid_source",
+    "p_design_tube_bar",
+    "p_design_shell_bar",
+    "t_design_tube_c",
+    "t_design_shell_c",
+    "dp_allow_tube_bar",
+    "dp_allow_shell_bar",
+    "t_design_offset_c",
+    "fouling_tube",
+    "fouling_shell",
+    "fouling_tube_key",
+    "fouling_shell_key",
+    "u_assumed",
+    "u_ref_key",
+    "margin",
+    "f_correction",
+    "area_source",
+    "area_manual_m2",
+    "area_nominal_m2",
+    "geom_tube_od_mm",
+    "geom_tube_wall_mm",
+    "geom_tube_length_mm",
+    "geom_tube_passes",
+    "geom_tube_pitch_mm",
+    "geom_tube_count",
+    "geom_arrangement",
+    "geom_shell_od_mm",
+    "geom_shell_id_mm",
+    "geom_baffle_type",
+    "geom_baffle_spacing_mm",
+    "geom_baffle_cut",
+    "geom_baffle_orient",
+    "geom_source",
+    "std_row_key",
+    "nozzle_tube_in_mm",
+    "nozzle_tube_out_mm",
+    "nozzle_shell_in_mm",
+    "nozzle_shell_out_mm",
+    "head_code",
+    "shell_code",
+    "rear_code",
+    "bundle_grade",
+    "note",
+)
+_HX_SELECTION_COLUMNS = (
+    "model_no",
+    "service_name",
+    "qty",
+    "shell_material",
+    "tube_material",
+    "std_code",
+    "note",
+)
+
+
+def save_hx_design(conn: sqlite3.Connection, model_key: str, block: str, values: dict) -> bool:
+    """写一台设备的换热器设计输入(upsert,version 自增)。
+
+    只写 `_HX_DESIGN_COLUMNS` 里的列;未知键直接忽略,避免拼 SQL 注入。
+    values 为空也允许写,但至少要有一列,否则返回 False。
+    """
+    clean = {k: values[k] for k in _HX_DESIGN_COLUMNS if k in values}
+    if not model_key or not block or not clean:
+        return False
+    clean["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    columns = ["model_key", "block", *clean.keys(), "version"]
+    placeholders = ",".join("?" for _ in columns)
+    updates = ",".join(f"{k}=excluded.{k}" for k in clean)
+    sql = (
+        f"INSERT INTO hx_design ({','.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(model_key, block) DO UPDATE SET {updates}, "
+        "version=hx_design.version+1"
+    )
+    conn.execute(sql, [model_key, block, *clean.values(), 0])
+    conn.commit()
+    return True
+
+
+def read_hx_design(conn: sqlite3.Connection, model_key: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM hx_design WHERE model_key=? ORDER BY block", (model_key,)
+    ).fetchall()
+
+
+def get_hx_design(conn: sqlite3.Connection, model_key: str, block: str) -> dict | None:
+    row = conn.execute(
+        "SELECT * FROM hx_design WHERE model_key=? AND block=?", (model_key, block)
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def save_hx_selection(conn: sqlite3.Connection, model_key: str, block: str, values: dict) -> bool:
+    """写选型台账(upsert)。"""
+    clean = {k: values[k] for k in _HX_SELECTION_COLUMNS if k in values}
+    if not model_key or not block or not clean:
+        return False
+    clean["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    columns = ["model_key", "block", *clean.keys()]
+    placeholders = ",".join("?" for _ in columns)
+    updates = ",".join(f"{k}=excluded.{k}" for k in clean)
+    sql = (
+        f"INSERT INTO hx_selection ({','.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(model_key, block) DO UPDATE SET {updates}"
+    )
+    conn.execute(sql, [model_key, block, *clean.values()])
+    conn.commit()
+    return True
+
+
+def read_hx_selection(conn: sqlite3.Connection, model_key: str) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM hx_selection WHERE model_key=? ORDER BY block", (model_key,)
+    ).fetchall()
+
+
+def save_hx_props(conn: sqlite3.Connection, case_id: int, stream: str, values: dict) -> bool:
+    """写一条物性缓存(Phase 2 用)。"""
+    clean = {k: values[k] for k in ("mu_cp", "cp_jkgk", "k_wmk", "source") if k in values}
+    if not case_id or not stream or not clean:
+        return False
+    clean["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    columns = ["case_id", "stream", *clean.keys()]
+    placeholders = ",".join("?" for _ in columns)
+    updates = ",".join(f"{k}=excluded.{k}" for k in clean)
+    sql = (
+        f"INSERT INTO hx_props ({','.join(columns)}) VALUES ({placeholders}) "
+        f"ON CONFLICT(case_id, stream) DO UPDATE SET {updates}"
+    )
+    conn.execute(sql, [case_id, stream, *clean.values()])
+    conn.commit()
+    return True
+
+
+def read_hx_props(conn: sqlite3.Connection, case_id: int) -> list[sqlite3.Row]:
+    return conn.execute(
+        "SELECT * FROM hx_props WHERE case_id=? ORDER BY stream", (case_id,)
+    ).fetchall()
 
 
 def find_component_cas(conn: sqlite3.Connection, case_id: int) -> dict:

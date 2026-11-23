@@ -9,6 +9,7 @@
 */
 
 import { openColumn, openComposition } from "./views/composition.js";
+import { openHeat } from "./views/heat.js";
 import { applyFlowView, clearFlowFocus, drawFlow, exportFlowPng, exportFlowSvg, fitFlow, flowExportSvg, focusFlow, zoomFlow } from "./views/flow.js";
 import { ZHONGLIAN_URL, closeDataDrawers, closePumpPromptTip, copyPlainText, fetchPumpPromptText, isOutsideDrawerClick, openPump, showPumpPromptTip } from "./views/pump.js";
 import { resumeReadIfRunning, startRead } from "./views/read.js";
@@ -88,11 +89,12 @@ function bindEvents() {
       schedulePvSave(box.dataset.pv, box.value);
     });
     tableBody.addEventListener("click", (e) => {
-      const link = e.target.closest(".stream-link, .col-link, .pump-link");
+      const link = e.target.closest(".stream-link, .col-link, .pump-link, .heat-link");
       if (!link) return;
       e.preventDefault();
       if (link.classList.contains("stream-link")) openComposition(link.dataset.stream);
       else if (link.classList.contains("col-link")) openColumn(link.dataset.block);
+      else if (link.classList.contains("heat-link")) openHeat(link.dataset.block);
       else openPump(link.dataset.block);
     });
   }
@@ -106,7 +108,7 @@ function bindEvents() {
     b.addEventListener("click", () => setCompareScope(b.dataset.scope)));
   document.getElementById("compareHint").addEventListener("click", () => setPage("compare"));
   // 三个抽屉的 ✕:与 Esc 同一条路径,关掉并把焦点还给打开它的那一行
-  ["closeColumn", "closeComp", "closePump"].forEach((id) => {
+  ["closeColumn", "closeComp", "closePump", "closeHeat"].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.addEventListener("click", () => closeDataDrawers({ restore: true }));
   });

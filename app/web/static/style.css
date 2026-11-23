@@ -2281,3 +2281,52 @@ input:focus-visible {
 .pump-sel-state-mini[data-state="ok"] { color: var(--ok-text); }
 .pump-sel-state-mini[data-state="bad"] { color: var(--bad); }
 .pump-sel-state-mini[data-state="unknown"] { color: var(--muted); }
+
+
+/* 换热器 L1 抽屉:沿用泵面板双列,表单窄、留白多,长说明不挤进输入框 */
+.heat-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.heat-field select,
+.heat-field input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+.heat-blockers { padding: 8px 2px 2px; }
+.heat-blockers .heat-block,
+.heat-blockers .heat-warn {
+  margin: 4px 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.heat-blockers .heat-block { color: var(--err, #c0392b); }
+.heat-blockers .heat-warn { color: var(--warn, #b7791f); }
+.heat-note { font-size: 12px; line-height: 1.5; margin: 6px 0 12px; }
+
+/* 换热家族主表:状态/来源并排,徽标后跟简写来源 */
+.hx-cell .hx-src { display: block; margin-top: 2px; font-size: 11px; color: var(--text-2); }
+.heat-config {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 15, 24, 0.55); padding: 24px;
+}
+.heat-config.hidden { display: none; }
+.heat-config-card {
+  width: min(860px, 96vw); max-height: 90vh; overflow: auto; background: var(--bg-1);
+  border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: 0 24px 64px rgba(0,0,0,.35);
+}
+.heat-config-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.heat-config-head h3 { margin: 0 0 4px; font-size: 16px; }
+.heat-cfg-tabs { display: flex; gap: 6px; margin: 12px 0 6px; flex-wrap: wrap; }
+.heat-cfg-tab { border: 1px solid var(--line); background: var(--bg-2); color: var(--text-1); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.heat-cfg-tab.active { border-color: var(--accent); color: var(--accent); background: var(--bg-1); }
+.heat-cfg-wrap { max-height: 46vh; overflow: auto; }
+.heat-cfg-table td { vertical-align: top; }
+.heat-cfg-label { display: block; font-size: 11px; color: var(--text-2); }
+.heat-cfg-table input, .heat-cfg-table select { width: 100%; min-width: 84px; }
+.heat-config-actions { display: flex; gap: 8px; margin-top: 10px; }
