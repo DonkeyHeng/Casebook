@@ -779,19 +779,53 @@ def setup_guide() -> dict:
     return json.loads(json.dumps(SETUP_GUIDE, ensure_ascii=False))
 
 
+#: 标准表里的“没有值”写法:空、半角/全角横杠、短破折号都按缺值放行。
+_MISSING_CELL_TOKENS = {"", "-", "—", "–", "--", "－"}
+_OD_RANGE_MM = (1.0, 3000.0)
+_WALL_RANGE_MM = (0.1, 100.0)
+_STRESS_RANGE_MPA = (1.0, 1000.0)
+_STD_DELIMITERS = (",", ";", "\t")
+
+
+def _std_csv_rows(text) -> list[dict]:
+    """读标准表 CSV:兼容 Excel 的 , ; Tab、「sep=;」首行与表头前后空格/BOM。"""
+    raw = str(text or "").lstrip("\ufeff")
+    lines = raw.splitlines()
+    delimiter = ","
+    if lines:
+        head = lines[0].strip().lower()
+        if head.startswith("sep="):
+            candidate = lines[0].split("=", 1)[1].strip()[:1]
+            if candidate in _STD_DELIMITERS:
+                delimiter = candidate
+            raw = "\n".join(lines[1:])
+        else:
+            counts = {d: lines[0].count(d) for d in _STD_DELIMITERS}
+            best = max(counts, key=lambda d: counts[d])
+            if counts[best] > 0:
+                delimiter = best
+    reader = csv.DictReader(io.StringIO(raw), delimiter=delimiter)
+    rows = []
+    for row in reader:
+        rows.append(
+            {str(k or "").strip().lstrip("\ufeff"): v for k, v in row.items() if k is not None}
+        )
+    return rows
+
+
 def _read_csv(path: Path) -> list[dict]:
     if not path.is_file():
         return []
     with path.open("rb") as f:
         text = f.read().decode("utf-8-sig")
-    return list(csv.DictReader(io.StringIO(text)))
+    return _std_csv_rows(text)
 
 
 def _parse_size(raw: str | None) -> float | None:
     """`10(10.2)` / `2.2(2.3)` → 名义值 10 / 2.2;解析不了返回 None。"""
     if raw is None or not str(raw).strip():
         return None
-    m = re.match(r"^\s*([0-9]+(?:\.[0-9]+)?)", str(raw))
+    m = re.match(r"^\s*(?:\([^)]*\)\s*)?([0-9]+(?:\.[0-9]+)?)", str(raw))
     return float(m.group(1)) if m else None
 
 
@@ -1193,6 +1227,90 @@ def template_preview() -> dict:
     }
 
 
+def _canonical_std_text(text) -> str:
+    """把已校验通过的文本统一成逗号分隔、规范表头,再写盘(运行时只认这一种)。"""
+    rows = _std_csv_rows(text)
+    if not rows:
+        return str(text or "")
+    headers = list(rows[0].keys())
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=headers, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+def _is_missing_cell(raw) -> bool:
+    return raw is None or str(raw).strip() in _MISSING_CELL_TOKENS
+
+
+def _parse_std_number(raw) -> float | None:
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _check_std_sizes(rows: list[dict], need: int) -> tuple[list[str], dict]:
+    """表 1/表 4:逐格查外径、壁厚的数值与物理区间,不再只看列名。"""
+    errors: list[str] = []
+    pairs = 0
+    ods: set[float] = set()
+    for i, row in enumerate(rows, start=2):
+        d_raw = row.get("D_mm")
+        s_raw = row.get("S_mm")
+        if _is_missing_cell(d_raw) and _is_missing_cell(s_raw):
+            continue
+        d = _parse_size(d_raw)
+        s = _parse_size(s_raw)
+        if d is None or s is None:
+            errors.append(
+                f"第 {i} 行:外径/壁厚读不出({str(d_raw).strip()!r} / {str(s_raw).strip()!r})"
+            )
+            continue
+        if not (_OD_RANGE_MM[0] <= d <= _OD_RANGE_MM[1]):
+            errors.append(f"第 {i} 行:外径 {d:g} mm 超出 1–3000 mm,疑似串列")
+        if not (_WALL_RANGE_MM[0] <= s <= _WALL_RANGE_MM[1]):
+            errors.append(f"第 {i} 行:壁厚 {s:g} mm 超出 0.1–100 mm,疑似串列")
+        if d <= 2 * s:
+            errors.append(f"第 {i} 行:外径 {d:g} mm 不大于 2×壁厚 {s:g} mm,数据不合理")
+        pairs += 1
+        ods.add(d)
+    if pairs < need:
+        errors.append(
+            f"能读出「外径 + 壁厚」的只有 {pairs} 行(至少 {need} 行),检查 D_mm / S_mm 是不是数值"
+        )
+    return errors[:12], {"rows": len(rows), "sizes": pairs, "od_count": len(ods)}
+
+
+def _check_std_stress(rows: list[dict]) -> tuple[list[str], dict]:
+    """表 B.1:空/横杠按缺值放行;真填了内容却读不出或超出 1–1000 MPa 才报错。"""
+    stress_cols = [c for c in rows[0] if c.startswith("许用应力_")]
+    if not stress_cols:
+        return ["没有许用应力列(许用应力_<温度>),表 B.1 至少要一档"], {}
+    errors: list[str] = []
+    grades: set[str] = set()
+    for i, row in enumerate(rows, start=2):
+        grade = str(row.get("牌号") or "").strip()
+        if grade:
+            grades.add(grade)
+        else:
+            errors.append(f"第 {i} 行:牌号为空")
+        for col in stress_cols:
+            raw = row.get(col)
+            if _is_missing_cell(raw):
+                continue
+            value = _parse_std_number(raw)
+            if value is None:
+                errors.append(f"第 {i} 行 {col}:{str(raw).strip()!r} 不是有效数字")
+            elif not (_STRESS_RANGE_MPA[0] <= value <= _STRESS_RANGE_MPA[1]):
+                errors.append(
+                    f"第 {i} 行 {col}:{value:g} MPa 超出 1–1000 MPa,疑似把温度/压力抄进应力列"
+                )
+    return errors[:12], {"rows": len(rows), "grades": sorted(grades)[:12]}
+
+
 def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
     """校验单个 CSV 的文本,返回 (错误列表, 统计)。"""
     if not isinstance(text, str) or not text.strip():
@@ -1202,34 +1320,20 @@ def _validate_std_text(spec: dict, text) -> tuple[list[str], dict]:
     if len(text.encode("utf-8")) > MAX_STD_FILE_BYTES:
         return [f"文件超过 {MAX_STD_FILE_BYTES // (1024 * 1024)} MB,不像标准表"], {}
     try:
-        rows = list(csv.DictReader(io.StringIO(text.lstrip("\ufeff"))))
+        rows = _std_csv_rows(text)
     except csv.Error as exc:
         return [f"CSV 解析失败:{exc}"], {}
     if not rows:
         return ["只有表头、没有数据行"], {}
-    names = [str(k or "").strip() for k in rows[0]]
+    names = list(rows[0].keys())
     missing = [c for c in spec["columns"] if c not in names]
     if missing:
         return [f"缺列 {', '.join(missing)};现在的表头是:{', '.join(names[:8])}"], {}
     if len(rows) < spec["need"]:
         return [f"只有 {len(rows)} 行数据(至少 {spec['need']} 行),像是没抄全"], {}
     if spec["name"].startswith("t3-"):
-        grades = sorted({str(r.get("牌号") or "").strip() for r in rows} - {""})
-        return [], {"rows": len(rows), "grades": grades[:12]}
-    pairs = 0
-    ods: set[float] = set()
-    for row in rows:
-        d = _parse_size(row.get("D_mm"))
-        s = _parse_size(row.get("S_mm"))
-        if d and s:
-            pairs += 1
-            ods.add(d)
-    if pairs < spec["need"]:
-        return [
-            f"能读出「外径 + 壁厚」的只有 {pairs} 行(至少 {spec['need']} 行),"
-            "检查 D_mm / S_mm 是不是数值"
-        ], {}
-    return [], {"rows": len(rows), "sizes": pairs, "od_count": len(ods)}
+        return _check_std_stress(rows)
+    return _check_std_sizes(rows, spec["need"])
 
 
 def reload_standards(dir_: Path | None = None) -> dict:
@@ -1290,7 +1394,7 @@ def import_standards(
         if errs:
             errors.extend(f"{name}:{e}" for e in errs)
             continue
-        accepted[spec["name"]] = text
+        accepted[spec["name"]] = _canonical_std_text(text)
     if errors:
         return False, errors, standards_status(base)
 

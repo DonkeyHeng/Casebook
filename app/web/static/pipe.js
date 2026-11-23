@@ -661,12 +661,33 @@ function renderPipeStdFiles() {
   }
 }
 
+/* Excel 二次保存常把 CSV 变成 GBK/UTF-16;先认 BOM,无 BOM 再按 UTF-8 → gb18030 降级。
+   UTF-16 必须放在最前面:它的字节序列用 UTF-8 硬解会先炸,不能留到最后兜底。 */
+async function readPipeStdFile(file) {
+  const buf = await file.arrayBuffer();
+  const u8 = new Uint8Array(buf);
+  const has = (a, b, c) => u8.length >= 3 && u8[0] === a && u8[1] === b && u8[2] === c;
+  const decode = (label, bytes, fatal = false) => new TextDecoder(label, { fatal }).decode(bytes);
+  if (has(0xef, 0xbb, 0xbf)) return decode("utf-8", u8.subarray(3));
+  if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) return decode("utf-16le", u8.subarray(2));
+  if (u8.length >= 2 && u8[0] === 0xfe && u8[1] === 0xff) return decode("utf-16be", u8.subarray(2));
+  try {
+    return decode("utf-8", u8, true);
+  } catch {
+    try {
+      return decode("gb18030", u8, true);
+    } catch {
+      throw new Error("认不出文件编码(支持 UTF-8 / GBK / UTF-16,请用 Excel 另存为 CSV UTF-8)");
+    }
+  }
+}
+
 async function onPipeStdFile(name, file) {
   if (!file) return;
   showPipeStdError("");
   showPipeStdOk("");
   try {
-    const text = await file.text();
+    const text = await readPipeStdFile(file);
     pipeStdPicked[name] = { text, fileName: file.name, ...pipeStdCheckText(name, text) };
   } catch (err) {
     pipeStdPicked[name] = { error: `读不出这个文件:${err.message}` };

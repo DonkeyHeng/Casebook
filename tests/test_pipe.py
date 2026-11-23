@@ -1023,6 +1023,29 @@ def test_std_import() -> None:
     check_eq("std: 统计到 24 个外径", info.get("od_count"), 24)
     errs, _ = pipe_data._validate_std_text(spec, good + "\ufffd")
     check("std: 乱码(非 UTF-8)被拒", any("UTF-8" in e for e in errs), f"{errs}")
+    check_eq(
+        "std: 括号规格取括号外的名义值",
+        [pipe_data._parse_size(x) for x in ("10(10.2)", "2.2(2.3)", "(5.4)5.5")],
+        [10.0, 2.2, 5.5],
+    )
+    semi = "D_mm;S_mm\n" + "\n".join(f"{d};2.5" for d in range(6, 30))
+    errs, _ = pipe_data._validate_std_text(spec, semi)
+    check_eq("std: 分号分隔也能读", errs, [])
+    spaced = " D_mm , S_mm \n" + "\n".join(f"{d},2.5" for d in range(6, 30))
+    errs, _ = pipe_data._validate_std_text(spec, spaced)
+    check_eq("std: 表头前后空格能读", errs, [])
+    bad_size = "D_mm,S_mm\n0.5,2.5\n" + "\n".join(f"{d},2.5" for d in range(6, 30))
+    errs, _ = pipe_data._validate_std_text(spec, bad_size)
+    check("std: 外径超物理区间被拒", any("超出" in e for e in errs), f"{errs}")
+
+    b1 = pipe_data.std_file_spec("t3-20801-tableB1.csv")
+    b1_ok = "标准,牌号,许用应力_40,许用应力_450,许用应力_500\nGB/T 8163,20#,-,—,\n"
+    errs, _ = pipe_data._validate_std_text(b1, b1_ok)
+    check_eq("std: 表 B.1 空/横杠按缺值放行", errs, [])
+    errs, _ = pipe_data._validate_std_text(b1, b1_ok.replace(",20#,-", ",20#,abc"))
+    check("std: 表 B.1 非数字被拒", any("有效数字" in e for e in errs), f"{errs}")
+    errs, _ = pipe_data._validate_std_text(b1, b1_ok.replace(",20#,-", ",20#,1001"))
+    check("std: 表 B.1 应力超区间被拒", any("超出" in e for e in errs), f"{errs}")
 
     base = tmp_root / "a" / "docx"
     ok, errs, status = pipe_data.import_standards(
@@ -1032,6 +1055,14 @@ def test_std_import() -> None:
     check("std: 文件写到了目标目录", (base / "t1-17395-table1.csv").is_file())
     rows = [f["rows"] for f in status["files"] if f["name"] == "t1-17395-table1.csv"]
     check_eq("std: 导入后状态里是 24 行", rows, [24])
+
+    semi_base = tmp_root / "semi" / "docx"
+    ok, errs, _ = pipe_data.import_standards(
+        {"files": {"t1-17395-table1.csv": semi}}, target_dir=semi_base, reload=False
+    )
+    check_eq("std: 分号表能导入", (ok, errs), (True, []))
+    written = (semi_base / "t1-17395-table1.csv").read_text(encoding="utf-8-sig")
+    check("std: 落盘统一成逗号分隔", written.splitlines()[0] == "D_mm,S_mm", written[:40])
 
     # 一个文件不合格 → 一张都不写(别留半份)
     ok, errs, _ = pipe_data.import_standards(
