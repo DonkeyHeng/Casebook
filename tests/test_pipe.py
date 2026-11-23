@@ -1153,7 +1153,9 @@ def test_std_template() -> None:
     text = pipe_standards_prompt.build()
     for name in texts:
         check(f"提示词: 点到 {name}", name in text)
-    check("提示词: 写了必需列", "D_mm" in text and "许用应力_20" in text)
+    check("提示词: 写了必需列", "D_mm" in text and "许用应力_40" in text)
+    check("提示词: 表 B.1 要求全录牌号", "全部牌号" in text)
+    check("提示词: 表 B.1 覆盖到 900 ℃", "许用应力_900" in text)
     check("提示词: 声明示例数值为虚构", "虚构" in text)
     check("提示词: 说明最少行数", "10 行" in text)
 
