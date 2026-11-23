@@ -474,13 +474,17 @@ def _motor_suggestion(block: dict, totals: dict) -> dict:
     missing = []
     if not hf_complete:
         missing.append("管段未齐")
-    if shaft.get("design_kw") is None and design_head is not None and design_head > 0:
+    vap = _num(block.get("pump_vap_frac"))
+    two_phase = vap is not None and vap > pump_rules.TWO_PHASE_VAP_LIMIT
+    if two_phase:
+        # 两相门禁先判:design_kw 是被汽化率拒掉的,不是流量/密度缺了,
+        # 不能靠 shaft.note 反猜原因(那会把"存在"的流量/密度报成缺失)。
+        missing.append("两相进口")
+    elif shaft.get("design_kw") is None and design_head is not None and design_head > 0:
         if _num(block.get("pump_eff")) is None:
             missing.append("缺效率")
         elif _num(shaft.get("design_kw")) is None:
             missing.append("缺流量/密度")
-    if str(shaft.get("note") or "").strip():
-        missing.append("两相进口")
     source_detail = "/".join(dict.fromkeys(missing)) or "未计管损"
     if aspen_kw is None:
         return {

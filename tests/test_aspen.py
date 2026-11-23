@@ -22,7 +22,10 @@ def test_units() -> None:
     cases = [
         ("length", 41.54, "meter", 41.54),  # METCBAR
         ("length", 12.7728155, "m-kgf/kg", 12.7728155),  # MET
-        ("length", 1000.0, "ft-lbf/lbm", 304.8),  # ENG(按定义推的,未实测)
+        ("length", 1000.0, "ft-lbf/lbm", 304.8),  # ENG 教科书写法
+        # ENG(V15 实测 2026-11-23,Aspen 实际给的是 lb 不带 m;20 台泵换算全对)
+        ("length", 2314.18111, "ft-lbf/lb", 705.362402328),
+        ("molar_density", 1.70404776, "lbmol/cuft", 27.296226),  # ENG 泵 RHO_LIQ
         ("molar_density", 47.86, "kmol/cum", 47.86),  # METCBAR
         ("molar_density", 0.027296226, "mol/cc", 27.296226),  # MET
         ("volume_flow", 465.043291, "l/min", 27.90259746),

@@ -689,6 +689,17 @@ def test_pump_line_two_phase_and_reverse():
     check_eq("两相:check_kw 拒算", est["check_kw"], None)
     check_eq("两相:design_kw 拒算", est["design_kw"], None)
     check_eq("两相:轴功率照会说明", est["note"], "含气/两相进口不计算轴功率照会")
+    motor = two["totals"]["motor"]
+    check(
+        "两相:电机回退原因写明两相进口",
+        "两相进口" in motor["power_source"],
+        motor["power_source"],
+    )
+    check(
+        "两相:不谎报缺流量/密度",
+        "缺流量/密度" not in motor["power_source"],
+        motor["power_source"],
+    )
     # 边界:正好 1e-4 按单相,与管道页 <= 1e-4 一致
     edge = pump_line.compute(
         _block(pump_vap_frac=1e-4),

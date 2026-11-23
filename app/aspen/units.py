@@ -161,7 +161,9 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "m-kgf/kg": (1.0, 0.0),
         "mkgf/kg": (1.0, 0.0),
         "ft-lbf/lbm": (0.3048, 0.0),  # ENG 单位集:1 ft 液柱 = 0.3048 m
+        "ft-lbf/lb": (0.3048, 0.0),  # 实测 V15 ENG 给的写法就是 lb(不带 m),仍是 ft 液柱
         "ftlbf/lbm": (0.3048, 0.0),
+        "ftlbf/lb": (0.3048, 0.0),
         "j/kg": (1 / 9.80665, 0.0),  # 比能形式:除以 g 才是米
         "mm": (0.001, 0.0),
         "cm": (0.01, 0.0),
@@ -181,6 +183,7 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "mol/ml": (1000.0, 0.0),
         "gmmol/cc": (1000.0, 0.0),
         "lbmol/ft3": (16.018463, 0.0),
+        "lbmol/cuft": (16.018463, 0.0),  # 实测 V15 ENG 的 RHO_LIQ 用 cuft,不是 ft3
     },
 }
 
