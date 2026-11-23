@@ -257,8 +257,233 @@ export async function openHeat(block) {
     currentRow = row;
     renderHeatTable(row);
     renderHeatForm(row);
+    renderL2Loading();
+    loadDetail(block).then((detail) => {
+      if (currentRow?.block === block) renderL2(detail);
+    }).catch((err) => {
+      document.getElementById("heatL2").innerHTML =
+        `<div class="pump-block-head"><span class="pump-block-title">几何初选</span></div>
+         <p class="heat-warn">⚠ 读取几何初选失败:${esc(err.message)}</p>`;
+    });
   } catch (err) {
     document.getElementById("heatHint").textContent = `读取失败:${err.message}`;
+  }
+}
+
+function loadDetail(block, force = false) {
+  const base = `/api/cases/${state.current?.id}/heat/${encodeURIComponent(block)}`;
+  return api(force ? `${base}?refresh=1` : base);
+}
+
+function renderL2Loading() {
+  document.getElementById("heatL2").innerHTML =
+    `<div class="pump-block-head"><span class="pump-block-title">L2 几何初选</span></div>
+     <p class="muted">正在按需读物性并枚举标准行…</p>`;
+}
+
+const L2_VERDICT = {
+  pass: ["简捷通过", "ok"],
+  reference: ["参考", "warn"],
+  fail: ["未通过", "err"],
+  unknown: ["缺数据", "warn"],
+  blocked: ["已拦截", "err"],
+};
+
+function l2Badge(verdict) {
+  const [text, cls] = L2_VERDICT[verdict] || ["未判定", "warn"];
+  return `<span class="badge ${cls}">${text}</span>`;
+}
+
+function renderL2(detail) {
+  const el = document.getElementById("heatL2");
+  const l2 = detail?.l2 || {};
+  const props = detail?.props || {};
+  const std = detail?.std_state || {};
+  const banners = [];
+
+  if (std.state && std.state !== "ok") {
+    banners.push(`<p class="heat-warn">⚠ 标准表:${esc(std.label || std.state)};${
+      esc(std.reason || "")}。已跳过标准规格圆整,只给 A_req 与经验推荐范围。</p>`);
+  }
+  if (props.source === "unavailable" && props.note) {
+    banners.push(`<p class="heat-warn">⚠ 物性读不到:${esc(props.note).replace(/\n/g, "<br>")}</p>`);
+  }
+  if (props.missing?.length) {
+    banners.push(`<p class="muted">缺物性:${esc(props.missing.join("、"))};h 与 Pr 算不出,只给几何与面积。
+      可在 Aspen 物性集里勾 CP / THK,然后点「重新读物性」。</p>`);
+  }
+  const assumptions = l2.assumptions || [];
+  if (assumptions.length) {
+    banners.push(`<p class="muted">假设输入 ${assumptions.length} 项,判定封顶为「参考」:${esc(assumptions.join(";"))}</p>`);
+  }
+
+  const rows = (l2.candidates || []).map((c) => {
+    const key = c.std_row_key || "—";
+    const picked = c.std_row_key && c.std_row_key === detail?.manual?.std_row_key;
+    return `<tr${picked ? ' class="is-picked"' : ""}>
+      <td class="name">${esc(key)}</td>
+      <td class="num">${fmt(c.area_std_m2, 1)}</td>
+      <td class="num">${fmt(c.area_ratio, 2)}</td>
+      <td class="num">${fmt(c.u_dirty_wm2k, 0)}</td>
+      <td class="num">${fmt(c.tube?.dp_bar, 2)}/${fmt(c.shell?.dp_bar, 2)}</td>
+      <td>${l2Badge(c.verdict)}</td>
+      <td><button class="btn small" type="button" data-pick="${esc(key)}">采用</button></td>
+    </tr>`;
+  }).join("");
+
+  const estimate = l2.estimate;
+  const estimateHtml = estimate?.cases?.length
+    ? `<table class="table-wrap small"><thead><tr><th scope="col">管径 mm</th><th scope="col">管长 mm</th>
+        <th scope="col">管数范围</th><th scope="col">壳径估算 mm</th></tr></thead><tbody>
+        ${estimate.cases.map((x) => `<tr><td>φ${fmt(x.tube_od_mm, 0)}</td>
+          <td>${x.lengths_mm.map((v) => fmt(v, 0)).join(" / ")}</td>
+          <td>${x.count_min} ~ ${x.count_max}</td>
+          <td>${fmt(estimate.shell_mm?.[String(x.tube_od_mm)] ?? estimate.shell_mm?.[String(Number(x.tube_od_mm))], 0)}</td></tr>`).join("")}
+        </tbody></table>
+        <p class="muted">经验范围只回答「大概多大」,不是标准规格,不进型号。</p>`
+    : "";
+
+  const manual = detail?.manual;
+  const manualHtml = manual
+    ? `<p class="muted">当前人工覆盖:壳径 ${fmt(manual.shell_id_mm, 0)} mm,φ${fmt(manual.tube_od_mm, 0)}×${fmt(manual.tube_wall_mm, 1)},
+       长 ${fmt(manual.tube_length_mm, 0)} mm,${fmt(manual.tube_count, 0)} 根,${fmt(manual.tube_passes, 0)} 管程
+       ${manual.verdict ? `· ${l2Badge(manual.verdict)}` : ""}
+       <button id="heatClearGeom" class="btn small" type="button">清除覆盖</button></p>`
+    : "";
+
+  el.innerHTML = `
+    <div class="pump-block-head"><span class="pump-block-title">L2 几何初选</span>
+      <span class="muted">${esc(l2.verdict_text || "")}</span></div>
+    ${banners.join("")}
+    ${rows ? `<div class="table-wrap small"><table>
+      <thead><tr><th scope="col">标准行</th><th scope="col" class="num">A_std m²</th>
+      <th scope="col" class="num">A/需求</th><th scope="col" class="num">U 计算</th>
+      <th scope="col" class="num">Δp 管/壳 bar</th><th scope="col">判定</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>` : ""}
+    ${estimateHtml}
+    ${manualHtml}
+    <p class="muted heat-note">标准行按「公称面积/需求面积」最接近 1 排序;判定里的「简捷通过」也只是简捷级,
+      压降按 Darcy + Kern 口径估,未做振动与两相分区,送 EDR 复核。</p>
+    <div class="muted">标准表:${esc(std.label || std.state || "未加载")}${std.rows ? `(${std.rows} 行)` : ""}
+      ${std.version ? `· 版本 ${esc(std.version)}` : ""}</div>
+    <div class="heat-l2-actions">
+      <button id="heatPropsRefresh" class="btn" type="button">重新读物性</button>
+      <button id="heatEdrPrompt" class="btn" type="button">复制 EDR 送审提示词</button>
+      <button id="heatStdPrompt" class="btn small" type="button" title="让 AI 把标准原文整理成 CSV">复制标准表填写提示词</button>
+      <a class="btn small" href="/api/hx-standards-template.zip" download>下载空模板</a>
+      <label class="btn small" for="heatStdFile">导入标准表 CSV</label>
+      <input id="heatStdFile" type="file" accept=".csv,text/csv" multiple hidden>
+    </div>
+    <p id="heatL2Msg" class="muted"></p>
+  `;
+
+  el.querySelectorAll("[data-pick]").forEach((btn) => {
+    btn.addEventListener("click", () => pickGeometry(btn.dataset.pick, l2));
+  });
+  const clear = document.getElementById("heatClearGeom");
+  if (clear) clear.addEventListener("click", clearGeometry);
+  document.getElementById("heatPropsRefresh").addEventListener("click", async () => {
+    document.getElementById("heatL2Msg").textContent = "正在重新读物性…";
+    try {
+      const next = await loadDetail(currentRow.block, true);
+      renderL2(next);
+    } catch (err) {
+      document.getElementById("heatL2Msg").textContent = `读物性失败:${err.message}`;
+    }
+  });
+  document.getElementById("heatEdrPrompt").addEventListener("click", copyEdrPrompt);
+  document.getElementById("heatStdPrompt").addEventListener("click", async () => {
+    try {
+      const data = await api("/api/hx-standards-prompt");
+      await navigator.clipboard.writeText(data.text || "");
+      document.getElementById("heatL2Msg").textContent = "标准表填写提示词已复制";
+    } catch (err) {
+      document.getElementById("heatL2Msg").textContent = `复制失败:${err.message}`;
+    }
+  });
+  document.getElementById("heatStdFile").addEventListener("change", importStandards);
+}
+
+async function importStandards(event) {
+  const files = Array.from(event.target.files || []);
+  if (!files.length) return;
+  const msg = document.getElementById("heatL2Msg");
+  msg.textContent = `正在校验并导入 ${files.length} 个文件…`;
+  const payload = { files: {} };
+  for (const file of files) {
+    payload.files[file.name] = await file.text();
+  }
+  try {
+    const result = await apiPost("/api/hx-standards", payload);
+    msg.textContent = result.ok
+      ? `已导入 ${result.loaded?.rows ?? 0} 行,版本 ${result.loaded?.version || ""}`
+      : `导入被拒:${(result.errors || []).slice(0, 3).join(";")}`;
+    if (result.ok) renderL2(await loadDetail(currentRow.block));
+  } catch (err) {
+    msg.textContent = `导入失败:${err.message}`;
+  } finally {
+    event.target.value = "";
+  }
+}
+
+async function pickGeometry(key, l2) {
+  const item = (l2.candidates || []).find((c) => c.std_row_key === key);
+  if (!item) return;
+  const values = {
+    geom_source: "manual",
+    std_row_key: key,
+    geom_shell_id_mm: item.shell_id_mm,
+    geom_shell_od_mm: item.shell_od_mm,
+    geom_tube_od_mm: item.tube_od_mm,
+    geom_tube_wall_mm: item.tube_wall_mm,
+    geom_tube_length_mm: item.tube_length_mm,
+    geom_tube_passes: item.tube_passes,
+    geom_tube_pitch_mm: item.tube_pitch_mm,
+    geom_tube_count: item.tube_count,
+    geom_arrangement: item.arrangement,
+    geom_baffle_spacing_mm: item.baffle_mm,
+    area_nominal_m2: item.area_std_m2,
+  };
+  try {
+    await apiPost(`/api/cases/${state.current?.id}/heat/${encodeURIComponent(currentRow.block)}/design`, values);
+    const detail = await loadDetail(currentRow.block);
+    renderL2(detail);
+    cache.rows = null;
+  } catch (err) {
+    document.getElementById("heatL2Msg").textContent = `采用失败:${err.message}`;
+  }
+}
+
+async function clearGeometry() {
+  const values = {
+    geom_source: null,
+    std_row_key: null,
+    geom_shell_id_mm: null,
+    geom_shell_od_mm: null,
+    geom_tube_od_mm: null,
+    geom_tube_wall_mm: null,
+    geom_tube_length_mm: null,
+    geom_tube_passes: null,
+    geom_tube_pitch_mm: null,
+    geom_tube_count: null,
+    geom_arrangement: null,
+    geom_baffle_spacing_mm: null,
+  };
+  try {
+    await apiPost(`/api/cases/${state.current?.id}/heat/${encodeURIComponent(currentRow.block)}/design`, values);
+    renderL2(await loadDetail(currentRow.block));
+  } catch (err) {
+    document.getElementById("heatL2Msg").textContent = `清除失败:${err.message}`;
+  }
+}
+
+async function copyEdrPrompt() {
+  try {
+    const data = await api("/api/hx-edr-prompt");
+    await navigator.clipboard.writeText(data.text || "");
+    document.getElementById("heatL2Msg").textContent = "EDR 送审提示词已复制";
+  } catch (err) {
+    document.getElementById("heatL2Msg").textContent = `复制失败:${err.message}`;
   }
 }
 

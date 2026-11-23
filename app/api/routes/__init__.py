@@ -114,6 +114,22 @@ ROUTES: list[Route] = [
     route("GET", r"/api/heat-config", "get_heat_config", "换热器三份配置与来源"),
     route("POST", r"/api/heat-config", "post_heat_config", "保存换热器配置(整体覆盖)"),
     route("DELETE", r"/api/heat-config", "delete_heat_config", "删除覆盖、恢复内置默认"),
+    route("GET", r"/api/hx-spec", "get_hx_spec", "换热器口径常量与枚举"),
+    route("GET", r"/api/hx-standards", "get_hx_standards", "换热器标准表状态"),
+    route("POST", r"/api/hx-standards", "post_hx_standards", "导入换热器标准表并切换版本"),
+    route(
+        "GET",
+        r"/api/hx-standards-prompt",
+        "get_hx_standards_prompt",
+        "换热器标准表填写提示词",
+    ),
+    route(
+        "GET",
+        r"/api/hx-standards-template\.zip",
+        "get_hx_standards_template",
+        "换热器标准表空模板",
+    ),
+    route("GET", r"/api/hx-edr-prompt", "get_hx_edr_prompt", "EDR 送审提示词"),
     route(
         "POST",
         _CASE + r"/heat/(?P<block>[^/]+)/design",
@@ -167,6 +183,12 @@ CASE_ROUTES: list[Route] = [
     route("GET", _CASE + r"/export\.ai\.zip", "get_export_ai", "AI 分析包"),
     route("GET", _CASE + r"/balance-report\.docx", "get_export_report", "物料与能量衡算报告"),
     route("GET", _CASE + r"/heat", "get_heat_table", "换热器选型 L1 一览"),
+    route(
+        "GET",
+        _CASE + r"/heat/(?P<block>[^/]+)",
+        "get_heat_detail",
+        "单台换热器详情(物性按需从 Aspen 读)",
+    ),
     route(
         "GET",
         _CASE + r"/heat-edr\.xlsx",

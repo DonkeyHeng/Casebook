@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 import time
 
+from app.design.heat import standards
 from app.export import docx_kit as kit
 from app.export import heat as heat_export
 from app.store import db
@@ -95,7 +96,7 @@ def _data_source(case: dict) -> str:
     return " · ".join(parts)
 
 
-def _remark(row: dict) -> str:
+def _remark(row: dict, l2: dict | None = None) -> str:
     """备注:判定 + 缺失几何 + 警告;空项不占位。"""
     case = row["case"]
     stored = row.get("design_row") or {}
@@ -108,42 +109,48 @@ def _remark(row: dict) -> str:
         "fail": "不合格",
     }.get(case.get("verdict"), "未判定")
     parts = [verdict]
+    if l2:
+        parts.append(f"L2:{l2.get('verdict_text') or '缺数据'}")
+        if l2.get("std_skipped"):
+            parts.append("未加载标准表")
     missing = code.get("missing") or []
     if missing:
         parts.append("缺:" + "/".join(str(m) for m in missing))
-    if not stored.get("area_nominal_m2") and (case.get("area") or {}).get("used_m2"):
-        parts.append("公称面积未填,按 Aspen 简捷面积列示")
+    geom = heat_export._selected_geometry(row, l2 or {})
+    if not stored.get("area_nominal_m2") and geom.get("area_nominal_m2"):
+        parts.append("公称面积取推荐标准行")
     warnings = case.get("warning_text") or case.get("warnings") or []
     for warning in warnings:
         parts.append(str(warning))
     return ";".join(parts)
 
 
-def _row_values(row: dict) -> list[str]:
+def _row_values(row: dict, l2: dict | None = None) -> list[str]:
     case = row["case"]
     stored = row.get("design_row") or {}
     selection = row.get("selection") or {}
     code = row.get("model_code") or {}
     area = case.get("area") or {}
-    nominal = stored.get("area_nominal_m2")
+    geom = heat_export._selected_geometry(row, l2 or {})
+    nominal = stored.get("area_nominal_m2") or geom.get("area_nominal_m2")
     area_value = nominal if nominal is not None else area.get("used_m2")
-    length_mm = stored.get("geom_tube_length_mm")
+    length_mm = stored.get("geom_tube_length_mm") or geom.get("tube_length_mm")
     return [
         row.get("block") or "—",
         selection.get("service_name") or TYPE_NAMES.get(row.get("type"), row.get("type")) or "—",
         code.get("code") or code.get("code_partial") or "—",
         _num(area_value, 2),
-        _text(stored.get("geom_tube_count"), 0),
+        _text(stored.get("geom_tube_count") or geom.get("tube_count"), 0),
         _num(length_mm / 1000 if isinstance(length_mm, (int, float)) else None, 2),
-        _num(stored.get("geom_tube_od_mm"), 1),
-        _text(stored.get("geom_tube_passes"), 0),
-        _num(stored.get("geom_shell_id_mm"), 1),
+        _num(stored.get("geom_tube_od_mm") or geom.get("tube_od_mm"), 1),
+        _text(stored.get("geom_tube_passes") or geom.get("tube_passes"), 0),
+        _num(stored.get("geom_shell_id_mm") or geom.get("shell_id_mm"), 1),
         _text(selection.get("shell_material")),
         _text(selection.get("tube_material")),
         _text(selection.get("qty") or 1, 0),
         _text(selection.get("std_code") or ("GB/T 151" if row.get("type") in SHELL_STD else None)),
         _data_source(case),
-        _remark(row),
+        _remark(row, l2),
     ]
 
 
@@ -162,6 +169,8 @@ def build_hx_docx(conn, case_id: int) -> tuple[bytes, str]:
     rows = heat_export.collect(conn, case_id)
     if not rows:
         raise LookupError("这个工况没有换热类设备")
+    props_rows = db.read_hx_props(conn, case_id)
+    l2_rows = {row["block"]: heat_export._l2(row, props_rows) for row in rows}
 
     try:
         from docx import Document
@@ -198,7 +207,7 @@ def build_hx_docx(conn, case_id: int) -> tuple[bytes, str]:
     kit._three_line(
         doc,
         HEADERS,
-        [_row_values(row) for row in rows],
+        [_row_values(row, l2_rows.get(row["block"])) for row in rows],
         WIDTHS,
         caption="表 1  换热器选型明细",
         font_pt=8.0,
@@ -211,10 +220,20 @@ def build_hx_docx(conn, case_id: int) -> tuple[bytes, str]:
     blocked = sum(1 for row in rows if row["case"].get("verdict") == "blocked")
     unknown = sum(1 for row in rows if row["case"].get("verdict") == "unknown")
     kit._gap(doc, 10)
+    std = standards.standard_state()
+    l2_counts: dict[str, int] = {}
+    for item in l2_rows.values():
+        l2_counts[item.get("verdict_text") or "缺数据"] = (
+            l2_counts.get(item.get("verdict_text") or "缺数据", 0) + 1
+        )
     summary = (
         f"汇总:共 {len(rows)} 台;假设/未确认项 {assumptions} 项;"
         f"已拦截 {blocked} 台;缺数据 {unknown} 台。"
-        f"标准表状态:GB/T 28712.2 标准系列表未启用(L2 再接入),本表不做标准系列匹配。"
+        f"L2 判定:"
+        + "、".join(f"{k} {v} 台" for k, v in l2_counts.items())
+        + f"。标准表状态:{std['label']}"
+        + (f"({std['reason']})" if std.get("reason") else "")
+        + "。"
     )
     para = kit._para(doc, summary, Pt(8), False, WD_ALIGN_PARAGRAPH.LEFT, space_after=4)
     for run in para.runs:

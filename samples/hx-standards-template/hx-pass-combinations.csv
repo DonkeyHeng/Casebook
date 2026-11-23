@@ -1,0 +1,3 @@
+shell_passes,tube_passes,need_f_correction,allowed,note
+1,1,0,1,纯逆流 F=1
+1,2,1,1,需 F 修正

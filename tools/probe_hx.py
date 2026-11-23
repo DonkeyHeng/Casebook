@@ -46,7 +46,6 @@ UTIL_TEMP_FIELDS = (
     "UTL_ENTH_OUT",
     "UTIL_TYPE",
 )
-PROP_HINTS = ("CP", "THK", "KTH", "VISC", "MUMX", "RHO")
 
 
 def fmt(value, unit="") -> str:
@@ -175,36 +174,51 @@ def probe_heat_blocks(session, lines: list[str]) -> dict:
     return {"rows": rows, "heators_with_id": with_id, "with_ua": with_ua}
 
 
-def probe_side_props(session, heat: dict, lines: list[str]) -> None:
+def probe_side_props(session, heat: dict, lines: list[str]) -> dict:
     lines.append("")
-    lines.append("## 3. 侧流股物性候选(Phase 2 参考,不影响 P1 结论)")
+    lines.append("## 3. 侧流股物性 cp / λ / μ(Phase 2)")
     samples = []
     for r in heat["rows"]:
         if r["type"] != "HeatX":
             continue
         base = f"{BLOCK_ROOT}\\{r['block']}"
-        for field in ("COLDIN", "HOTIN"):
+        for field in ("COLDIN", "COLDOUT", "HOTIN", "HOTOUT"):
             value, _ = reader.fetch(session, f"{base}\\Output\\{field}")
             if value:
                 samples.append(str(value))
-        if len(samples) >= 2:
-            break
     if not samples:
         lines.append("  * 没有可用的 HeatX 侧流股样本,跳过")
-        return
-    for stream in samples[:2]:
+        return {"streams": [], "cp": 0, "k": 0, "mu": 0}
+
+    stats = {"streams": [], "cp": 0, "k": 0, "mu": 0}
+    for stream in list(dict.fromkeys(samples))[:4]:
         sbase = rf"\Data\Streams\{stream}"
-        children = reader.child_names(session.find(sbase + r"\Output"))
-        hits = [c for c in children if any(h in c.upper() for h in PROP_HINTS)]
-        lines.append(f"  - 流股 {stream}:Output 下命中物性关键字的节点 {len(hits)} 个")
-        for name in hits[:12]:
-            value, unit = reader.fetch(session, f"{sbase}\\Output\\{name}")
-            lines.append(
-                f"      {name:24s} = {fmt(value, unit):>24s}  (子项 {reader.child_names(session.find(f'{sbase}\\Output\\{name}'))[:3]})"
-            )
         upper = reader.child_names(session.find(sbase + r"\Output\STRM_UPP"))
-        if upper:
-            lines.append(f"      STRM_UPP 子项({len(upper)}):{', '.join(upper[:15])}")
+        props = reader.read_stream_hx_props(session, stream)
+        lines.append(f"  - 流股 {stream}")
+        lines.append(f"      STRM_UPP 子项:{', '.join(upper) if upper else '无'}")
+        lines.append(
+            f"      cp={fmt(props['cp_jkgk'], 'J/(kg·K)')}  "
+            f"λ={fmt(props['k_wmk'], 'W/(m·K)')}  μ={fmt(props['mu_cp'], 'cP')}"
+        )
+        if props["paths"]:
+            lines.append(f"      命中路径:{props['paths']}")
+        if props["unit_gaps"]:
+            lines.append(f"      单位缺口:{props['unit_gaps']}")
+        stats["streams"].append(stream)
+        for key in ("cp", "k", "mu"):
+            if props[f"{'cp_jkgk' if key == 'cp' else ('k_wmk' if key == 'k' else 'mu_cp')}"]:
+                stats[key] += 1
+    lines.append(
+        f"  * 可读率:{stats['cp']}/{len(stats['streams'])} cp、"
+        f"{stats['k']}/{len(stats['streams'])} λ、{stats['mu']}/{len(stats['streams'])} μ"
+    )
+    if not stats["cp"] and not stats["k"]:
+        lines.append(
+            "  * 结论:模型没挂含 CP/THK 的物性集。L2 的 h 与 Pr 算不出来,"
+            "只能给 A_req + 经验推荐范围(界面会标「缺物性」)。"
+        )
+    return stats
 
 
 def probe_names(session, heat: dict, lines: list[str]) -> None:
@@ -274,7 +288,7 @@ def main() -> int:
     ]
     util = probe_utilities(session, lines)
     heat = probe_heat_blocks(session, lines)
-    probe_side_props(session, heat, lines)
+    props = probe_side_props(session, heat, lines)
     probe_names(session, heat, lines)
 
     lines.append("")
@@ -293,6 +307,10 @@ def main() -> int:
         f"UTILITY_ID 可读 {len(heat['heators_with_id'])} 台"
     )
     lines.append(f"  * HX_UA 有值 {len(heat['with_ua'])} 台")
+    lines.append(
+        f"  * 侧流股物性:cp {props['cp']}/{len(props['streams'])}、"
+        f"λ {props['k']}/{len(props['streams'])}、μ {props['mu']}/{len(props['streams'])}"
+    )
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

@@ -126,6 +126,91 @@ def allowable_dp(p_op_bar: float | None, phase: str | None) -> float | None:
     return round(max(p * ratio, DP_ALLOW_FLOOR_BAR), 3)
 
 
+# ---------------------------------------------------------------- 物性(Phase 2)
+#
+# L2 算 h / Re / Pr 要 cp、λ、μ 三项。Aspen 未必挂物性集(实测本机 STRM_UPP
+# 只有 PL / MUMX / PBUB),所以:
+#   ① 读到的就用,标 aspen;
+#   ② cp 读不到时,允许用 |Q|/(m·|ΔT|) 反推一份,标 derived —— 它把热损、潜热
+#      都算进显热,只能在"单相 + 有实测 Q/m/ΔT"时当校核值;
+#   ③ λ 与 μ 没有反推途径,读不到就留空(L1 不受影响)。
+
+#: 反推 cp 的门槛(低于这个就当没有工况信息,不反推)
+CP_DERIVE_MIN_DUTY_KW = 0.5
+CP_DERIVE_MIN_DT_K = 2.0
+#: 单相判据:汽化率低于这个值就当全是液相;None 按"未知但允许"处理(相变另有拦截)
+CP_DERIVE_MAX_VAP = 0.02
+
+PROP_TEXT = {
+    "aspen": "Aspen 实测",
+    "derived": "由 Q/(m·ΔT) 反推",
+    "manual": "人工录入",
+    "missing": "未取得",
+}
+
+
+def cp_from_duty(
+    duty_kw: float | None, mass_flow_kgh: float | None, dt_c: float | None
+) -> float | None:
+    """单相由能量平衡反推 cp(J/(kg·K));条件不足返回 None,不猜。
+
+    口径:cp = |Q| / (m · |ΔT|);Q 取设备热负荷绝对值,m 为该侧质量流量。
+    相变工况不要用它(潜热会被折成显热,结果偏大一个量级)—— 相变已被 §6 拦截。
+    """
+    q_kw, m, dt = _num(duty_kw), _num(mass_flow_kgh), _num(dt_c)
+    if q_kw is None or m is None or dt is None:
+        return None
+    if abs(q_kw) < CP_DERIVE_MIN_DUTY_KW or m <= 0 or abs(dt) < CP_DERIVE_MIN_DT_K:
+        return None
+    cp = abs(q_kw) * 1000.0 / ((m / 3600.0) * abs(dt))
+    return round(cp, 1)
+
+
+def side_props(side: dict | None, stored: dict | None = None, duty_kw: float | None = None) -> dict:
+    """把"库里缓存的物性 + 可反推的 cp"整理成一条侧物性。
+
+    Args:
+        side: `build_sides()` 的一条侧记录(要 t_in_c / t_out_c / mass_flow_kgh / vap_*)
+        stored: `hx_props` 的一行(dict),可缺键
+        duty_kw: 设备热负荷(kW),反推 cp 用
+
+    返回:
+        {mu_cp, cp_jkgk, k_wmk, source:{mu,cp,k}, missing:[...], notes:[...]}
+    """
+    stored = stored or {}
+    out = {
+        "mu_cp": _num(stored.get("mu_cp")),
+        "cp_jkgk": _num(stored.get("cp_jkgk")),
+        "k_wmk": _num(stored.get("k_wmk")),
+        "source": {
+            "mu": "aspen" if _num(stored.get("mu_cp")) is not None else "missing",
+            "cp": "aspen" if _num(stored.get("cp_jkgk")) is not None else "missing",
+            "k": "aspen" if _num(stored.get("k_wmk")) is not None else "missing",
+        },
+        "missing": [],
+        "notes": [],
+    }
+
+    if out["cp_jkgk"] is None and side:
+        vap_in = _num(side.get("vap_in"))
+        vap_out = _num(side.get("vap_out"))
+        single_phase = all(v is None or v <= CP_DERIVE_MAX_VAP for v in (vap_in, vap_out))
+        dt = None
+        if side.get("t_in_c") is not None and side.get("t_out_c") is not None:
+            dt = float(side["t_in_c"]) - float(side["t_out_c"])
+        if single_phase:
+            derived = cp_from_duty(duty_kw, side.get("mass_flow_kgh"), dt)
+            if derived is not None:
+                out["cp_jkgk"] = derived
+                out["source"]["cp"] = "derived"
+                out["notes"].append("cp 由 Q/(m·ΔT) 反推,仅作校核值")
+
+    for key, name in (("cp_jkgk", "cp"), ("k_wmk", "λ"), ("mu_cp", "μ")):
+        if out[key] is None:
+            out["missing"].append(name)
+    return out
+
+
 def _side_from_stream(stream) -> dict:
     return {
         "stream": _get(stream, "name"),
@@ -133,6 +218,8 @@ def _side_from_stream(stream) -> dict:
         "t_out_c": None,
         "p_bar": _num(_get(stream, "pressure_bar")),
         "mass_flow_kgh": _num(_get(stream, "mass_flow_kgh")),
+        # 体积流量:管程流速与接管口径要用;质量流量算不出流速(缺密度)
+        "vol_flow_m3h": _num(_get(stream, "vol_flow_m3h")),
         "vap_in": _num(_get(stream, "vap_frac")),
         "vap_out": None,
         "corrosive": False,
@@ -155,6 +242,8 @@ def _merge_side(side: dict, stream) -> None:
         side["p_bar"] = _num(_get(stream, "pressure_bar"))
     if side.get("mass_flow_kgh") is None:
         side["mass_flow_kgh"] = _num(_get(stream, "mass_flow_kgh"))
+    if side.get("vol_flow_m3h") is None:
+        side["vol_flow_m3h"] = _num(_get(stream, "vol_flow_m3h"))
 
 
 def build_sides(block, connections, streams) -> dict:
@@ -188,6 +277,8 @@ def build_sides(block, connections, streams) -> dict:
                     rec["p_bar"] = _num(_get(stream, "pressure_bar"))
                 if rec.get("mass_flow_kgh") is None:
                     rec["mass_flow_kgh"] = _num(_get(stream, "mass_flow_kgh"))
+                if rec.get("vol_flow_m3h") is None:
+                    rec["vol_flow_m3h"] = _num(_get(stream, "vol_flow_m3h"))
             elif direction == "out":
                 rec["t_out_c"] = _num(_get(stream, "temperature_c"))
                 rec["vap_out"] = _num(_get(stream, "vap_frac"))
@@ -202,6 +293,7 @@ def build_sides(block, connections, streams) -> dict:
             "t_out_c": _num(_get(block, "outlet_temp_c")),
             "p_bar": None,
             "mass_flow_kgh": None,
+            "vol_flow_m3h": None,
             "vap_in": None,
             "vap_out": _num(_get(block, "outlet_vap_frac")),
             "corrosive": False,
@@ -235,6 +327,7 @@ def build_sides(block, connections, streams) -> dict:
             "t_out_c": _num(_get(block, "util_t_out_c")),
             "p_bar": None,
             "mass_flow_kgh": None,
+            "vol_flow_m3h": None,
             "vap_in": None,
             "vap_out": None,
             "corrosive": False,
@@ -524,7 +617,7 @@ def build_design(
             warnings.append("U_ASSUMED")
         else:
             u_source = "none"
-    u_for_req = u_aspen or u_assumed
+    u_for_req = u_aspen or u_assumed or u_back
     if q_w and u_for_req and dtlm and f:
         area_req = q_w / (u_for_req * dtlm * f) * (1 + (_num(margin) or 0.0))
 

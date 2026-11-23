@@ -81,6 +81,53 @@ TUBE_FLUID_RULES: tuple[dict, ...] = (
     {"rule": 7, "key": "fallback", "text": "无明确判据,按课堂惯例"},
 )
 
+# 壳程/管程组合(方案 §8.2 文件 2 的内置默认)。表未导入时用这 4 行;
+# 导入后以文件为准(用户想加 1/6、2/2 就改文件,不改代码)。
+PASS_COMBINATIONS_DEFAULTS: tuple[dict, ...] = (
+    {
+        "shell_passes": 1,
+        "tube_passes": 1,
+        "need_f_correction": 0,
+        "allowed": 1,
+        "note": "纯逆流,F=1",
+    },
+    {
+        "shell_passes": 1,
+        "tube_passes": 2,
+        "need_f_correction": 1,
+        "allowed": 1,
+        "note": "需 F 修正",
+    },
+    {
+        "shell_passes": 1,
+        "tube_passes": 4,
+        "need_f_correction": 1,
+        "allowed": 1,
+        "note": "需 F 修正",
+    },
+    {
+        "shell_passes": 2,
+        "tube_passes": 4,
+        "need_f_correction": 1,
+        "allowed": 0,
+        "note": "本期不支持双壳程",
+    },
+)
+
+# 缺标准表时的经验推荐范围(方案 §8.5)。**只用于"大概多大"**:
+# 不进编码、不进台账、不出现在 Word 型号列。
+ESTIMATE_TUBE_ODS_MM = (19.0, 25.0)
+ESTIMATE_LENGTHS_MM = (4500, 6000, 7500)
+
+# 物性设置指引(方案 §2.3):页面在"缺 cp / λ"时按这几步引导用户挂物性集。
+PROPS_SETUP_STEPS: tuple[str, ...] = (
+    "Aspen 里打开 Properties → Property Sets,新建一个物性集(名字随意,如 HXPROP)。",
+    "在物性集里勾上 VISC(粘度,已有则不重复)、CP(定压比热)、THK(导热系数)。",
+    "Properties → Reports → Stream Results(或 Stream 页 → Property Set)挂上这个物性集。",
+    "Run 一次模型后重新读工况;打开换热器抽屉,物性会自动按需读取并缓存。",
+    "单位认不出来时(如摩尔基 cal/mol-K)工具留空并提示手填,不拿常见值顶替。",
+)
+
 # 计算说明书与 EDR 清单里对来源的中文标签。**界面、台账、导出共用这一张表**,
 # 免得同一来源在三处写法不一致。
 SOURCE_LABELS: dict[str, str] = {
@@ -250,6 +297,39 @@ def tube_fluid_suggestion(
 
 def _suggest(value: str, rule: int, reason: str) -> dict:
     return {"value": value, "rule": rule, "reason": reason}
+
+
+def pass_combinations(config: list | tuple | None = None) -> list[dict]:
+    """壳程/管程组合:用户导入的组合表优先,否则用内置 4 行。
+
+    返回字段统一成 {shell_passes, tube_passes, need_f_correction, allowed, note}。
+    不在这里判"支不支持",只负责取数 —— 判定在 `geometry.check_combination()`。
+    """
+    rows = config if isinstance(config, (list, tuple)) and config else PASS_COMBINATIONS_DEFAULTS
+    out = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out.append(
+            {
+                "shell_passes": int(row.get("shell_passes") or 1),
+                "tube_passes": int(row.get("tube_passes") or 1),
+                "need_f_correction": int(row.get("need_f_correction") or 0),
+                "allowed": int(row.get("allowed") if row.get("allowed") is not None else 1),
+                "note": str(row.get("note") or ""),
+            }
+        )
+    return out
+
+
+def props_setup_guide() -> dict:
+    """物性缺项时的一次性设置指引(方案 §2.3)。"""
+    return {
+        "title": "模型缺 cp / λ,无法算膜系数",
+        "why": "膜系数要 cp、λ、μ 三项;μ 已在读(VISC),cp 与 λ 需要在物性集里勾上才会输出。",
+        "steps": list(PROPS_SETUP_STEPS),
+        "fallback": "L1 不受影响;L2 只给理论需求面积 A_req 与经验推荐范围,不编造膜系数。",
+    }
 
 
 def check_tube_fluid(kind: str, value: str | None) -> str | None:

@@ -860,7 +860,7 @@ GB/T 28712.2 与 GB/T 151 的**数值表**受著作权保护，仓库与安装�
 | `结果与提示` | `A_req`、`A_std`、裕量、`U_back`/`U_calc`、Δp 管/壳、判定、拦截/告警、缺失项 |
 
 - 每页首行下方留一行灰字说明单位；不做合并单元格，保证可直接筛选粘贴。
-- **落地状态（Phase 1）**：当前 `heat-edr.xlsx` 暂为单页 40 列 + 「说明」页。Phase 1 尚无 L2 结构几何（标准行、管心距、折流板等），强行拆三页签会有大量空列；待 P2-6 补全几何数据后再按本表拆分为 `EDR工艺输入` / `EDR结构输入` / `结果与提示` 三页签。
+- **落地状态（Phase 2，2026-11-23）**：已按本表拆分为 `EDR工艺输入`（16 列，每台管/壳程两行）/ `EDR结构输入`（16 列）/ `结果与提示`（13 列）+ `说明` 页；第 2 行灰字单位提示、`A3` 冻结、表头筛选；几何列取人工覆盖，缺则回退 L2 推荐标准行并标「L2 推荐」。
 
 ### 9.4 计算说明书
 
@@ -924,6 +924,21 @@ GB/T 28712.2 与 GB/T 151 的**数值表**受著作权保护，仓库与安装�
 
 > 两期合计约 30 人日；Phase 1 完成即可对外使用 L1，Phase 2 不改变任何已发布的表结构与接口。
 
+#### 落地进度（Phase 2，2026-11-23）
+
+| 编号 | 状态 | 已落地内容 / 下一步 |
+| --- | --- | --- |
+| P2-0 | ✅ 完成 | 探针确认 `STRM_UPP` 默认只有 `PL / MUMX / PBUB`，`CP`/`THK` 需用户挂物性集；`units` 增 viscosity / specific_heat / conductivity；`reader.read_stream_hx_props()`（候选路径 + 子节点扫描 + 单位缺口）与 `read_hx_props()`（只读本台四端）；`api/hx_props.py` 按需读 + `hx_props` 缓存 + `PropsUnavailable` 降级；`cp_from_duty()` 反推（单相、Q≥0.5 kW、ΔT≥2 K）标 `derived` 且不落库 |
+| P2-1 | ✅ 完成 | `design/heat/standards.py`（CSV 校验含 A1 面积自洽 3%、状态门槛 20 行 / 3 DN / 2 管径、版本化目录 + 原子指针 + staging 回滚、模板指纹拒绝、`estimate_ranges()` + Kern 管束直径）；`prompt.py`（标准表与 EDR 填写提示词）；`samples/hx-standards-template/` 空模板；本机 φ19/φ25 共 192 行已导入 `version=20261123-205803`；缺表降级 `std_skipped` + `A_req` + 经验范围 |
+| P2-2 | ✅ 完成 | `geometry.py`：标准行枚举、管程流通面积 / 流速 / Re / Pr / Dittus-Boelter / h、Darcy 压降（复用 `hydraulics`，ζ=1.5+1.0+1.5×(Np−1)）；`DN325/φ19/6000/1 程` 命中 99 根 34.9 m² |
+| P2-3 | ✅ 完成 | `geometry.py`：壳程 Kern（`d_e`、`A_c`、`G`、`Re`、`Nu=0.36Re^0.55Pr^(1/3)`、`f=exp(0.576−0.19lnRe)`、Δp）、`U_clean/U_dirty`、接管按 GB/T 17395 最小可达外径圆整；合成工况 H2O-H2O 与真实 case61 均已跑通（case61 气-气判 fail 且 `U_MISMATCH`，属预期） |
+| P2-4 | ✅ 完成 | `rating.py`：五态、压降 / 面积阈值（0.98 / 1.30 / need>1.05）、假设清单 7 类、`select()` 排序与推荐；**含任意假设最高 reference** 由单测锁定 |
+| P2-5 | ✅ 完成 | `views/heat.js`：L2 面板（候选表、采用 / 清除、未导入标准表黄条、物性缺失提示、假设说明、复制提示词、下载模板、导入 CSV）；`GET /api/cases/{id}/heat/{block}` 详情 |
+| P2-6 | ✅ 完成 | `export/heat.py` 拆为 `EDR工艺输入` / `EDR结构输入` / `结果与提示` + `说明`（16/16/13 列）；`export/hx_schedule.py` 无人工几何时回退 L2 推荐行并在备注标「L2 推荐」，表尾按 L2 判定计数 |
+| P2-7 | ✅ 完成 | `tests/test_hx_l2.py` 9 组 90+ 断言（物性换算 / 扫描 / 反推 / 表校验 / 状态与回滚 / 几何水力 / 五态 / 缺表降级 + 三页签 / 详情接口），已登记 `tests/_suite.py`；计算说明书加第 12 章；`selftest` 1544 条、`check_render` 197 条 |
+
+> Phase 2 收尾：四道门禁（`ruff check` / `ruff format --check` / `tools.selftest` / `check_render`）全绿后提交；标准表数值仍不入库，仓库只发布模板与导入管道。
+
 ---
 
 ## 11. 自测用例规划
@@ -951,6 +966,7 @@ GB/T 28712.2 与 GB/T 151 的**数值表**受著作权保护，仓库与安装�
 | Aspen 交叉 | HX-72~74 | `HX_DTLM` 与自算一致、`HX_UAVD` 与 `U_back` 一致、`HX_EX_*` 全 0 判 shortcut | 52.295 ℃ ±0.1；850 ±1%；`area_basis_hint=shortcut_design` |
 | 公用工程类型 | HX-75~77 | `ELECTRICITY` 拦截、`STEAM` 无温度转预设、`UTL_DUTY` 不参与计算 | 电加热 `UTILITY_NO_TEMP`；`UTL_DUTY=1` 被忽略 |
 - 目标：Phase 1 ≥45 条断言、Phase 2 再 ≥35 条断言（每个用例可含多条断言）；保持原 1252 条全绿。
+- 现状（2026-11-23）：`tests/test_heat.py` 10 组；`tests/test_hx_l2.py` 9 组 90+ 断言，均已在 `tests/_suite.py` 登记；`selftest` 合计 1544 条。
 - 回归要求：`python -m tools.selftest --db data/cases.db`、`node tools/check_render.mjs`、`ruff check`、`ruff format --check` 四道闸门全绿再提交。
 
 ---

@@ -1161,6 +1161,9 @@ def _to_cp(value, unit) -> float | None:
         return None
     if num <= 0:
         return None
+    converted = units.convert("viscosity", value, unit)
+    if converted is not None:
+        return converted
     text = (
         str(unit or "")
         .strip()
@@ -1229,6 +1232,180 @@ def read_stream_viscosity(session, stream_name: str):
         if cp is not None:
             return cp
     return None
+
+
+# ---------------------------------------------------------------- 换热器物性(Phase 2)
+#
+# 为什么按"候选名扫描"而不是写死一条路径:
+#   * `CP`(定压比热)与导热系数只有在 Aspen 的**物性集**里勾上才会出现在
+#     `Output\STRM_UPP` 下,节点名就是物性集条目的名字,用户可能写成
+#     CP / CPMASS / THK / KMX / KTH …… 版本间也不一致;
+#   * 实测(2026-11-23,V15 全流程模型,`tools/probe_hx.py --props`)本机
+#     `STRM_UPP` 只有 `PL / MUMX / PBUB` 三项,**没有 CP 与 THK** —— 所以
+#     路径必须能配、读不到就留空,不能像 MUMX 那样假设只有一个名字。
+#   * 认不出的单位一律留 None 并计入 `unit_gaps`,不拿常见值顶替。
+CP_STREAM_NODES = (
+    "STRM_UPP\\CP\\MIXED\\TOTAL",
+    "STRM_UPP\\CP\\MIXED",
+    "STRM_UPP\\CPMASS\\MIXED\\TOTAL",
+    "STRM_UPP\\CPMASS\\MIXED",
+    "STRM_UPP\\CPMASS",
+    "STRM_UPP\\CPMX\\MIXED",
+    "STRM_UPP\\CP\\LIQUID\\MIXED",
+    "STRM_UPP\\CP",
+    "CPMASS",
+    "CP\\MIXED\\TOTAL",
+    "CP",
+)
+K_STREAM_NODES = (
+    "STRM_UPP\\THK\\MIXED\\TOTAL",
+    "STRM_UPP\\THK\\MIXED",
+    "STRM_UPP\\THK\\LIQUID\\MIXED",
+    "STRM_UPP\\THK",
+    "STRM_UPP\\KTH\\MIXED\\TOTAL",
+    "STRM_UPP\\KTH",
+    "STRM_UPP\\KMX\\MIXED\\TOTAL",
+    "STRM_UPP\\KMX\\MIXED",
+    "STRM_UPP\\KMX",
+    "STRM_UPP\\KVMX\\MIXED",
+    "STRM_UPP\\LAMBDA\\MIXED",
+    "THK",
+    "KMX",
+    "KTH",
+)
+# 扫描 STRM_UPP 子项时用的关键字(兜住用户自定义物性集名)
+_CP_SCAN_KEYS = ("CP", "HEATCAP", "CPMASS")
+_K_SCAN_KEYS = ("THK", "KMX", "KTH", "KVMX", "LAMBDA", "COND")
+
+
+def _scan_prop(session, base: str, nodes, scan_keys) -> tuple[object, str, str]:
+    """在流股 Output 下按候选名找物性节点,返回 (值, 单位, 命中路径)。
+
+    先按候选路径试(命中概率最高),再扫 `STRM_UPP` 子项名兜底。
+    只认钻到的叶子真值 —— 目录节点(值恒为 1)会被 `_lower_leaf` 过滤掉。
+    """
+    for rel in nodes:
+        path = rf"{base}\{rel}"
+        value, unit = _lower_leaf(session, path)
+        if value is not None:
+            return value, unit, path
+    upper = session.find(rf"{base}\STRM_UPP")
+    for name in child_names(upper):
+        text = str(name).upper()
+        if not any(key in text for key in scan_keys):
+            continue
+        path = rf"{base}\STRM_UPP\{name}"
+        value, unit = _lower_leaf(session, path)
+        if value is not None:
+            return value, unit, path
+    return None, "", ""
+
+
+def read_stream_hx_props(session, stream_name: str) -> dict:
+    """按需读一条流股的 cp / λ / μ(**只读**)。读不到就留 None,不猜。
+
+    返回:
+        stream / cp_jkgk / k_wmk / mu_cp
+        source        aspen(读到至少一项) / none
+        paths         命中的节点路径(排查"为什么读不到"用)
+        unit_gaps     单位认不出来或数值不合理的项(如 "cp:cal/mol-K")
+    """
+    base = rf"\Data\Streams\{stream_name}\Output"
+    out = {
+        "stream": stream_name,
+        "cp_jkgk": None,
+        "k_wmk": None,
+        "mu_cp": None,
+        "source": None,
+        "paths": {},
+        "unit_gaps": [],
+    }
+
+    cp_raw, cp_unit, cp_path = _scan_prop(session, base, CP_STREAM_NODES, _CP_SCAN_KEYS)
+    if cp_raw is not None:
+        cp = units.convert("specific_heat", cp_raw, cp_unit)
+        if cp is not None and cp > 0:
+            out["cp_jkgk"] = cp
+            out["paths"]["cp"] = cp_path
+        elif cp is None:
+            # 摩尔基(cal/mol-K 之类)换算不了质量基 —— 明确记一笔,页面提示手填
+            out["unit_gaps"].append(f"cp:{cp_unit or '无单位'}")
+
+    k_raw, k_unit, k_path = _scan_prop(session, base, K_STREAM_NODES, _K_SCAN_KEYS)
+    if k_raw is not None:
+        k = units.convert("conductivity", k_raw, k_unit)
+        if k is not None and k > 0:
+            out["k_wmk"] = k
+            out["paths"]["k"] = k_path
+        elif k is None:
+            out["unit_gaps"].append(f"k:{k_unit or '无单位'}")
+
+    mu = read_stream_viscosity(session, stream_name)
+    if mu is not None:
+        out["mu_cp"] = mu
+
+    if any(out[key] is not None for key in ("cp_jkgk", "k_wmk", "mu_cp")):
+        out["source"] = "aspen"
+    return out
+
+
+def heat_side_streams(blocks, connections, block: str | None = None) -> dict[str, list[str]]:
+    """换热设备 → 四端流股名(按 hot / cold 分组,去重保序)。
+
+    只走连接关系,不猜:Heater 的公用工程侧不是流股,自然不在这里出现。
+    """
+    sides: dict[str, list[str]] = {}
+    heat_names = {
+        b.get("name")
+        for b in blocks or []
+        if (b.get("type") or "") in HEATX_BLOCK_TYPES + UTILITY_BLOCK_TYPES
+    }
+    if block:
+        heat_names &= {block}
+    for row in connections or []:
+        if row.get("block") not in heat_names:
+            continue
+        side = row.get("side") or ""
+        if side not in ("hot", "cold"):
+            continue
+        name = row.get("stream")
+        if not name:
+            continue
+        bucket = sides.setdefault(side, [])
+        if name not in bucket:
+            bucket.append(name)
+    return sides
+
+
+def read_hx_props(
+    session, streams: list[dict] | None = None, blocks=None, connections=None, block=None
+) -> dict:
+    """按需读换热器四端流股的物性(单台,打开抽屉时用),返回 {流股名: props}。
+
+    **不扩全表**:只对这台设备(pass `block`)或本次传入的 heat 块读,
+    4 条侧流股 × 3 个物性 ≈ 12 次 COM 调用。
+
+    第二个副作用:若传入 `streams`(read_streams() 的记录),把 `cp_jkgk` /
+    `k_wmk` 就地写进对应记录,方便调用方直接拿去拼 L1 结果;不传就只返回字典。
+    """
+    wanted = heat_side_streams(blocks, connections, block)
+    names: list[str] = []
+    for side in ("hot", "cold"):
+        names.extend(wanted.get(side, []))
+    rows: dict[str, dict] = {}
+    for name in names:
+        if name in rows:
+            continue
+        rows[name] = read_stream_hx_props(session, name)
+
+    if streams:
+        for rec in streams:
+            props = rows.get(rec.get("name"))
+            if props is None:
+                continue
+            rec["cp_jkgk"] = props.get("cp_jkgk")
+            rec["k_wmk"] = props.get("k_wmk")
+    return rows
 
 
 def enrich_side_temperatures(streams, blocks, connections) -> None:
