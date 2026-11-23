@@ -238,7 +238,7 @@
           <legend>设计压力</legend>
           <label title="按操作压力再放一点余量,一般 1.1 倍">放大系数<input id="ppFactor" type="number" step="0.05" min="1"></label>
           <label title="不管实际压力多低,设计压力不低于这个值。常规取 1.0 MPa">最低值 MPa<input id="ppFloor" type="number" step="0.1" min="0"></label>
-          <label>显示单位<select id="ppUnit">
+          <label title="不改计算结果,只换表格里「压力」和「设计压力」两列的单位">压力单位<select id="ppUnit">
             <option value="kpa">kPa</option>
             <option value="mpa">MPa</option>
             <option value="bar">bar</option>
@@ -246,8 +246,10 @@
         </fieldset>
         <fieldset class="pipe-group">
           <legend>其他</legend>
-          <label title="本期只做到 DN600(外径 630 mm),更大的会在表尾单独列出">最大管径<select id="ppMaxDn"></select></label>
           <label title="没有配置管道等级表时,所有流股都用这个管材">默认管材<select id="ppMaterial"></select></label>
+          <label class="pipe-toggle" title="表 B.1 按母材类别分组(Fe-1、Fe-4…);勾上才把铸铁/非钢管牌号(HT200、QT400-18 等)也列出来">
+            <input id="ppAllGrades" type="checkbox"> 显示全部牌号(含铸铁)
+          </label>
         </fieldset>
         <label class="pipe-toggle" title="在「备注」列右侧多出 7 列中间结果:管外径、设计压力、设计温度、许用应力、计算厚度、加裕量后厚度、最小壁厚下限。想核对每个数字怎么来的就勾上。&#10;壁厚 = 承压需要(计算厚度 + 腐蚀裕量)圆整到标准壁厚,且不低于小口径的最小壁厚下限(DN10–100 为 2–3 mm);下限那列显示「—」表示这一档不设限">
           <input id="ppShowCalc" type="checkbox"> 显示计算过程

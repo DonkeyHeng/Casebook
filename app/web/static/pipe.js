@@ -33,10 +33,6 @@ const PIPE_VELOCITY_RANGE = {
   liquid: [1.0, 2.5], gas: [10, 25], two: [5, 10], pump_inlet: [0.5, 1.0],
 };
 
-/* DN65 / DN125 为非优先口径,2026-11-18 起从选型系列里屏蔽(§17.2) */
-const PIPE_DN_LADDER = [10, 15, 20, 25, 32, 40, 50, 80, 100, 150,
-  200, 250, 300, 350, 400, 450, 500, 600, 700, 800, 900, 1000];
-
 const PIPE_MATERIAL_FALLBACK = ["S30408", "S31603", "20#", "Q345B"];
 
 const PIPE_PRESSURE_UNITS = {
@@ -61,7 +57,7 @@ const PIPE_CODE_TEXT = {
 const PIPE_COLUMNS = [
   { key: "stream", label: "流股", cls: "sticky-col pipe-name" },
   { key: "temperature", label: "温度 ℃", num: true, digits: 2 },
-  { key: "pressure", label: "压力 MPa", num: true },
+  { key: "pressure", label: "压力", num: true },
   { key: "phase", label: "状态" },
   { key: "vol_flow", label: "体积流量 m³/h", num: true, digits: 4 },
   { key: "velocity", label: "流速 m/s", num: true, digits: 2 },
@@ -95,7 +91,7 @@ const pipeState = {
   settingsCaseId: null,  // 参数已经从库里按模型取过了吗
   params: { ...PIPE_DEFAULT_PARAMS },
   savedParams: { ...PIPE_DEFAULT_PARAMS },
-  view: { unit: "kpa", showCalc: false, onlyBad: false, filter: "" },
+  view: { unit: "mpa", showCalc: false, onlyBad: false, filter: "" },
   data: null,            // 接口返回体
   status: "idle",        // idle / loading / ok / invalid / not-ready / error
   error: "",
@@ -137,7 +133,6 @@ const PIPE_PARAM_FIELDS = [
   { id: "ppPumpInlet", key: "pump_inlet", min: 0.05 },
   { id: "ppFactor", key: "factor", min: 1 },
   { id: "ppFloor", key: "floor", min: 0 },
-  { id: "ppMaxDn", key: "max_dn", min: 10, int: true },
 ];
 
 /* 从面板读参数:留空 → 当场写回默认值;填错 → 标红并返回出错的 key。
@@ -181,25 +176,26 @@ function applyPipeParamsToDom() {
   if (unit) unit.value = pipeState.view.unit;
 }
 
-/* 下拉选项尽量来自"服务端有什么":核对过的 DN、表 B.1 里录了哪些牌号 */
+/* 下拉选项尽量来自"服务端有什么":表 B.1 里录了哪些牌号 */
 function fillPipeSelects(tables) {
-  const maxDn = document.getElementById("ppMaxDn");
-  if (maxDn) {
-    const ladder = PIPE_DN_LADDER.slice();
-    const verified = (tables && tables.dn_to_od && tables.dn_to_od.verified) || [];
-    verified.forEach((dn) => { if (!ladder.includes(dn)) ladder.push(dn); });
-    ladder.sort((a, b) => a - b);
-    const keep = pipeState.params.max_dn;
-    maxDn.innerHTML = ladder.map((dn) => `<option value="${dn}">DN${dn}</option>`).join("");
-    maxDn.value = String(ladder.includes(keep) ? keep : 600);
-  }
   const mat = document.getElementById("ppMaterial");
   if (mat) {
-    const grades = (tables && tables.stress && tables.stress.grades) || [];
-    const list = grades.length ? grades : PIPE_MATERIAL_FALLBACK;
-    const suffix = grades.length ? "" : "(候选,未核对)";
-    mat.innerHTML = list.map((g) => `<option value="${esc(g)}">${esc(g)}${suffix}</option>`).join("");
-    if (list.includes(pipeState.params.material)) mat.value = pipeState.params.material;
+    const stress = (tables && tables.stress) || {};
+    const groups = stress.groups || [];
+    const grades = stress.grades || [];
+    const showAll = !!document.getElementById("ppAllGrades")?.checked;
+    if (groups.length) {
+      mat.innerHTML = gradeOptionsHtml(grades, null, groups, {
+        current: pipeState.params.material,
+        showAll,
+      });
+      if (pipeState.params.material) mat.value = pipeState.params.material;
+    } else {
+      const list = grades.length ? grades : PIPE_MATERIAL_FALLBACK;
+      const suffix = grades.length ? "" : "(候选,未核对)";
+      mat.innerHTML = list.map((g) => `<option value="${esc(g)}">${esc(g)}${suffix}</option>`).join("");
+      if (list.includes(pipeState.params.material)) mat.value = pipeState.params.material;
+    }
   }
   // 管道等级表只是**可选的覆盖**:没配就全部按上面选的默认材质,不要让人以为漏了什么
   const hint = document.getElementById("pipeClassHint");
@@ -234,6 +230,8 @@ function bindPipeEvents() {
   });
   const mat = document.getElementById("ppMaterial");
   if (mat) mat.addEventListener("change", onPipeParamInput);
+  const allGrades = document.getElementById("ppAllGrades");
+  if (allGrades) allGrades.addEventListener("change", () => fillPipeSelects(pipeState.tables));
 
   const unit = document.getElementById("ppUnit");
   if (unit) unit.addEventListener("change", (e) => {
@@ -369,6 +367,7 @@ const PIPE_CLASS_GRADES = ["20#", "Q345A", "Q345B", "S30408", "S31603"];
 
 let pipeClassAutoOpened = false;   // #pipes/class 深链只自动开一次
 let pipeStdAutoOpened = false;     // #pipes/standards 深链只自动开一次
+let pipeClassGroups = [];          // 表 B.1 的母材类别分组,弹窗里加行时沿用
 
 function openPipeClass() {
   const modal = document.getElementById("pipeClassModal");
@@ -380,11 +379,13 @@ function openPipeClass() {
   api("/api/piping-classes").then((data) => {
     const grades = (data && data.grades) || PIPE_CLASS_GRADES;
     const codes = (data && data.material_codes) || {};
+    pipeClassGroups = (data && data.groups) || [];
     const defaultSel = document.getElementById("pipeClassDefault");
     if (defaultSel) {
+      const defGrade = (data && data.default && data.default.grade) || "";
       defaultSel.innerHTML = '<option value="">(不指定,走页面上的默认管材)</option>'
-        + grades.map((g) => `<option value="${esc(g)}">${esc(gradeLabel(g, codes))}</option>`).join("");
-      defaultSel.value = (data && data.default && data.default.grade) || "";
+        + gradeOptionsHtml(grades, codes, pipeClassGroups, { current: defGrade });
+      defaultSel.value = defGrade;
     }
     const tbody = document.querySelector("#pipeClassTable tbody");
     if (tbody) tbody.innerHTML = "";
@@ -424,8 +425,25 @@ function gradeLabel(grade, codes) {
   return grade;
 }
 
+/* 牌号 <option>:有分组就按母材类别 optgroup 排,默认只留钢管(steel=true);
+   已选的铸铁牌号补一条到最前面,免得打开弹窗时选择被悄悄改掉 */
+function gradeOptionsHtml(grades, codes, groups, { current = "", showAll = false } = {}) {
+  const opt = (g) =>
+    `<option value="${esc(g)}"${g === current ? " selected" : ""}>${esc(gradeLabel(g, codes))}</option>`;
+  if (!groups || !groups.length) return (grades || []).map(opt).join("");
+  const visible = groups.filter((g) => showAll || g.steel);
+  const listed = visible.flatMap((g) => g.grades);
+  let html = "";
+  if (current && !listed.includes(current)) {
+    html += `<optgroup label="当前选择">${opt(current)}</optgroup>`;
+  }
+  return html + visible
+    .map((g) => `<optgroup label="${esc(g.label)}">${g.grades.map(opt).join("")}</optgroup>`)
+    .join("");
+}
+
 /* 一行 = 一条规则:前缀(逗号分隔) / 介质(逗号分隔) / 牌号 / 腐蚀裕量 / 说明 */
-function addPipeClassRow(rule, grades, codes) {
+function addPipeClassRow(rule, grades, codes, groups) {
   const tbody = document.querySelector("#pipeClassTable tbody");
   if (!tbody) return;
   const list = grades || PIPE_CLASS_GRADES;
@@ -433,8 +451,9 @@ function addPipeClassRow(rule, grades, codes) {
   tr.innerHTML = `
     <td><input class="pc-prefix" placeholder="如 CW,CWR" value="${esc((rule.stream_prefix || []).join(","))}"></td>
     <td><input class="pc-medium" placeholder="如 PL" value="${esc((rule.medium || []).join(","))}"></td>
-    <td><select class="pc-grade">${list.map((g) =>
-      `<option value="${esc(g)}"${g === rule.grade ? " selected" : ""}>${esc(gradeLabel(g, codes))}</option>`).join("")}</select></td>
+    <td><select class="pc-grade">${gradeOptionsHtml(list, codes, groups || pipeClassGroups, {
+      current: rule.grade || "",
+    })}</select></td>
     <td><input class="pc-c2" type="number" step="0.1" min="0" max="20" value="${rule.corrosion_mm ?? 0}"></td>
     <td><input class="pc-note" placeholder="可选" value="${esc(rule.note || "")}"></td>
     <td><button class="btn pc-del" type="button" title="删掉这一条"><svg class="ico"><use href="#i-close"/></svg></button></td>`;
@@ -808,7 +827,9 @@ async function loadPipeSettings(caseId) {
       factor: Number.isFinite(opt.pressure_factor) ? opt.pressure_factor : PIPE_DEFAULT_PARAMS.factor,
       floor: Number.isFinite(opt.pressure_floor_mpa)
         ? opt.pressure_floor_mpa : PIPE_DEFAULT_PARAMS.floor,
-      max_dn: Number.isFinite(opt.max_dn) ? opt.max_dn : PIPE_DEFAULT_PARAMS.max_dn,
+      // 最大管径不再开放:固定按内置 DN1000(仅超出上限时给提示,不截断选档)。
+      // 旧存档里可能存过 600,这里一律按默认覆盖,免得老工况冒出一堆"超出上限"。
+      max_dn: PIPE_DEFAULT_PARAMS.max_dn,
       material: opt.material || PIPE_DEFAULT_PARAMS.material,
     };
     pipeState.savedParams = { ...pipeState.params };
@@ -928,15 +949,27 @@ function pipePressure(valueMpa) {
   return fmt(valueMpa * u.factor, u.digits);
 }
 
+/* 表头跟单位走:压力 / 设计压力两列写「压力 kPa」「设计压力 MPa」,切换时整列一起变 */
+function pipeUnitLabel() {
+  return (PIPE_PRESSURE_UNITS[pipeState.view.unit] || PIPE_PRESSURE_UNITS.kpa).label;
+}
+
+function pipeColLabel(col) {
+  if (col.key === "pressure" || col.key === "design_pressure_mpa") {
+    return `${col.label} ${pipeUnitLabel()}`;
+  }
+  return col.label;
+}
+
 /* 设计压力多半被下限钳到 1.0 MPa,不写清会被当成算错 */
 function pipePressureTitle(row) {
   const bits = [];
   if (row.vacuum) bits.push("真空流股:内压按最小标准壁厚,外压 0.1 MPa 另行校核");
   if (row.gauge_pressure_mpa !== null && row.gauge_pressure_mpa !== undefined) {
-    bits.push(`表压 ${fmt(row.gauge_pressure_mpa, 3)} MPa`);
+    bits.push(`表压 ${pipePressure(row.gauge_pressure_mpa)} ${pipeUnitLabel()}`);
   }
   if (row.design_pressure_mpa !== null && row.design_pressure_mpa !== undefined) {
-    bits.push(`设计 ${fmt(row.design_pressure_mpa, 3)} MPa`);
+    bits.push(`设计 ${pipePressure(row.design_pressure_mpa)} ${pipeUnitLabel()}`);
     if (Math.abs(row.design_pressure_mpa - pipeState.params.floor) < 1e-9) {
       bits.push(`已钳到下限 ${fmt(pipeState.params.floor, 2)} MPa`);
     }
@@ -970,7 +1003,9 @@ function pipeCellValue(row, col, ctx) {
   switch (col.key) {
     case "stream": return esc(row.stream);
     case "temperature": return fmt(s.temperature_c, 2);
-    case "pressure": return fmt(s.pressure_bar === undefined ? null : s.pressure_bar / 10, 2);
+    case "pressure": return pipePressure(
+      s.pressure_bar === undefined || s.pressure_bar === null ? null : s.pressure_bar / 10,
+    );
     case "phase": {
       const text = PIPE_PHASE_TEXT[row.phase] || "—";
       const tip = row.phase === "two" ? "气液共存:需专项核算" : "";
@@ -1129,7 +1164,7 @@ function drawPipeTable() {
   const cols = PIPE_COLUMNS.filter((c) => c.group !== "calc" || pipeState.view.showCalc);
   thead.innerHTML = `<tr>${cols.map((c) => `<th scope="col" class="${
     [c.num ? "num" : "", c.cls || "", c.mono ? "mono" : ""].filter(Boolean).join(" ")
-  }">${esc(c.label)}</th>`).join("")}</tr>`;
+  }">${esc(pipeColLabel(c))}</th>`).join("")}</tr>`;
 
   const hits = pipeFindingMap();
   const ctx = { streams: pipeStreamIndex(), hits };

@@ -117,7 +117,7 @@
 | D-01 | 两册正文 | 多处用户可见段落暴露仓库实现、测试环境与补丁过程 | 改为面向读者的规则描述；σ 来源统一写标准表号 | `check_manual_content` |
 | D-02 | DOCX 目录 | 生成器只写 TOC 占位，检查器遇占位直接跳过 | Word 更新目录后发布；检查器发现占位即报问题，不再静默跳过 | `check_manual_content` + Word COM |
 
-待人工核查项仍按资料到位后处理：DN700–1000 外径系列、GB/T 3215-2025 裕量表、R1E 项目公式审批、真实 Aspen 两相泵块回归、GB/T 20801.1 表 B.1 全表逐格核对、真空外压支撑跨距完整校核。
+待人工核查项仍按资料到位后处理：DN700–1000 外径系列、GB/T 3215-2025 裕量表、R1E 项目公式审批、真实 Aspen 两相泵块回归、GB/T 20801.1 表 B.1 全表逐格核对（2026-11-23 已导入全表，见 C-21）、真空外压支撑跨距完整校核。
 
 ## 五、v1.7.3 修订（二）：标准原文复核后更新（2026-11-22）
 
@@ -129,7 +129,7 @@
 | C-11 | `app/values.py` | 增加 `MOTOR_STANDARD_MIN_KW=4.0`；低于 4 kW 的工程档在 note 标“需买方批准”，不静默改档 | `test_pump` 的 1 kW 用例 |
 | D-03 | 两册说明书 | 补 HG/T 20553 Ia 来源、DN1000 壁厚特例、外压适用门槛与 GB/T 3215 4 kW 口径 | `test_calc_manuals_consistency`；`check_manual_content` |
 
-仍未闭环：表 B.1 全表（当前只核 14 行并识别 S30403/S32168 缺行）、R1E 项目公式审批、真实 Aspen 两相泵块回归、真空外压按 GB/T 150.3 的支撑跨距/加强圈完整校核。大口径壁厚已改为 Ia 采购档，但表 B.1 全表与 Aspen 回归仍需用户提供数据，不在本轮补造。
+已闭环：表 B.1 全表（2026-11-23 导入 211 行，见 C-21）；仍待办：R1E 项目公式审批、真实 Aspen 两相泵块回归、真空外压按 GB/T 150.3 的支撑跨距/加强圈完整校核。大口径壁厚已改为 Ia 采购档，但表 B.1 全表与 Aspen 回归仍需用户提供数据，不在本轮补造。
 
 ## 六、v1.7.3 修订（三）：标准口径收口（2026-11-22）
 
@@ -156,5 +156,8 @@
 | C-18 | `app/export/workbook.py`、`app/api/routes/pumps.py`、`app/design/pump.py` | Excel「负偏差 mm」列改取行内 `c1_mm`（R1E/自定义为 0）；手填 `pv_bar` 拒绝 0；`npsh_available_m` 增加 p_v 有限且 >0 守卫（0 视为缺失），Aspen 路径行为不变 | 审计 T-P1-4、T-P0-4；`pytest -q` |
 | C-19 | `tools/manual_appendix_b.py` | 附录 B 改为每版本 2–4 行的用户向精简记录，删除脚本路径、复算轮次、抽检过程与「不入库」等内部表述 | 审计维度 8；`check_manual_content` |
 | C-20 | 两册 DOCX | 安装 pandoc 后重生成；正式公式恢复 OMML 公式域，消除 LaTeX 源码纯文本 | 审计 T-P0-5；解包断言 `oMath` 数 >0、残留 `\\frac`/`\\sqrt`/`\\le`=0 |
-| — | 标准条款 | GB/T 3215-2025 7.1.4 条文号与 4 kW、GB/T 150.1-2024 5.3.3 d) 的具体条款号：本机无购置原文，按 API 610/ISO 13709 惯例与已核实标准目录保留现有引用，**未逐字核对原件**，待资料到位后补核 | 审计 ⑤ 待人工确认 2、3 |
+| — | 标准条款 | GB/T 3215-2025 7.1.4 与 GB/T 150.1-2024 5.3.3 d) 已按购置原文逐字核对（2026-11-23）：7.1.4 最小可接受电动机额定功率 4 kW，表 12 分档为 <22 kW→125%、22–55 kW→115%、>55 kW→110%，且泵额定点功率不得超过铭牌功率；5.3.3 d) 真空容器设计压力为「有安全控制装置取 1.25 倍最大内外压差与 0.1 MPa 的低值，无装置取 0.1 MPa」。代码的固定 0.1 MPa 与 4 kW 提示均与原文相符（0.1 MPa 为保守上包络） | 原文复核 |
+| C-21 | 管路册 2.4 节；`app/design/pipe/data.py`；运行时 `t3-20801-tableB1.csv` | 表 B.1 由 16 行扩到全表 211 行、31 个温度档（40–900 ℃），牌号从 7 个扩到 104 个；`project_grade()` 与 `_STRESS_PICK` 的牌号比对改为忽略空格（全表写作「06Cr19Ni10 (304)」），修掉导入全表后 S30408/S31603 查不到值的回归；CSV 改为 UTF-8 with BOM（Excel 双击打开中文不再乱码）；管材下拉按表 B.1 的「母材类别」分组（Fe-1…Fe-11A / 铸铁），默认只列钢管牌号，勾「显示全部牌号」才展开铸铁；5 个预置牌号在旧表覆盖区间内的取值逐档比对无变化 | 旧 16 行逐格 diff 0 差异、温度单调性 0 违反、印刷页 133 逐行目视核对；104 个牌号全部归组不重不漏；`pytest`、`selftest` |
+| C-22 | `app/design/pipe/data.py`（`MATERIAL_CODE_BY_GRADE`、`HEAT_RESISTANT_GRADE_RULES` 注释）、`selection.py`、管路册 4.x/附录 A、`pipe-class-codes.md` §4、`pipe-selection-plan.md` T6 | 材质代号不再只有 5 个预置：表 B.1 的 104 个牌号逐行确认（用户 2026-11-23 判定），A 铸铁 8、B 碳钢 25、C 普通低合金钢 22、D 合金钢 38、E 不锈钢 11；`10MnDG` 归 C，`06Ni9DG/06Ni3MoDG/LC3/LC9` 等低温镍钢归 D，HT/QT/KTH 铸铁归 A；表内牌号不再按前缀猜、也不再落「暂记 E」；表外牌号的铬钼耐热钢前置规则与专用告警保留 | 104 个牌号 `material_code_for` 全部返回 `explicit` 且代号都在 A–H 表内（新增断言）；表内 12Cr1MoV/15CrMo/12Cr2Mo1/10Cr9Mo1VNbN → D、表外 1Cr5Mo/9Cr1Mo/5CrMo 仍 `heat_resistant`；`pytest`、`selftest` |
+| C-23 | 管道页 `ppUnit` / `ppMaxDn`（`app/web/static/pipe.js`、`index.html`）、`app/desktop.py`、管路册 2.3 节 | ①「显示单位」改为「压力单位」，同时作用于「压力」和「设计压力」两列并同步改表头，默认 MPa；原来只格式化折叠在「显示计算过程」里的设计压力列，默认视图切换看不出变化。②去掉「最大管径」下拉，固定按内置 DN1000（超出仅提示、不截断选档）；旧存档里存过的 max_dn 一律按 1000 覆盖，避免老工况冒出「超出上限」告警。③桌面版首次启动（无 `window.json`）默认最大化，并把最大化/还原状态一并落盘 | 表头随单位显示「压力 kPa/MPa/bar」；`PIPE_PARAM_FIELDS` 与初始化不再引用 `ppMaxDn`；桌面版实测 `IsZoomed=True` 且 `window.json` 记 `maximized:true`；`check_render`、`pytest`、`selftest` |
 

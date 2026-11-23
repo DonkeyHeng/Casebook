@@ -10,7 +10,9 @@
   1. 端口:不再固定 8000,让系统挑空闲端口,和浏览器模式可以同时开着;
   2. 下载:WebView 里没有"下载栏",导出文件改由主进程写进 data/exports/ 并打开文件夹
      (`Api.save_export`);页面侧 `static/download.js` 检测到桥接才走这条路;
-  3. 关窗即退:窗口关掉要停掉后台 HTTP 服务,否则进程会挂着。
+  3. 关窗即退:窗口关掉要停掉后台 HTTP 服务,否则进程会挂着;
+  4. 首次启动最大化:没有窗口存档时直接铺满屏幕,之后按上次的尺寸/位置恢复
+     (窗口几何存在 `<data-dir>/window.json`,删掉它就回到"首次启动")。
 
 跑法:
     python -m app.desktop                 # 开窗口
@@ -195,6 +197,9 @@ def run(db_path: str, port: int = 0, debug: bool = False, smoke: bool = False) -
     print(f"工况库:{os.path.abspath(db_path)}")
 
     state = srv.win.load_state(state_path())
+    # 首次启动(还没有窗口存档)默认最大化,不要停在 1280×820 的小窗里;
+    # 之后按上次记下的尺寸/位置恢复。存档是空 dict 或没有 w 都算首次。
+    first_open = not state or not state.get("w")
     window = webview.create_window(
         srv.WINDOW_KEY,
         base + "/",
@@ -206,18 +211,32 @@ def run(db_path: str, port: int = 0, debug: bool = False, smoke: bool = False) -
         min_size=(1000, 640),
         text_select=True,
         hidden=smoke,
-        maximized=bool(state.get("maximized")),
+        # --smoke 是隐藏窗口自检,不参与最大化(部分 WebView2 版本对 hidden+maximized 会报错)
+        maximized=(not smoke) and (True if first_open else bool(state.get("maximized"))),
     )
     api.attach(window)  # 桥接里的 quit() 靠它关窗
 
-    def remember(*_args) -> None:
-        """窗口尺寸/位置变了就记下来,下次原样恢复(浏览器模式下是 window.py 干这事)。"""
+    def remember(*_args, maximized: bool | None = None) -> None:
+        """窗口尺寸/位置变了就记下来,下次原样恢复(浏览器模式下是 window.py 干这事)。
+
+        `maximized` 显式传入时以它为准(最大化/还原事件);否则读窗口当前状态。
+        只写 False 会把「最大化」这个事实丢掉,下次就又开成普通大窗。
+        """
         try:
             width, height = int(window.width), int(window.height)
             if width > 200 and height > 100:
+                zoomed = (
+                    bool(getattr(window, "maximized", False)) if maximized is None else maximized
+                )
                 srv.win.save_state(
                     state_path(),
-                    {"x": window.x, "y": window.y, "w": width, "h": height, "maximized": False},
+                    {
+                        "x": window.x,
+                        "y": window.y,
+                        "w": width,
+                        "h": height,
+                        "maximized": zoomed,
+                    },
                 )
         except Exception:
             pass
@@ -225,6 +244,11 @@ def run(db_path: str, port: int = 0, debug: bool = False, smoke: bool = False) -
     if not smoke:
         window.events.resized += remember
         window.events.moved += remember
+        # 最大化/还原也要落盘:不然「首次启动全屏」只生效一次,下次又缩回去
+        if hasattr(window.events, "maximized"):
+            window.events.maximized += lambda *a: remember(maximized=True)
+        if hasattr(window.events, "restored"):
+            window.events.restored += lambda *a: remember(maximized=False)
 
     def on_closed() -> None:
         threading.Thread(target=httpd.shutdown, daemon=True).start()
