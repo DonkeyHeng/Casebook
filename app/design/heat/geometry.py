@@ -37,16 +37,16 @@ H_RANGE = (20.0, 20000.0)
 U_SELF_CONSISTENCY = 0.30
 
 WARN_TEXT = {
-    "TUBE_VELOCITY": "管程流速超出 0.5~1.5 m/s 建议区间",
-    "H_OUT_OF_RANGE": "膜系数超出 20~20000 W/(m²·K),物性或几何可能有问题",
-    "U_MISMATCH": "反算 U 与按几何算的 U 相差超过 30%",
-    "NOZZLE_ESTIMATED": "接管口径按目标流速估算后圆整,未做接管压降核算",
-    "PITCH_NOT_STANDARD": "管心距不是常见值(φ19 用 25、φ25 用 32)",
+    "TUBE_VELOCITY": "管程流速超出建议区间 0.5–1.5 m/s",
+    "H_OUT_OF_RANGE": "膜系数超出 20–20000 W/(m²·K):物性或几何可能异常",
+    "U_MISMATCH": "反算 U 与几何计算 U 偏差超过 30%",
+    "NOZZLE_ESTIMATED": "接管口径按目标流速估算并圆整:未做接管压降核算",
+    "PITCH_NOT_STANDARD": "管心距非标准值(φ19 取 25、φ25 取 32)",
 }
 
 BLOCK_HINT = {
-    "NO_PROPS": "缺 cp / λ / μ,算不了 Re、Pr、Nu",
-    "NO_FLOW": "缺体积流量或质量流量,算不了流速",
+    "NO_PROPS": "缺 cp / λ / μ:无法计算 Re、Pr、Nu",
+    "NO_FLOW": "缺体积或质量流量:无法计算流速",
     "NO_DUTY": "缺热负荷",
     "NO_DT": "缺有效平均温差 ΔTm",
     "NO_U": "缺反算 U 或 Aspen 设计 U",

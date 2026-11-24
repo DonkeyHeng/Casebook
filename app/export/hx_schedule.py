@@ -88,7 +88,11 @@ def _num(value, digits: int = 2) -> str:
 
 def _data_source(case: dict) -> str:
     """数据来源 = 面积来源 + 公用工程来源;没有公用工程的场合只写面积来源。"""
-    area = AREA_SOURCE_TEXT.get((case.get("area") or {}).get("source"), "缺面积")
+    area_case = case.get("area") or {}
+    area = AREA_SOURCE_TEXT.get(area_case.get("source"), "缺面积")
+    if area_case.get("source") == "none" and area_case.get("required_m2"):
+        # 没有公称面积但有需求面积:如实写"估算",不写"缺面积"
+        area = "需求面积(估算)"
     parts = [f"面积:{area}"]
     if case.get("utility"):
         utility = UTILITY_SOURCE_TEXT.get((case.get("utility") or {}).get("source"), "公用工程")

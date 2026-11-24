@@ -6,7 +6,7 @@ API 与导出共用这一份,避免"页面看到的"和"导出的"两套口径�
 
 from __future__ import annotations
 
-from app.design.heat import model_code, params
+from app.design.heat import channels, model_code, params
 
 HEAT_TYPES = ("HeatX", "MHeatX", "Heater", "HeaterX")
 
@@ -76,10 +76,17 @@ def build_row(block: dict, conns, streams, stored: dict, selection: dict, config
 
 
 def assemble(blocks, conns, streams, designs: dict, selections: dict, configs: dict) -> list[dict]:
-    """批量拼行;只处理换热类设备。"""
+    """批量拼行;只处理换热类设备,并滤掉零负荷 Heater(仅调压/标签点)。
+
+    零负荷判据见 ``channels.is_trivial``:Heater 类 |Q| < 1e-3 kW 不进设备表,
+    否则会出现一批"面积 0"的假换热器;HeatX 不按此跳过。
+    """
     rows = []
     for block in blocks:
-        if (block.get("type") or "") not in HEAT_TYPES:
+        btype = block.get("type") or ""
+        if btype not in HEAT_TYPES:
+            continue
+        if channels.is_trivial(btype, block.get("duty_kw")):
             continue
         name = block["name"]
         rows.append(
@@ -168,7 +175,7 @@ def edr_checklist(rows: list[dict]) -> list[dict]:
                 "型号": row.get("model_code", {}).get("code")
                 or row.get("model_code", {}).get("code_partial"),
                 "判定": c.get("verdict"),
-                "备注": "未做 EDR rating;空值 = 未取得,不是 0",
+                "备注": "未做 EDR rating;空值表示未取得,非 0",
             }
         )
     return out

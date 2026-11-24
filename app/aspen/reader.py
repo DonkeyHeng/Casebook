@@ -623,7 +623,7 @@ def read_component_meta(session, comps: list[str]) -> list[dict]:
 
     组分名从流股的 `Output\\X` 子节点来(那才是模型里定义的组分 ID)。
     **不能拿 `\\Data\\Components` 的子节点当组分名** —— 实测那一层是分组名,
-    照抄会把 14 个分组写进组分字典(2026-11-15 踩过这个坑)。
+    直接照抄会将 14 个分组写入组分字典(2026-11-15 已确认)。
 
     字段名与父节点都还没有唯一实测答案,所以走"候选父路径 + 两层叶子名匹配":
     名字规范化后等于 cas / casno / casnumber… 的当 CAS,等于 dbname1 的当数据库名。
@@ -1044,6 +1044,8 @@ def unit_gaps(streams: list[dict], blocks: list[dict]) -> dict:
             ("duty_kw", BLOCK_DUTY_FIELDS),
             ("power_kw", BLOCK_POWER_FIELDS),
             ("area_m2", BLOCK_AREA_FIELDS),
+            # 设计 U 换算失败原先不进缺口表 → 换热页"缺面积"但无提示。
+            ("hx_u_design_wm2k", ("HX_UAVD",)),
         ):
             if b.get(key) is not None:
                 continue
@@ -1127,11 +1129,12 @@ def read_stream_vapor_pressure(session, stream_name: str):
 # 放"物性集结果"的地方)。第一版漏了 STRM_UPP 前缀,所以模型算出来了也读不到。
 VISC_STREAM_PATHS = (
     # **首选 MUMX**:Aspen 里"混合物粘度"的属性名是 MUMX(VISC 只是纯组分方法名)。
-    # 实测(2026-11-15)物性集挂上后 STRM_UPP 下出现了 MUMX 节点,且和 PBUB 一样
-    # 直接取 MIXED 会拿到"1 + 单位"的标志值 —— 真值要再往下钻到 TOTAL。
+    # 实测(2026-11-24,V15 全流程)真实结构是 `MUMX\MIXED\{VAPOR|LIQUID}` ——
+    # 相态在 MIXED **后面**;液相流股给 LIQUID,气相流股给 VAPOR,另一支为空。
     r"STRM_UPP\MUMX\MIXED\TOTAL",
+    r"STRM_UPP\MUMX\MIXED\VAPOR",
+    r"STRM_UPP\MUMX\MIXED\LIQUID",
     r"STRM_UPP\MUMX\MIXED",
-    r"STRM_UPP\MUMX\LIQUID\MIXED",
     r"STRM_UPP\MUMX",
     r"STRM_UPP\VISC\MIXED\TOTAL",
     r"STRM_UPP\VISC\MIXED",
@@ -1193,9 +1196,10 @@ def _to_cp(value, unit) -> float | None:
 
 
 # 目录里再往下找时优先看的子节点名:Aspen 的 TOTAL 就是"混合物总物性",
-# MIXED 是混合相,LIQUID / LIQ 是液相。顺序有讲究 —— 单相液相流股优先取液相值。
-# 粘度(VISC/MUMX)与蒸气压(PBUB)共用这一套下钻规则,见 `_lower_leaf`。
-_DESCEND_NAMES = ("total", "mixed", "liquid", "liq")
+# MIXED 是混合相,LIQUID / LIQ 是液相,VAPOR / VAP / GAS 是气相。
+# 顺序有讲究 —— 单相液相流股优先取液相值,气相流股接着往下试 VAPOR。
+# 粘度(MUMX)、比热(CPMX)、热导(KMX)共用这一套下钻规则,见 `_lower_leaf`。
+_DESCEND_NAMES = ("total", "mixed", "liquid", "liq", "vapor", "vap", "gas")
 
 # 一次最多下钻几层:Output\STRM_UPP\VISC\MIXED\TOTAL 是 4 层,再留 1 层余量
 _DESCEND_MAX_DEPTH = 5
@@ -1217,9 +1221,14 @@ def _lower_leaf(session, path: str, depth: int = _DESCEND_MAX_DEPTH):
         value, unit = fetch(session, path)
         return value, unit
     lowered = {str(k).lower(): k for k in kids}
+    # 逐分支尝试,取首个**实际读到值**的分支。2026-11-24 实测:气相流股的
+    # `CPMX\MIXED` 下同时挂 VAPOR 与 LIQUID,仅 VAPOR 有值;
+    # 若命中 LIQUID 即返回,气相 cp/λ/μ 将全为空。
     for want in _DESCEND_NAMES:
         if want in lowered:
-            return _lower_leaf(session, rf"{path}\{lowered[want]}", depth - 1)
+            value, unit = _lower_leaf(session, rf"{path}\{lowered[want]}", depth - 1)
+            if value is not None:
+                return value, unit
     return None, ""
 
 
@@ -1240,17 +1249,25 @@ def read_stream_viscosity(session, stream_name: str):
 #   * `CP`(定压比热)与导热系数只有在 Aspen 的**物性集**里勾上才会出现在
 #     `Output\STRM_UPP` 下,节点名就是物性集条目的名字,用户可能写成
 #     CP / CPMASS / THK / KMX / KTH …… 版本间也不一致;
-#   * 实测(2026-11-23,V15 全流程模型,`tools/probe_hx.py --props`)本机
-#     `STRM_UPP` 只有 `PL / MUMX / PBUB` 三项,**没有 CP 与 THK** —— 所以
-#     路径必须能配、读不到就留空,不能像 MUMX 那样假设只有一个名字。
+#   * 实测(2026-11-24,V15 全流程,`STRM_UPP` 节点探针)结构是
+#     `CPMX\MIXED\{VAPOR|LIQUID}`、`KMX\MIXED\{VAPOR|LIQUID}` —— 相态在 MIXED 后面,
+#     且气相流股只有 VAPOR 有值;`CPMX` 单位是 `cal/mol-K`(摩尔基),
+#     `KMX` 是 `kcal-m/hr-sqm-K`。所以候选路径按这个实测结构写,单位另做换算。
 #   * 认不出的单位一律留 None 并计入 `unit_gaps`,不拿常见值顶替。
 CP_STREAM_NODES = (
+    # CPMX 才是"混合物"热容;裸 CP 在部分物性集里给的是纯组分值,排在后面
+    "STRM_UPP\\CPMX\\MIXED\\VAPOR",
+    "STRM_UPP\\CPMX\\MIXED\\LIQUID",
+    "STRM_UPP\\CPMX\\MIXED\\TOTAL",
+    "STRM_UPP\\CPMX\\MIXED",
+    "STRM_UPP\\CPMX",
+    "STRM_UPP\\CP\\MIXED\\VAPOR",
+    "STRM_UPP\\CP\\MIXED\\LIQUID",
     "STRM_UPP\\CP\\MIXED\\TOTAL",
     "STRM_UPP\\CP\\MIXED",
     "STRM_UPP\\CPMASS\\MIXED\\TOTAL",
     "STRM_UPP\\CPMASS\\MIXED",
     "STRM_UPP\\CPMASS",
-    "STRM_UPP\\CPMX\\MIXED",
     "STRM_UPP\\CP\\LIQUID\\MIXED",
     "STRM_UPP\\CP",
     "CPMASS",
@@ -1258,17 +1275,21 @@ CP_STREAM_NODES = (
     "CP",
 )
 K_STREAM_NODES = (
+    # **KMX 是流股混合物热导的节点名**;THK 是物性方法名,不是 Output 下的结果节点
+    # (2026-11-24 用户确认:模型里根本没有 THK)。KMX 放最前,免得每次空走 THK 分支。
+    "STRM_UPP\\KMX\\MIXED\\VAPOR",
+    "STRM_UPP\\KMX\\MIXED\\LIQUID",
+    "STRM_UPP\\KMX\\MIXED\\TOTAL",
+    "STRM_UPP\\KMX\\MIXED",
+    "STRM_UPP\\KMX",
+    "STRM_UPP\\KTH\\MIXED\\TOTAL",
+    "STRM_UPP\\KTH",
+    "STRM_UPP\\KVMX\\MIXED",
+    "STRM_UPP\\LAMBDA\\MIXED",
     "STRM_UPP\\THK\\MIXED\\TOTAL",
     "STRM_UPP\\THK\\MIXED",
     "STRM_UPP\\THK\\LIQUID\\MIXED",
     "STRM_UPP\\THK",
-    "STRM_UPP\\KTH\\MIXED\\TOTAL",
-    "STRM_UPP\\KTH",
-    "STRM_UPP\\KMX\\MIXED\\TOTAL",
-    "STRM_UPP\\KMX\\MIXED",
-    "STRM_UPP\\KMX",
-    "STRM_UPP\\KVMX\\MIXED",
-    "STRM_UPP\\LAMBDA\\MIXED",
     "THK",
     "KMX",
     "KTH",
@@ -1301,6 +1322,34 @@ def _scan_prop(session, base: str, nodes, scan_keys) -> tuple[object, str, str]:
     return None, "", ""
 
 
+def _stream_mw(session, base: str) -> float | None:
+    """流股平均分子量(g/mol)。读不到返回 None —— 摩尔基物性就不做质量基换算。"""
+    for rel in ("MW", "MWMX", "MW_GAS", "MW_LIQ"):
+        value, _unit = fetch(session, rf"{base}\{rel}")
+        try:
+            num = float(value)
+        except (TypeError, ValueError):
+            continue
+        if num > 0:
+            return num
+    return None
+
+
+def _cp_mass_from_molar(session, base: str, value, unit) -> float | None:
+    """摩尔基比热 → J/(kg·K):1 J/(mol·K) ÷ (MW/1000) kg/mol = ×1000/MW。
+
+    实测(2026-11-24)CPMX 节点单位是 `cal/mol-K`,属摩尔基;没有分子量就留 None,
+    不从别处猜一个值。
+    """
+    molar = units.convert("molar_heat_capacity", value, unit)
+    if molar is None or molar <= 0:
+        return None
+    mw = _stream_mw(session, base)
+    if not mw:
+        return None
+    return molar * 1000.0 / mw
+
+
 def read_stream_hx_props(session, stream_name: str) -> dict:
     """按需读一条流股的 cp / λ / μ(**只读**)。读不到就留 None,不猜。
 
@@ -1324,11 +1373,14 @@ def read_stream_hx_props(session, stream_name: str) -> dict:
     cp_raw, cp_unit, cp_path = _scan_prop(session, base, CP_STREAM_NODES, _CP_SCAN_KEYS)
     if cp_raw is not None:
         cp = units.convert("specific_heat", cp_raw, cp_unit)
+        if cp is None:
+            # 实测 CPMX 给的是摩尔基(cal/mol-K),按流股分子量折成质量基
+            cp = _cp_mass_from_molar(session, base, cp_raw, cp_unit)
         if cp is not None and cp > 0:
             out["cp_jkgk"] = cp
             out["paths"]["cp"] = cp_path
         elif cp is None:
-            # 摩尔基(cal/mol-K 之类)换算不了质量基 —— 明确记一笔,页面提示手填
+            # 质量基/摩尔基都换不了 —— 明确记一笔,页面提示手填
             out["unit_gaps"].append(f"cp:{cp_unit or '无单位'}")
 
     k_raw, k_unit, k_path = _scan_prop(session, base, K_STREAM_NODES, _K_SCAN_KEYS)
@@ -1349,29 +1401,43 @@ def read_stream_hx_props(session, stream_name: str) -> dict:
     return out
 
 
-def heat_side_streams(blocks, connections, block: str | None = None) -> dict[str, list[str]]:
-    """换热设备 → 四端流股名(按 hot / cold 分组,去重保序)。
+def heat_side_streams(
+    blocks, connections, block: str | None = None, material_names: set | None = None
+) -> dict[str, list[str]]:
+    """换热设备 → 侧流股名(按 hot / cold / process 分组,去重保序)。
 
     只走连接关系,不猜:Heater 的公用工程侧不是流股,自然不在这里出现。
+    实测(2026-11-24):Heater 的连接 **side 是空字符串**(不像 HeatX 写 hot/cold),
+    空侧就是工艺侧,统一归到 "process" 键;老代码只认 hot/cold,Heater 于是一条都读不到。
+
+    material_names 给了就只留物料流股:HEAT 热流股(如 Q1~Q4)没有 cp/λ/μ 节点,
+    混进去只会读出一堆空值。
     """
-    sides: dict[str, list[str]] = {}
-    heat_names = {
-        b.get("name")
-        for b in blocks or []
-        if (b.get("type") or "") in HEATX_BLOCK_TYPES + UTILITY_BLOCK_TYPES
-    }
+    type_of: dict[str, str] = {}
+    for b in blocks or []:
+        if (b.get("type") or "") in HEATX_BLOCK_TYPES + UTILITY_BLOCK_TYPES:
+            type_of[b.get("name")] = b.get("type") or ""
+    heat_names = set(type_of)
     if block:
         heat_names &= {block}
+    sides: dict[str, list[str]] = {}
     for row in connections or []:
-        if row.get("block") not in heat_names:
+        blk = row.get("block")
+        if blk not in heat_names:
             continue
         side = row.get("side") or ""
-        if side not in ("hot", "cold"):
+        if side in ("hot", "cold"):
+            key = side
+        elif side == "" and type_of.get(blk) in UTILITY_BLOCK_TYPES:
+            key = "process"
+        else:
             continue
         name = row.get("stream")
         if not name:
             continue
-        bucket = sides.setdefault(side, [])
+        if material_names is not None and name not in material_names:
+            continue
+        bucket = sides.setdefault(key, [])
         if name not in bucket:
             bucket.append(name)
     return sides
@@ -1388,10 +1454,19 @@ def read_hx_props(
     第二个副作用:若传入 `streams`(read_streams() 的记录),把 `cp_jkgk` /
     `k_wmk` 就地写进对应记录,方便调用方直接拿去拼 L1 结果;不传就只返回字典。
     """
-    wanted = heat_side_streams(blocks, connections, block)
+    material_names = (
+        {
+            rec.get("name")
+            for rec in streams
+            if rec.get("stream_type") in (None, "MATERIAL") and rec.get("name")
+        }
+        if streams
+        else None
+    )
+    wanted = heat_side_streams(blocks, connections, block, material_names=material_names)
     names: list[str] = []
-    for side in ("hot", "cold"):
-        names.extend(wanted.get(side, []))
+    for side in wanted:  # hot / cold / process(Heater 空侧)
+        names.extend(wanted[side])
     rows: dict[str, dict] = {}
     for name in names:
         if name in rows:
@@ -1414,8 +1489,8 @@ def enrich_side_temperatures(streams, blocks, connections) -> None:
     为什么不用设备自己的 `B_TEMP`:
       * 塔是逐级数组(顶/底温好用,保留在 top/bottom 两列);
       * 换热器(HeatX)没有 `B_TEMP`;
-      * 反应器 RPlug 的 `B_TEMP` 读出来是标志位 `1.0`(和 `HMX` 读成 `1` 同一类坑)。
-    流股温度是实测值,所有设备通用,所以统一取连接流股的 `temperature_c`。
+      * 反应器 RPlug 的 `B_TEMP` 读作标志位 `1.0`(与 `HMX` 读作 `1` 同类)。
+    流股温度为实测量,所有设备通用,故统一取连接流股的 `temperature_c`。
 
     口径:
       * 主进口 / 主出口:换热器优先 `hot` 侧,其余设备取第一个进/出流股;

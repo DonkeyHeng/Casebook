@@ -78,7 +78,7 @@ TUBE_FLUID_RULES: tuple[dict, ...] = (
     {"rule": 4, "key": "cooling-water", "text": "冷却水走管程"},
     {"rule": 5, "key": "utility-isothermal", "text": "蒸汽冷凝/制冷剂蒸发走壳程"},
     {"rule": 6, "key": "large-flow", "text": "大流量低粘度侧走壳程,压降更低"},
-    {"rule": 7, "key": "fallback", "text": "无明确判据,按课堂惯例"},
+    {"rule": 7, "key": "fallback", "text": "无明确判据:按常规工程惯例分配"},
 )
 
 # 壳程/管程组合(方案 §8.2 文件 2 的内置默认)。表未导入时用这 4 行;
@@ -121,21 +121,22 @@ ESTIMATE_LENGTHS_MM = (4500, 6000, 7500)
 
 # 物性设置指引(方案 §2.3):页面在"缺 cp / λ"时按这几步引导用户挂物性集。
 PROPS_SETUP_STEPS: tuple[str, ...] = (
-    "Aspen 里打开 Properties → Property Sets,新建一个物性集(名字随意,如 HXPROP)。",
-    "在物性集里勾上 VISC(粘度,已有则不重复)、CP(定压比热)、THK(导热系数)。",
-    "Properties → Reports → Stream Results(或 Stream 页 → Property Set)挂上这个物性集。",
-    "Run 一次模型后重新读工况;打开换热器抽屉,物性会自动按需读取并缓存。",
-    "单位认不出来时(如摩尔基 cal/mol-K)工具留空并提示手填,不拿常见值顶替。",
+    "「模拟」页 → 物性组:新建物性组 Donkey(名称不限)。",
+    "添加 PL、PBUB(bar)、MUMX(cP)、CPMX(cal/mol-K)、KMX(kcal-m/hr-sqm-K);单位保持默认。",
+    "「限定符」页:相态勾 Vapor 与 Liquid 两列;只勾一侧时另一相流股读空。",
+    "「模拟」→ 设置 → 报告选项 → 流股 → 物性组:把 Donkey 加到右栏,重置并运行至收敛。",
+    "回本工具「读取当前工况」;换热页再点「重新读物性」。",
 )
 
 # 计算说明书与 EDR 清单里对来源的中文标签。**界面、台账、导出共用这一张表**,
 # 免得同一来源在三处写法不一致。
 SOURCE_LABELS: dict[str, str] = {
-    "aspen": "Aspen 实测/简捷",
+    "aspen": "Aspen 读数 / 简捷计算",
     "manual": "人工录入",
     "edr": "EDR 校核",
     "preset": "预设假设",
     "assumed": "经验假设",
+    "empirical": "经验查表(相态组合)",
     "builtin": "内置默认",
     "rule": "规则建议",
     "user": "用户指定",
@@ -325,10 +326,10 @@ def pass_combinations(config: list | tuple | None = None) -> list[dict]:
 def props_setup_guide() -> dict:
     """物性缺项时的一次性设置指引(方案 §2.3)。"""
     return {
-        "title": "模型缺 cp / λ,无法算膜系数",
-        "why": "膜系数要 cp、λ、μ 三项;μ 已在读(VISC),cp 与 λ 需要在物性集里勾上才会输出。",
+        "title": "缺 cp / λ:膜系数无法计算",
+        "why": "膜系数需 cp、λ、μ;三者均随物性组输出,缺项时留空并提示手填。",
         "steps": list(PROPS_SETUP_STEPS),
-        "fallback": "L1 不受影响;L2 只给理论需求面积 A_req 与经验推荐范围,不编造膜系数。",
+        "fallback": "L1 不受影响;L2 仅给理论需求面积 A_req 与经验范围,不编造膜系数。",
     }
 
 

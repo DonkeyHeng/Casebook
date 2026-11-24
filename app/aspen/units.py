@@ -210,6 +210,12 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "cal/sec-cm2-k": (41868.0, 0.0),
         "cal/sec-m2-k": (4.1868, 0.0),
         "kcal/hr-m2-c": (1.163, 0.0),
+        # 实测 V15 简捷 HeatX 的 HX_UAVD 用 kcal/hr-sqm-K(sqm 拼写 + 温标写 K)。
+        # 漏掉这两条会让设计 U 静默变成 None,需求面积随之算不出来。
+        "kcal/hr-sqm-k": (1.163, 0.0),
+        "kcal/hr-sqm-c": (1.163, 0.0),
+        "kcal/hr-m2-k": (1.163, 0.0),
+        "kcal/hr-m2k": (1.163, 0.0),
         "btu/hr-ft2-f": (5.678, 0.0),
     },
     # 粘度 → cP。泵侧原来在 reader._to_cp 里手写这套换算,Phase 2 起统一走这里,
@@ -271,8 +277,28 @@ _TABLES: dict[str, dict[str, tuple[float, float]]] = {
         "cal/sec-cm-c": (418.68, 0.0),
         "cal/s-cm-c": (418.68, 0.0),
         "kcal/hr-m-c": (1.163, 0.0),
+        # 实测(2026-11-24 V15 全流程)KMX 节点单位是 `kcal-m/hr-sqm-K`:
+        # 量纲等价于 kcal/(hr·m·K),折算仍是 1.163 → W/(m·K)。
+        "kcal-m/hr-sqm-k": (1.163, 0.0),
+        "kcal-m/hr-sqm-c": (1.163, 0.0),
+        "kcal-m/hr-m-k": (1.163, 0.0),
         "btu/hr-ft-f": (1.730735, 0.0),
         "btu/(hrftf)": (1.730735, 0.0),
+    },
+    # 摩尔基定压比热 → J/(mol·K)。**不直接当质量基用**:实测 CPMX 给的就是
+    # `cal/mol-K`,要换成 J/(kg·K) 还得除分子量,由 reader 负责(见
+    # `_cp_mass_from_molar`)。
+    "molar_heat_capacity": {
+        "j/mol-k": (1.0, 0.0),
+        "j/mol-c": (1.0, 0.0),
+        "j/(molk)": (1.0, 0.0),
+        "kj/kmol-k": (1.0, 0.0),
+        "kj/kmol-c": (1.0, 0.0),
+        "cal/mol-k": (4.184, 0.0),
+        "cal/mol-c": (4.184, 0.0),
+        "kcal/kmol-k": (4.184, 0.0),
+        "kcal/kmol-c": (4.184, 0.0),
+        "kcal/mol-k": (4184.0, 0.0),
     },
 }
 

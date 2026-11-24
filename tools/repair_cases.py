@@ -41,6 +41,8 @@ BLOCK_COLUMNS = [
     ("duty_kw", reader.BLOCK_DUTY_FIELDS, "power"),
     ("power_kw", reader.BLOCK_POWER_FIELDS, "power"),
     ("area_m2", reader.BLOCK_AREA_FIELDS, "area"),
+    # 2026-11-24 补 kcal/hr-sqm-K 别名后,老工况的设计 U 也能离线回填。
+    ("hx_u_design_wm2k", ("HX_UAVD",), "u_value"),
     ("cond_duty_kw", ("COND_DUTY",), "power"),
     ("reb_duty_kw", ("REB_DUTY",), "power"),
 ]
@@ -220,7 +222,7 @@ def repair_case(conn, case, apply: bool) -> dict:
             ],
         )
         conn.executemany(
-            "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?,"
+            "UPDATE blocks SET duty_kw=?, power_kw=?, area_m2=?, hx_u_design_wm2k=?,"
             " cond_duty_kw=?, reb_duty_kw=?,"
             " dh_kw=?, ref_kw=?, ref_kind=?, balance_state=?, balance_note=?,"
             " head_m=?, flow_m3h=?, pump_eff=?, p_in_bar=?, p_out_bar=?, dp_bar=?,"
@@ -233,6 +235,7 @@ def repair_case(conn, case, apply: bool) -> dict:
                     b["duty_kw"],
                     b["power_kw"],
                     b["area_m2"],
+                    b.get("hx_u_design_wm2k"),
                     b.get("cond_duty_kw"),
                     b.get("reb_duty_kw"),
                     (b.get("balance") or {}).get("dh_kw"),

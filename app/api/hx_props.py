@@ -189,6 +189,10 @@ def _payload(block_rec: dict, sides: dict, cached: dict, source: str, note: str 
             "missing": info["missing"],
             "notes": info["notes"],
         }
+        # 只有挂着真实流股的一侧才并入顶层缺失:Heater 的公用工程侧本来就没有
+        # 流股,它的 missing 不能算"缺物性"。
+        if not name:
+            continue
         for item in info["missing"]:
             if item not in missing:
                 missing.append(item)

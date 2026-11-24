@@ -78,11 +78,13 @@
 | 公用工程用量（可选） | 公用工程树 | `UTL_TRATE`（kg/h） | kg/hr | 仅展示 |
 | Aspen 平均温差 | HeatX 块 | `HX_DTLM` | ℃ | 与自算 LMTD 交叉校核 |
 | F 修正 | HeatX 块 | `HX_FMTD` | 无量纲 | 多管程 F（本机 4 台均 1.0） |
-| 设计 U | HeatX 块 | `HX_UAVD` | `cal/sec-cm²-K` | 与 `U_back` 互校，直接暴露简捷假设 |
+| 设计 U | HeatX 块 | `HX_UAVD` | `cal/sec-cm²-K` / `kcal/hr-sqm-K` | 与 `U_back` 互校，直接暴露简捷假设 |
 | 串联壳数 | HeatX 块 | `HX_NSHLS` | 个 | >1 时提示多壳串联 |
 | UA 值 | 块 `Output` | `HX_UA` | `cal/sec-K` | 与 `U_back = Q/(A·ΔTm)` 互校 |
 
 > **实测校正（2026-11-23）**：`UTL_DUTY` 在已投用的公用工程上读到的都是 `1 cal/sec`（是标志位，不是负荷），**不得用于任何计算**；热负荷只认块上的 `QCALC/HX_DUTY`。`UTL_IN_TEMP/OUT_TEMP` 只在「已配置且有设备引用」的公用工程上有值（本机 7 个里 3 个有值）。
+
+> **U 单位别名（2026-11-24）**：`HX_UAVD` 在本机 V15 工况里写作 `kcal/hr-sqm-K`（实测 730.868444，= 850 W/(m²·K)）。`units.py` 原先只登记 `kcal/hr-m2-c`，换算静默返回 `None`，工况 73/75 的 8 台 HeatX 设计 U 全空、需求面积算不出。已补 `kcal/hr-sqm-k` 等别名，并把 `hx_u_design_wm2k` 纳入 `reader.unit_gaps` 扫描与 `tools/repair_cases` 回填。
 
 > `aspen-field-map.md` §12.4 已实测过 7 个公用工程成员与四个温度/用量字段，但**代码目前完全没读**（`reader.py` 无 `UTILITY` 关键字）。这是 Phase 1 新增的**公用工程树**依赖；`HX_UA`、`HX_DTLM`、`HX_FMTD`、`HX_UAVD` 也在同一次改造里加读。**V15 已用 `tools/probe_hx.py` 跑通**（见 §2.4）；V11/V12.1 的叶子层数待用对应模型复核。
 
@@ -104,11 +106,16 @@
 
 ### 2.3 Phase 2 新增读取（物性，按需读、不扩全表）
 
-| 量 | 候选路径（与 `VISC` 同构，**均未实测**） | 目标单位 | 缺失时 |
+| 量 | 实测路径（2026-11-24，工况 77 的 `STRM_UPP` 探针） | 目标单位 | 缺失时 |
 | --- | --- | --- | --- |
-| 粘度 μ | `STRM_UPP\MUMX`（已有）、`STRM_UPP\VISC\MIXED\TOTAL` | cP | 手填（沿用泵页范式） |
-| 定压比热 cp | `STRM_UPP\CP\MIXED\TOTAL`、`STRM_UPP\CPMASS` | J/(kg·K) | 由 `abs(Q)/(m·abs(ΔT))` 反推（仅单相、仅作校核值） |
-| 导热系数 λ | `STRM_UPP\THK\MIXED\TOTAL`、`STRM_UPP\KTH` | W/(m·K) | 手填；无则不算 h，只给 L1 |
+| 粘度 μ | `STRM_UPP\MUMX\MIXED\{VAPOR\|LIQUID}` | cP | 手填（沿用泵页范式） |
+| 定压比热 cp | `STRM_UPP\CPMX\MIXED\{VAPOR\|LIQUID}`，Aspen 给 `cal/mol-K` | J/(kg·K)，按流股 `MW` 折质量基 | 由 `abs(Q)/(m·abs(ΔT))` 反推（仅单相、仅作校核值） |
+| 导热系数 λ | `STRM_UPP\KMX\MIXED\{VAPOR\|LIQUID}`，单位 `kcal-m/hr-sqm-K` | W/(m·K) | 手填；无则不算 h，只给 L1 |
+
+- **相态在 `MIXED` 后面**，不是 `VAPOR\MIXED`：气相流股只有 `VAPOR` 有值、液相只有 `LIQUID` 有值，另一支是空叶子。下钻必须两相都试，命中空支不能直接返回 —— 否则气相三项（cp / λ / μ）会整片读空，看起来就像「物性集没挂上」。
+- 目录节点（`CPMX` / `KMX` / `MUMX` 本身）的值恒为 `1 + 单位`，不能当读数。
+- 摩尔基 cp 要除以流股分子量：`\Data\Streams\<S>\Output\MW`；`MW` 读不到就留空，不拿别处的值猜。
+- 实测样例（工况 77，E0104 四端）：0114 气相 cp 1574.1 J/(kg·K)、λ 0.1107 W/(m·K)、μ 0.05615 cP；0117 液相 cp 4080.5、λ 0.6222、μ 0.7347。
 
 - 读取时机：**打开单台换热器抽屉时按需读**（4 条侧流股 × 3 个物性 ≈ 12 次 COM 调用），成功结果写入 `hx_props` 缓存（按 `case_id + stream`），不参与全表读取。
 - 页面提供一次性设置指引（与 `p_v` 同样的「物性集五步」），并给出当前模型缺哪几个物性。
@@ -127,9 +134,15 @@
 | Heater 的 UTILITY_ID | 17/19 | 缺失 2 台：`B3`、`E0403`（无公用工程或未配置） |
 | 公用工程温度 | 6/7 | `MS` 247/246、`HS` 350/349、`LS` 135/134、`WAT` 32/40、`LWAT` 7/12、`AIR` 35/40 ℃；仅 `ELE` 无温度（电加热） |
 | 公用工程类型 | 7/7 | `STEAM`（MS/LS/HS）、`WATER`（WAT/LWAT）、`GENERAL`（AIR）、`ELECTRICITY`（ELE） |
-| 侧流股 `CP/THK` | 0/2 样本 | `STRM_UPP` 只有 `PL / MUMX / PBUB`，没有 `CP` 与 `THK` |
+| 侧流股 `CP/THK` | 0/2 样本（2026-11-23，物性集未挂） | 当时 `STRM_UPP` 只有 `PL / MUMX / PBUB`；2026-11-24 挂上 `CPMX`/`KMX` 后四端 cp/λ/μ 全读到，见 §2.3 |
 
 > 2026-11-23 复核更正：早先探针报告写「`LS`/`HS` 被引用却无温度」，是路径少了一层 `Output` 导致的假空值。按 `\Data\Utilities\<U>\Output\UTL_IN_TEMP / UTL_OUT_TEMP` 重读，`HS` 与 `LS` 都有温度，且都落在 1 ℃ 内（等温相变）。**以本表为准**；`MISSING_UTILITY_T` 只用于真的读不到温度的情形（本模型仅 `ELE`）。
+
+> 2026-11-24 复核（工况 77，connections 表实测）：**HeatX 的连接 side 为 `hot`/`cold`，Heater 的连接 side 为空串**（in/out 直接挂流股）。`heat_side_streams()` 对空 side 的换热类块归到 `process` 键，否则 Heater 工艺侧流股会被整片漏掉。Heater 的公用工程侧没有流股（`stream=None`），该侧自身的 `missing` 不并入顶层 `props.missing`——没有流股不等于缺物性；顶层缺物性横幅只由挂着真实流股的一侧驱动。实测 E0102 工艺侧 0108：cp 2198.9 J/(kg·K)、λ 0.0334 W/(m·K)、μ 0.01094 cP，`complete=true`。抽屉左栏按块类型条件渲染：`HX_DTLM`、F 修正、面积、U 反算、`HX_UAVD`、`HX_UA` 这 6 项只在 HeatX 显示，Heater 不展示一排无意义的「—」。
+>
+> **工艺流股与公用工程怎么区分**（三个判据同时成立才算公用工程侧）：① `stream` 为空——`\Data\Streams` 下根本没有这条物料；② 该侧带 `utility_id`（来自块的 `Input\UTILITY_ID`）；③ 温度来自 `\Data\Utilities\<U>\Output\UTL_IN_TEMP / UTL_OUT_TEMP`。实例 E0204：`side=''` 的加热器，工艺侧 0212（70.0 → 55.0，汽化率 0.816 → 0.716，冷凝），公用工程侧 `CW`（30.0 → 40.0，液体，无流股、无 cp/λ/μ）。界面因此分两行显示「工艺侧温度(流股 0212) / 公用工程侧温度(CW)」，公用工程侧来源标 `Aspen 公用工程 CW` 而不是「流股实测」；该侧没有物性，L2 的两侧膜系数只能算工艺侧，判定停在「缺数据」——这是如实缺值，不是读错。
+>
+> 2026-11-24 复核（工况 77，31 台换热逐台实测）：E0202/E0207/E0601/E0603 四台除物料进出口外还挂了一条 `HEAT` 型热流股（Q1~Q4，无温度/流量/物性节点）。老逻辑按连接顺序把工艺侧流股名覆盖成 Q1，再去 `\Data\Streams\Q1\Output` 读物性，三项全空于是误报缺 cp/λ/μ。修法：`build_sides()` 与 `heat_side_streams()` 只认 `MATERIAL` 流股，`HEAT`/`WORK` 一律不进工艺侧。修复后 31 台 `props.missing` 全部为空、`complete=true`（其中 15 台本次 live 现读、16 台走缓存）；这几台真正的拦截原因是「没配公用工程/缺公用工程温度」，与缺物性无关。
 
 **关键实测结论（决定了溯源设计）**：`HX_UAVD` 4 台全为 850.0 W/(m²·K)，`U_back = Q/(A·ΔTm)` 也全为 850.0 —— 面积来自 Aspen **简捷设计里人工填的 U**，不是 rating 结果；`HX_EX_*` 全 0 可作为「Shortcut 模式」的可靠判据，比「U 恰好 850」的猜测更硬。
 
@@ -534,9 +547,26 @@ A_req = |Q| / (U_assumed · ΔTm · F) × (1 + margin)
 | `boiling-organic` | 500–1500 | 800 | 有机液沸腾 |
 
 - 区间取自手册经验范围，并用本机 4 个案例的 `U_back`（344.9 / 1115.8 / 1292.5 / 1892.6）做了范围校核；仍是经验值，标「参考」。
+- **U 的取值顺序（2026-11-24 起，`params.build_design`）**：
+  1. Aspen 简捷设计值 `HX_UAVD`（只有 HeatX 有；实测单位 `kcal/hr-sqm-K`，`units.py` 已收该别名，730.868 = 850 W/(m²·K)）；
+  2. 人工指定的经验档（`u_ref_key`，来源标 `assumed`）；
+  3. 按通道自动挑经验档（来源标 `empirical`，并给 `U_AUTO` 警告，`u.auto_key/auto_reason` 写清依据）；
+  4. 兜底用 `U_back = |Q|/(A_aspen·ΔTm·F)`，只对 HeatX 成立，且属循环论证（面积由假设 U 得来），仅作参照，排在经验档之后。
+
+**两条提取通道（严格分开，2026-11-24 起 `app/design/heat/channels.py`）**：
+
+| 通道 | BlockType | 边界来源 | 自动挑 U 的依据 |
+| --- | --- | --- | --- |
+| `process-process` 工艺-工艺 | `HeatX` / `MHeatX` | Aspen 内 hot / cold 两侧进出口温度、压力、汽化率 | 两侧相态组合 |
+| `process-utility` 工艺-公用工程 | `Heater` / `HeaterX` | 工艺侧进出口 + 公用工程树实测温度；读不到才用预设/人工 | 工艺侧相态 + 公用工程相态与介质 |
+
+自动挑档只用相态组合，不猜组分：冷凝 + 液体 → `condensing-organic`（公用工程为蒸汽冷凝时用 `condensing-steam`）；沸腾 + 液体 → `boiling-organic`；液-液 → `organic-water`；气-液 → `gas-liquid`；气-气 → `gas-gas`。
+
+**零负荷 Heater 过滤**：`|Q| < 1e-3 kW` 的 Heater 视为「物流标签点 / 仅调压」，不进换热设备表（`channels.is_trivial`）；HeatX 不按此判据跳过。热负荷读不到（None）不跳过，按缺数据报出来。
+
 - 冷凝/沸腾两档只用于「公用工程侧冷凝」或用户在外部估算时手选；**工艺侧发生相变时仍按 §6 拦截**，不得用这些经验值绕过拦截。
-- `margin` 默认 0.40（案例 34%~44% 的中位附近），允许 0.30~0.50；超出区间给 warning，不拒算。
-- `A_req` 与 `area_nominal_m2` 分开存：前者是需求，后者是标准公称值（编码只用后者）。
+- `margin` 默认 0.30（`assemble.build_row` 的兜底值），允许 0.30~0.50；超出区间给 warning，不拒算。
+- `A_req` 与 `area_nominal_m2` 分开存：前者是需求，后者是标准公称值（编码只用后者）。没有公称面积但有需求面积时，界面/导出写「需求面积(估算)」，不写「缺面积」。
 
 ### 5.8 几何（Phase 2）
 
@@ -933,7 +963,7 @@ GB/T 28712.2 与 GB/T 151 的**数值表**受著作权保护，仓库与安装�
 | P2-2 | ✅ 完成 | `geometry.py`：标准行枚举、管程流通面积 / 流速 / Re / Pr / Dittus-Boelter / h、Darcy 压降（复用 `hydraulics`，ζ=1.5+1.0+1.5×(Np−1)）；`DN325/φ19/6000/1 程` 命中 99 根 34.9 m² |
 | P2-3 | ✅ 完成 | `geometry.py`：壳程 Kern（`d_e`、`A_c`、`G`、`Re`、`Nu=0.36Re^0.55Pr^(1/3)`、`f=exp(0.576−0.19lnRe)`、Δp）、`U_clean/U_dirty`、接管按 GB/T 17395 最小可达外径圆整；合成工况 H2O-H2O 与真实 case61 均已跑通（case61 气-气判 fail 且 `U_MISMATCH`，属预期） |
 | P2-4 | ✅ 完成 | `rating.py`：五态、压降 / 面积阈值（0.98 / 1.30 / need>1.05）、假设清单 7 类、`select()` 排序与推荐；**含任意假设最高 reference** 由单测锁定 |
-| P2-5 | ✅ 完成 | `views/heat.js`：L2 面板（候选表、采用 / 清除、未导入标准表黄条、物性缺失提示、假设说明、复制提示词、下载模板、导入 CSV）；`GET /api/cases/{id}/heat/{block}` 详情 |
+| P2-5 | ✅ 完成 | `views/heat.js`：L2 面板（候选表、采用 / 清除、未导入标准表黄条、物性缺失提示、假设说明）；`GET /api/cases/{id}/heat/{block}` 详情。2026-11-24 起「复制提示词 / 下载模板 / 导入 CSV」三个入口移到首页「标准表」模块，L2 缺表时只留一个「去首页 › 标准表」按钮 |
 | P2-6 | ✅ 完成 | `export/heat.py` 拆为 `EDR工艺输入` / `EDR结构输入` / `结果与提示` + `说明`（16/16/13 列）；`export/hx_schedule.py` 无人工几何时回退 L2 推荐行并在备注标「L2 推荐」，表尾按 L2 判定计数 |
 | P2-7 | ✅ 完成 | `tests/test_hx_l2.py` 9 组 90+ 断言（物性换算 / 扫描 / 反推 / 表校验 / 状态与回滚 / 几何水力 / 五态 / 缺表降级 + 三页签 / 详情接口），已登记 `tests/_suite.py`；计算说明书加第 12 章；`selftest` 1544 条、`check_render` 197 条 |
 

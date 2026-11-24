@@ -54,7 +54,9 @@ class HeatRoutes:
                 "rows": rows,
                 "config": ctx["config_meta"],
                 "std_state": standards.standard_state(),
-                "boundary": "管壳式(BEM 为主,兼容固定管板/浮头/U 形管编码);板式/空冷器不在本期",
+                "boundary": (
+                    "管壳式:以 BEM 为主,兼容固定管板 / 浮头 / U 形管;板式、空冷器不在本期范围"
+                ),
             }
         )
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import math
 
-from . import data
+from . import channels, data
 
 # 相变判据:进出口汽化率变化超过这个值就当有相变(体积分数,0~1)
 PHASE_EPS = 1e-4
@@ -37,28 +37,27 @@ DP_ALLOW_FLOOR_BAR = 0.2
 
 # 拦截代码 → 中文提示(界面、导出共用)
 BLOCKER_TEXT = {
-    "PHASE_CHANGE": "工艺侧进出口汽化率变化,属相变工况;纯显热 LMTD 不适用,请转 EDR 分段计算",
-    "NEAR_ISOTHERMAL_PROCESS": "工艺侧近等温,端差退化;纯显热 LMTD 不可靠,请转 EDR",
-    "TEMP_CROSS": "逆流端差为负或接近零(温度交叉),LMTD 无定义,请转 EDR",
-    "MISSING_PROCESS_TEMPS": "工艺侧进出口温度不全,无法算 LMTD",
-    "MISSING_DUTY": "设备热负荷缺失,无法算 U 与面积需求",
-    "MULTI_STREAM": "多股/多侧换热(MHeatX 或多端口),L1 不处理",
-    "UTILITY_NO_TEMP": "公用工程既无实测温度也未选预设/手填,无法算 LMTD",
-    "UTILITY_ELECTRIC": "电加热/燃料公用工程没有流体温度,LMTD 无意义",
-    "NO_SIDES": "未取到冷热两侧流股,无法建立工况",
-    "TUBE_FLUID_ILLEGAL": (
-        "管程侧分配与设备类型不符(HeatX 只能 hot/cold,Heater 只能 process/utility)"
-    ),
+    "PHASE_CHANGE": "相变工况:工艺侧汽化率变化,纯显热 LMTD 不适用;须转 EDR 分段计算",
+    "NEAR_ISOTHERMAL_PROCESS": "工艺侧近等温:端差退化,纯显热 LMTD 不可靠;须转 EDR",
+    "TEMP_CROSS": "温度交叉:逆流端差 ≤ 0,LMTD 无定义;须转 EDR",
+    "MISSING_PROCESS_TEMPS": "缺工艺侧进出口温度:无法计算 LMTD",
+    "MISSING_DUTY": "缺设备热负荷:无法计算 U 与需求面积",
+    "MULTI_STREAM": "多股 / 多侧换热(MHeatX 或多端口):L1 不处理",
+    "UTILITY_NO_TEMP": "公用工程温度缺失(无实测、未选预设、未手填):无法计算 LMTD",
+    "UTILITY_ELECTRIC": "电加热 / 燃料公用工程无流体温度:LMTD 无意义",
+    "NO_SIDES": "未取得冷、热两侧流股:无法建立工况",
+    "TUBE_FLUID_ILLEGAL": ("管程侧分配与设备类型不符(HeatX 仅 hot/cold;Heater 仅 process/utility)"),
 }
 # 警告(不拦截,只降级)
 WARNING_TEXT = {
-    "UTILITY_PRESET": "公用工程温度来自预设假设,不是实测",
-    "UTILITY_MANUAL": "公用工程温度为人工录入",
-    "UTILITY_ISOTHERMAL": "公用工程为等温相变,已按等温端差处理",
-    "U_ASSUMED": "总传热系数取经验值,面积需求仅供参考",
-    "AREA_ASSUMED": "面积来自 Aspen 简捷假设(非 rating 结果)",
-    "F_UNCOVERED": "F 修正系数未取得,按纯逆流(F=1)计算",
-    "TUBE_FLUID_RULE": "管/壳程分配按规则建议,未经用户确认",
+    "UTILITY_PRESET": "公用工程温度:预设假设,非实测",
+    "UTILITY_MANUAL": "公用工程温度:人工录入",
+    "UTILITY_ISOTHERMAL": "公用工程为等温相变:按等温端差处理",
+    "U_ASSUMED": "总传热系数取所选档经验值;面积需求仅供参考",
+    "U_AUTO": "总传热系数按两侧相态组合查经验表(未做 EDR);面积需求仅供参考",
+    "AREA_ASSUMED": "面积:取自 Aspen 简捷假设,非 rating 结果",
+    "F_UNCOVERED": "F 修正系数未取得:按纯逆流(F=1)计算;单壳程多管程实际约 0.85–0.9,校核时按此折算",
+    "TUBE_FLUID_RULE": "管 / 壳程分配为规则建议,未经用户确认",
     "DTLM_FROM_ASPEN": "平均温差直接取 Aspen HX_DTLM,未独立复算",
 }
 
@@ -308,10 +307,18 @@ def build_sides(block, connections, streams) -> dict:
             stream = smap.get(_get(conn, "stream"))
             if stream is None:
                 continue
+            # 热流股(HEAT,如 Q1~Q4)与功流股不是物料:没有 cp/λ/μ,也不能当工艺侧。
+            # 实测(2026-11-24 工况 77):同一台 Heater 同时挂物料进出口和一条 HEAT 进,
+            # 不过滤会把工艺侧流股名覆盖成 Q1,然后永远报缺三项。
+            stream_type = _get(stream, "stream_type")
+            if stream_type and stream_type != "MATERIAL":
+                continue
             if _get(conn, "direction") == "in":
                 process["stream"] = _get(stream, "name")
                 if process["t_in_c"] is None:
                     process["t_in_c"] = _num(_get(stream, "temperature_c"))
+                # 汽化率独立于温度取值:块上有温度时也要拿到进口相态,否则自动 U 会把两相判成未知
+                if process["vap_in"] is None:
                     process["vap_in"] = _num(_get(stream, "vap_frac"))
                 if process["p_bar"] is None:
                     process["p_bar"] = _num(_get(stream, "pressure_bar"))
@@ -516,6 +523,8 @@ def build_design(
     duty_kw = _num(_get(block, "duty_kw"))
     sides = build_sides(block, connections, streams)
     kind = "HeatX" if btype in ("HeatX", "MHeatX") else btype
+    # 通道只做分类,不改截面口径:HeatX 走 hot/cold,Heater 走 process/utility。
+    channel = channels.channel_of(btype)
 
     utility = None
     if "utility" in sides:
@@ -607,6 +616,9 @@ def build_design(
     if q_w and area_aspen and dtlm and f:
         u_back = q_w / (area_aspen * dtlm * f)
     u_assumed = None
+    u_auto_key = None
+    u_auto_reason = None
+    u_auto_label = None
     if u_aspen:
         u_source = "aspen_design"
     else:
@@ -616,7 +628,17 @@ def build_design(
             u_source = "assumed"
             warnings.append("U_ASSUMED")
         else:
-            u_source = "none"
+            # 未指定档时按通道自动挑:HeatX 看两侧相态,Heater 看工艺侧 + 公用工程。
+            # 自动挑出的经验 U 排在反算值之前 —— 反算值由 Aspen 假设面积得来,循环论证。
+            u_auto_key, u_auto_reason = channels.pick_u_key(channel, sides, sides.get("utility"))
+            auto_ref = data.u_reference(u_cfg, u_auto_key)
+            if auto_ref:
+                u_assumed = auto_ref["default"]
+                u_auto_label = auto_ref["label"]
+                u_source = "empirical"
+                warnings.append("U_AUTO")
+            else:
+                u_source = "none"
     u_for_req = u_aspen or u_assumed or u_back
     if q_w and u_for_req and dtlm and f:
         area_req = q_w / (u_for_req * dtlm * f) * (1 + (_num(margin) or 0.0))
@@ -647,6 +669,8 @@ def build_design(
     return {
         "block": name,
         "kind": kind,
+        "channel": channel,
+        "channel_text": channels.CHANNEL_TEXT.get(channel or "", ""),
         "duty_kw": duty_kw,
         "sides": sides,
         "hot": hot,
@@ -680,6 +704,9 @@ def build_design(
             "assumed_wm2k": u_assumed,
             "source": u_source,
             "ref_key": u_ref_key,
+            "auto_key": u_auto_key,
+            "auto_reason": u_auto_reason,
+            "auto_label": u_auto_label,
             "ua_wk": ua_aspen,
         },
         "lmtd": {
