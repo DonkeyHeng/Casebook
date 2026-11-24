@@ -9,7 +9,7 @@
 **简体中文** | [English](README-en.md)
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
-[![Version: v1.7.3](https://img.shields.io/badge/version-v1.7.3-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.3)
+[![Version: v1.8.1](https://img.shields.io/badge/version-v1.8.1-0F766E)](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.8.1)
 [![安装说明](https://img.shields.io/badge/安装说明-docs%2Finstall.md-4D6BFE)](docs/install.md)
 
 > **免责与隐私声明**
@@ -245,7 +245,10 @@ Casebook/
 
 ## 版本演进
 
-**当前最新版本：[v1.7.3](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.7.3)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+**当前最新版本：[v1.8.1](https://github.com/DonkeyHeng/Casebook/releases/tag/v1.8.1)**（完整发布包与更新日志见 [Releases](https://github.com/DonkeyHeng/Casebook/releases)）
+
+- **v1.8.1（换热器双通道与物性读取修正，配置入口收口）**：换热器 L1 拆成工艺-工艺（HeatX/MHeatX）与工艺-公用工程（Heater/HeaterX）两条提取通道——Heater 的连接侧在 Aspen 里是空串，此前工艺侧流股整片漏读，现统一归入工艺侧。U 取值改为四级顺序（Aspen 设计 U → 人工选定经验档 → 按两侧相态自动挑档 → 反算值兜底），自动档标「经验查表」并写清依据，不进合格判定；`|Q| < 1e-3 kW` 的零负荷 Heater（仅调压或物流标签点）不再进设备表。物性读取按 V15 实测修正：`MUMX`/`CPMX`/`KMX` 的相态位于 `MIXED` 之后且气相只有 `VAPOR` 分支有值，下钻改为逐支取首个读到值的分支；`CPMX` 为摩尔基（`cal/mol-K`），按流股分子量折算质量基；`HX_UAVD` 补 `kcal/hr-sqm-K` 单位别名（此前换算静默返回空，8 台 HeatX 的设计 U 与需求面积缺失），老工况可用 `tools/repair_cases` 离线回填。界面侧：管路 3 张与换热 2 张标准表、Aspen 物性组配置教程统一收到首页；设备表补「入口压力 / 出口压力」与可点击的进出口流股列，换热家族按 HeatX / Heater 分档筛选；塔详情改为与泵、换热一致的居中悬浮窗。全站界面文案与代码注释按新增的 `docs/conventions.md` §5 收敛（状态提示 ≤ 25 字、结论前置、注释只写 Why / 标准号 / 边界）。实测：`selftest` 1595 条、`check_render` 212 条全部通过。
+- **v1.8.0（换热器选型闭环）**：新增换热器页与 L1 参考结论——管壳式设备表（热负荷、自算与 Aspen LMTD、反算 U、需求面积与裕量、设计压力 / 温度、允许压降、污垢热阻、五态判定与拦截）、逐项溯源标签、15 列《换热器选型一览表》导出；公用工程温度按实测 / 预设 / 人工三档取用，缺项如实留空不编造。L2 增补几何初选：GB/T 28712.2 标准系列表以版本化目录导入并原子切换、标准行枚举与管 / 壳侧水力（Dittus-Boelter、Darcy、Kern）、接管按目标流速圆整、五态判定与三页签 EDR 输入导出。
 
 - **v1.7.3（两册计算说明书对外终审与边界修正）**：两册说明书按当前代码逐条复核并做对外化改写，删除代码级表述、把附录 B 收敛为面向使用者的版本记录；正式公式恢复为 Word 原生公式域，目录可随 Word 刷新。口径层面：Y 系数按 GB/T 20801.1-2025 表 27 分钢种写明（铁素体 ≤482 ℃、奥氏体 ≤566 ℃，计算仍固定取 0.4 属保守简化）；大口径焊接管壁厚改按 HG/T 20553-2011 Ia 采购档（6.3–20 mm）；表 B.1 许用应力收敛到已定牌号范围，固定取行规则按牌号各行取；R1E 明确为项目专用规则，真空外压改为「筛查＋完整校核输入」两层。代码侧修正 Excel 负偏差列改为取该行生效 C1、拒绝手填 $p_v=0$、$\text{NPSH}_a$ 计算把 $p_v\le 0$ 视为缺失。
 - **v1.7.2（计算说明书复核与壁厚/材质口径修正）**：两册计算说明书按当前代码逐条复核并重建：壁厚圆整的「最小壁厚托底」标记改为只在工艺下限真正把档位抬高时置真，无可用壁厚时把「名义下限不足」与「扣负偏差后净厚不足」分开说明；PN 整档保护把厚度顶过薄壁公式适用域时给出显式提示；1Cr5Mo、9Cr1Mo 等铬钼耐热钢不再被静默判为不锈钢类别，统一转入待人工确认并告警；单位换算补齐 kJ/hr 与 lb/(ft·s)，管道页主表与 Word 管路一览表的列口径分别写明。
