@@ -86,6 +86,8 @@ app/
     lib/ui.js    界面外壳公用件:主题、提示条、徽章、判定条
     views/table.js       数据页表格:流股 / 设备 / 对比 / 家族页签 / 泵列
     views/pump.js        泵参数悬浮窗:详细参数、设计扬程 / 两侧管段、选型台账
+    views/heat.js        换热器悬浮窗:L1 只读结果 + L2 几何初选 + 人工决定
+    views/standards.js   首页「标准表」卡片与统一导入弹窗(管路 3 张 + 换热 2 张)
     views/composition.js 塔剖面详情与流股组成 / CAS 编辑
     views/column.js      塔剖面图(曲线)
     views/report.js      衡算报告页

@@ -2,9 +2,9 @@
    设计 token(第二批 A:2026-11)
    三层:原始色板(--c-*) → 语义层(--bg / --ok-* / --chart-*) → 组件。
    组件规则里不写裸 hex;要加颜色,先在这里加语义名。
-   状态色统一成四档:text(文字)/ line(边框)/ fill(底色)/ mark(色条、
-   输入框这种大色块)。原来错误语义有 3 个红、警告语义有 2 个琥珀,
-   而琥珀还被借去画「气相」曲线 —— 看图会误读成"这条曲线有警告"。
+   状态色统一为四档:text(文字)/ line(边框)/ fill(底色)/ mark(色条、
+   大色块输入框)。此前错误语义有 3 种红、警告语义有 2 种琥珀,
+   且琥珀兼用于「气相」曲线,易被误读为该曲线存在告警。
    ================================================================ */
 :root {
   /* ---------- 原始色板 ---------- */
@@ -118,10 +118,10 @@
   --chart-rest: var(--c-slate-300);    /* 相态条里的「其他」 */
 
   /* ---------- 流程图 ----------
-     状态靠 1.2px 描边传递。原来用 green-300 / red-300 / amber-300,
-     对白底只有 1.4–1.6:1(非文本元素要求 3:1),缩略视图里几乎看不见。
-     现在描边用 600 档:实测 #16a34a 3.26:1、#dc2626 4.90:1、#d97706 3.20:1、
-     #64748b 4.75:1。浅色只留给 hover 光环(.on)。 */
+     状态由 1.2px 描边传递。此前使用 green-300 / red-300 / amber-300,
+     对白底仅 1.4–1.6:1(非文本元素要求 3:1),缩略视图不可辨。
+     现描边改用 600 档:实测 #16a34a 3.26:1、#dc2626 4.90:1、#d97706 3.20:1、
+     #64748b 4.75:1。浅色仅用于 hover 光环(.on)。 */
   --flow-idle-line: var(--c-slate-500);
   --flow-edge: var(--c-slate-400);
   --flow-ok-line: var(--c-green-600);
@@ -135,18 +135,18 @@
   --tip-accent: var(--c-blue-300);
 
   /* ---------- 字号 ----------
-     只有 5 档。原来散出 15 档(9.5–21px),光 12.5/12.8/13 就三个,
-     彼此差 0.5px 人眼看不出,却让"同一层级"的文字在不同面板高度不同。
+     仅 5 档。此前散出 15 档(9.5–21px),仅 12.5/12.8/13 即三档,
+     相邻差 0.5px 视觉无差异,却使同层级文字在各面板高度不一致。
      SVG 内部(流程图标签 9.5/10/10.5、坐标轴 11、节点名 14.5)沿用原值:
-     它们是按 viewBox 缩放画的,不受这套档位约束。 */
+     按 viewBox 缩放绘制,不受本档位约束。 */
   --fs-xs: 12px;    /* 辅助文字、徽标、表头小字 */
   --fs-sm: 13px;    /* 正文、按钮、表格 */
   --fs-md: 15px;    /* 小节标题、面板标题 */
   --fs-lg: 17px;    /* 页面标题、品牌 */
   --fs-xl: 21px;    /* 首屏判定句(全页唯一)—— 指标数字已降到 --fs-lg */
   /* ---------- 圆角 ----------
-     只留三档:控件 4 / 容器 8 / 胶囊 999。原来是 2/3/4/6/8/10/12 七种,
-     差 2px 肉眼几乎看不出,却让相邻卡片和按钮的圆角看起来"不齐"。 */
+     仅三档:控件 4 / 容器 8 / 胶囊 999。此前为 2/3/4/6/8/10/12 七种,
+     相邻差 2px 视觉不可辨,却造成相邻卡片与按钮圆角不一致。 */
   --r-sm: 4px;
   --r-md: 8px;
   --r-pill: 999px;
@@ -271,8 +271,8 @@
 
 /* ---------- 图标 ----------
    sprite 在 index.html 顶部,这里只定义尺寸与笔画。
-   原来全站用文本符号当图标(✕ / ⇄),同一功能在两处是 24px 和 28px、
-   字号 12 和 13,基线还随字体变;换成正圆笔画 1.5 的 SVG 后大小可控。 */
+   此前全站以文本符号作图标(✕ / ⇄):同一功能在两处为 24px / 28px、
+   字号 12 / 13,基线随字体变化;改为正圆笔画 1.5 的 SVG 后尺寸可控。 */
 .icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .ico {
   width: 16px;
@@ -483,8 +483,8 @@ select {
    ① 判定句(.verdict-say)—— 用户关掉页面后唯一会记得的那一句;
    ② 复述信息(流股 / 设备 / 运行 ID)—— 12px,卡片里还会再出现一次,不必抢;
    ③ 明细清单(.verdict-body)—— 13px,默认展开,收起的只是明细,不是结论。
-   这同时回答了 ui-style.md §11 悬着的「四个 21px 要不要降」:要降 ——
-   原来的问题不是数字太大,而是有三处同时在用最大字号。 */
+   这同时回答 ui-style.md §11 未决的「四个 21px 是否下调」:应下调 ——
+   问题不在数值过大,而在三处同时使用最大字号。 */
 .verdict-meta { font-size: var(--fs-xs); font-weight: 600; }
 .verdict-say {
   margin-top: 6px;
@@ -570,9 +570,13 @@ select {
 }
 
 
+/* 固定宽度:同一工具条里「设备」页会多出家族页签与换热通道页签,
+   可伸缩的搜索框会让宽度随之跳动(设备各家族之间、设备与流股页之间)。
+   取与换热通道显示时相近的宽度,剩余空间留给末尾的 spacer。 */
 #filter {
-  flex: 1;
-  max-width: 320px;
+  flex: 0 0 176px;
+  width: 176px;
+  max-width: 176px;
   padding: 6px 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
@@ -859,10 +863,15 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   to { transform: none; }
 }
 
-/* 泵参数改为页面居中的悬浮窗。原来从右侧滑出的 620px 抽屉,详细参数、
-   设计扬程、选型台账三块全挤在同一列,表格只能被拉窄或逼出横向滚动条;
-   现在左列专放详细参数,右列叠设计扬程与选型台账,窗口本身不再贴边。 */
-#pumpPanel.pump-modal {
+/* 泵参数改为页面居中悬浮窗。此前为右侧滑出的 620px 抽屉,详细参数、
+   设计扬程、选型台账三块同列,表格被压缩或产生横向滚动条;
+   现左列放详细参数,右列叠设计扬程与选型台账,窗口不贴边。 */
+/* 泵参数与换热器详情共用同一套居中悬浮窗。两个面板都带 .pump-modal,
+   选择器成对写,别只挂 #pumpPanel —— 换热详情曾因此退回默认右侧抽屉:
+   高度 100vh 被 overflow:hidden 裁掉,又没有内部滚动条。 */
+#pumpPanel.pump-modal,
+#heatPanel.pump-modal,
+#columnPanel.pump-modal {
   position: fixed;
   inset: 0;
   margin: auto;
@@ -933,7 +942,9 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   color: var(--text);
   font-size: var(--fs-xs);
 }
-#pumpPanel.pump-modal .pump-panel-scroll {
+#pumpPanel.pump-modal .pump-panel-scroll,
+#heatPanel.pump-modal .pump-panel-scroll,
+#columnPanel.pump-modal .pump-panel-scroll {
   display: grid;
   grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr);
   gap: 20px;
@@ -942,14 +953,18 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   overflow: hidden;
   scrollbar-gutter: stable;
 }
-#pumpPanel.pump-modal .pump-modal-col {
+#pumpPanel.pump-modal .pump-modal-col,
+#heatPanel.pump-modal .pump-modal-col,
+#columnPanel.pump-modal .pump-modal-col {
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
   scrollbar-gutter: stable;
 }
-#pumpPanel.pump-modal .pump-modal-left { padding-left: 2px; }
+#pumpPanel.pump-modal .pump-modal-left,
+#heatPanel.pump-modal .pump-modal-left,
+#columnPanel.pump-modal .pump-modal-left { padding-left: 2px; }
 /* 右列只有 600px 左右,9 列按固定百分比分,输入框吃满本列;
    状态只留「缺 N 项 / 已关联 + 编辑」,缺什么放 title,避免把表撑出窗口。 */
 #pumpPanel.pump-modal .pump-line-table { table-layout: fixed; }
@@ -968,18 +983,28 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
 #pumpPanel.pump-modal .pump-line-state { white-space: normal; }
 #pumpPanel.pump-modal .pump-line-state .badge { margin-right: 2px; }
 @media (max-width: 980px) {
-  #pumpPanel.pump-modal {
+  #pumpPanel.pump-modal,
+  #heatPanel.pump-modal,
+  #columnPanel.pump-modal {
     width: 96vw;
     height: 92vh;
     padding: 14px 16px 16px;
   }
-  #pumpPanel.pump-modal .pump-panel-scroll {
+  #pumpPanel.pump-modal .pump-panel-scroll,
+  #heatPanel.pump-modal .pump-panel-scroll,
+  #columnPanel.pump-modal .pump-panel-scroll {
     grid-template-columns: minmax(0, 1fr);
     overflow-y: auto;
     gap: 14px;
   }
-  #pumpPanel.pump-modal .pump-modal-col { overflow: visible; padding-right: 0; }
+  #pumpPanel.pump-modal .pump-modal-col,
+  #heatPanel.pump-modal .pump-modal-col,
+  #columnPanel.pump-modal .pump-modal-col { overflow: visible; padding-right: 0; }
 }
+
+/* 换热详情左侧是「参数 / 值 / 来源」三列只读表,沿用泵的双列比例即可;
+   表本身不再设 320px 上限,交给列容器滚动,避免"表内一条 + 列一条"两道滚动条。 */
+#heatPanel .table-wrap { max-height: none; overflow: auto; }
 
 .panel-head {
   display: flex;
@@ -1027,8 +1052,8 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   overflow: hidden;
 }
 /* 图顶一行:标题在左、图例在右。
-   图例原来画在 SVG 里、挤在左上角和最大刻度抢地方,并排后单图只有 285px 更明显。
-   挪成 HTML 一行后两者各占一头,换行也不会压到曲线上。 */
+   图例此前绘制于 SVG 内,与左上最大刻度争位,并排后单图宽 285px 时更明显。
+   改为 HTML 单行后各占一端,换行不压曲线。 */
 .chart-head {
   display: flex;
   align-items: baseline;
@@ -1053,18 +1078,28 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
 
 .table-wrap.small { max-height: 320px; }
 
-/* 塔剖面抽屉里的表:吃掉抽屉剩余高度,自己滚(覆盖 .page .table-wrap 的公式)。
-   顺带收掉一个老债:.page .table-wrap 的 max-height(calc(100vh-150px))与
-   .table-wrap.small 的 320px 同优先级、又写在后面,实测把 320 盖成了 652。
-   这里用 id 直接接管,不让两套口径继续打架。 */
+/* 塔剖面弹窗:左列两张图竖着排。横排时单张只剩 250px 宽,轴文字会缩到看不清;
+   右列放塔板表,高度由列容器决定,表内不再单独出一条滚动条。
+   (老实现是右侧 620px 抽屉 + 图横排 + 表吃剩余高度,换算后一并收掉。) */
+#columnPanel.pump-modal .charts {
+  grid-template-columns: minmax(0, 1fr);
+  margin-bottom: 0;
+}
 #columnPanel .table-wrap {
-  flex: 1 1 auto;
-  min-height: 0;           /* flex 子项默认 min-height:auto,不给 0 就不会滚 */
   max-height: none;
+  overflow: auto;
 }
 
 .col-link, .stream-link { color: var(--accent); text-decoration: none; border-bottom: 1px dashed rgba(37, 99, 235, .4); }
 .col-link:hover, .stream-link:hover { border-bottom-style: solid; }
+
+/* 混合分流的进出口流股:小胶囊,多流股自动换行;点击打开组分抽屉 */
+.mix-streams { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.stream-chip {
+  padding: 1px 6px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface-head); font-variant-numeric: tabular-nums;
+}
+.stream-chip:hover { border-color: var(--accent); background: var(--surface-hover); }
 
 /* ---------- 图表悬停提示 ---------- */
 .chart-svg { cursor: crosshair; }
@@ -1399,8 +1434,8 @@ thead .cmp-name { background: var(--surface-head); z-index: 3; }
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-/* 0 值也是数据("这一组分不含")。原来用 gray-400(白底 2.54:1)几乎看不见,
-   换成 --muted(4.8:1);"没读到"另有 — 号表达,不靠颜色深浅区分。 */
+/* 0 值亦为数据(该组分不含)。此前用 gray-400(白底 2.54:1)几乎不可见,
+   改用 --muted(4.8:1);未读到另有「—」表达,不以颜色深浅区分。 */
 td.comp-zero { color: var(--muted); }
 
 /* ================================================================
@@ -1577,8 +1612,8 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   padding: 16px 0 10px;
 }
 .page-head h2 { margin: 0; font-size: var(--fs-lg); font-weight: 700; }
-/* 操作按钮分组:结果(重算/导出)与配置(标准表/等级表/说明)分开,
-   中间一条竖线,免得 7 个同级按钮连成一排、误点 */
+/* 操作按钮分组:结果(重算 / 导出)与配置(标准表 / 等级表 / 说明)分离,
+   中间以竖线分隔,避免 7 个同级按钮同排误点 */
 .btn-group { display: inline-flex; align-items: center; gap: 8px; }
 .btn-group + .btn-group {
   margin-left: 4px; padding-left: 12px; border-left: 1px solid var(--line);
@@ -1719,7 +1754,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   font-weight: 400;
   fill: var(--muted);
 }
-/* 描边只画在 node-body 上:原来选的是 rect,连 4px 色条也描了一圈 */
+/* 描边仅施加于 node-body:此前选中 rect,4px 色条亦被描边 */
 .flow-node .flow-stripe { fill: var(--muted); stroke: none; }
 .flow-node.st-ok .node-body { stroke: var(--flow-ok-line); }
 .flow-node.st-ok .flow-stripe { fill: var(--ok); }
@@ -1844,10 +1879,17 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   padding: 4px 6px; font: inherit; font-size: var(--fs-sm); border: 1px solid var(--line);
   border-radius: var(--r-sm); background: var(--panel); color: var(--text);
 }
-.pipe-toggle { gap: 6px; }
+/* 组内勾选项与组外勾选项同排显示时贴底对齐:
+   组内默认垂直居中,会被 legend 顶高约 5 px,与组外的 .pipe-toggle 错位 */
+.pipe-toggle { gap: 6px; align-self: flex-end; }
 
-/* 表体撑满剩余高度:这一页有参数面板,不能用 .page .table-wrap 的 max-height 公式 */
-.pipe-wrap { margin-top: 10px; max-height: none; }
+/* 表体限高:本页整体滚动,表体不限高会把下方「未选型流股 / 校验发现」推离首屏。
+   上限 700 px(全屏约 19 行);窗口较矮时按视口收缩,给下方两张卡片留可视高度。 */
+#pagePipes .pipe-wrap {
+  margin-top: 10px;
+  max-height: min(700px, calc(100vh - 360px));
+  min-height: 240px;
+}
 .pipe-wrap table { min-width: 1080px; }
 /* 结果还没回来时**不整表变淡**(会闪) —— 状态改由参数条右侧的 .pipe-status 表示 */
 
@@ -1875,7 +1917,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 /* 空态有两种形状:
    .empty        纯文本(保留换行、居中)
    .empty--block 整块 HTML(409 卡片:左对齐、不要 pre-wrap)
-   以前是"给 .empty 加 pre-wrap,再在 #pipeEmpty 里反向覆盖",三段补丁互相盖。 */
+   此前以 `.empty` 加 pre-wrap、再在 #pipeEmpty 反向覆盖,三处补丁互相覆盖。 */
 .empty--block { padding: 14px 0; white-space: normal; text-align: left; }
 .pipe-blocked {
   max-width: 880px; margin: 0 auto;
@@ -2023,15 +2065,54 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
 .pipe-std-pick { grid-column: 2; grid-row: 1 / span 3; align-self: center; white-space: nowrap; }
 .pipe-std-note { margin: 0; font-size: var(--fs-xs); line-height: 1.75; }
 .pipe-std-note code { overflow-wrap: anywhere; }
+/* 首页「标准表」卡片 + 统一导入弹窗(管路 / 换热各一块,共用同一套 .pipe-std-* 行) */
+.std-modal-box { width: min(900px, 100%); }
+.std-family {
+  display: flex; flex-direction: column; gap: 8px;
+  border: 1px solid var(--line); border-radius: var(--r-md);
+  padding: 10px 12px 12px;
+}
+.std-family-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap;
+}
+.std-family-head h4 { margin: 0; font-size: var(--fs-sm); font-weight: 600; }
+.std-family-head .muted { font-size: var(--fs-xs); }
+.std-family .pipe-notice { white-space: pre-line; }
+.home-std-status { font-size: var(--fs-sm); line-height: 1.7; }
+.home-std-row { display: flex; flex-direction: column; gap: 4px; }
+.home-std-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.home-std-name { font-weight: 500; }
 .pipe-notice.ok { background: var(--ok-fill); border-color: var(--ok-line); color: var(--ok); }
-/* 服务端一次可能回好几种错误,一条一行 */
-#pipeStdError, #pipeStdWarn, #pipeStdOk { white-space: pre-line; }
 .pipe-setup-cta { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .pipe-setup-cta .muted { font-size: var(--fs-sm); }
+
+/* ---------- 物性组教程弹窗(首页卡片与数据页 p_v 浮层共用) ---------- */
+.prop-guide-box { width: min(940px, 100%); }
+.prop-steps { margin: 0; padding-left: 22px; font-size: var(--fs-sm); line-height: 1.8; }
+.prop-steps li { margin: 2px 0; }
+.prop-map { width: 100%; border-collapse: collapse; font-size: var(--fs-xs); border: 1px solid var(--line); }
+.prop-map th, .prop-map td {
+  padding: 6px 9px; border-bottom: 1px solid var(--line);
+  text-align: left; vertical-align: top; line-height: 1.6;
+}
+.prop-map thead th { background: var(--surface-head); font-weight: 600; white-space: nowrap; }
+.prop-map tbody tr:last-child td { border-bottom: 0; }
+.prop-map code { white-space: nowrap; }
+/* 两张 Aspen 界面截图:并排,窄窗口落成一列;图注贴底对齐(两图长宽比不同) */
+.prop-shots { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.prop-shots figure { margin: 0; display: flex; flex-direction: column; }
+.prop-shots img {
+  width: 100%; height: auto; display: block;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface-head);
+}
+.prop-shots figcaption { margin-top: auto; padding-top: 4px; font-size: var(--fs-xs); color: var(--muted); }
+.prop-note { margin: 0; font-size: var(--fs-xs); line-height: 1.7; }
 
 @media (max-width: 720px) {
   .pipe-modal { padding: 8px; }
   .pipe-modal-box { border-radius: var(--r-md); }
+  .prop-shots { grid-template-columns: 1fr; }
 }
 
 /* ================================================================
@@ -2046,7 +2127,7 @@ body { display: flex; align-items: stretch; min-height: 100vh; }
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-/* 贴边或胶囊形的控件不再外扩焦点框,免得压到相邻元素 */
+/* 贴边或胶囊形控件不扩展焦点框,避免压住相邻元素 */
 .nav-item:focus-visible,
 .btn:focus-visible,
 .icon-btn:focus-visible,
@@ -2092,8 +2173,8 @@ input:focus-visible {
 /* ================================================================
    响应式(第三批 I)
    目标设备:电脑 + 横屏平板,最小按 1024×768 的内容区设计。
-   原来 6 条 @media 里有 4 条只服务管道页弹窗,侧栏一直死钉 220px ——
-   1024 宽时内容区只剩 804px,11 列的流股表必然横滚(粘首列已做)。
+   此前 6 条 @media 中 4 条仅服务管道页弹窗,侧栏固定 220px:
+   1024 宽时内容区仅 804px,11 列流股表必然横向滚动(首列已固定)。
    ================================================================ */
 @media (max-width: 1279px) {
   .sidebar { width: 180px; padding: 14px 10px; gap: 14px; }
@@ -2309,24 +2390,59 @@ input:focus-visible {
 .heat-blockers .heat-warn { color: var(--warn, #b7791f); }
 .heat-note { font-size: 12px; line-height: 1.5; margin: 6px 0 12px; }
 
+/* L2 的"程序替你做的假设"逐条列出,比挤成一句话好读 */
+.heat-assume {
+  margin: 2px 0 10px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.heat-assume li { margin: 0; }
+
+/* 标准行键的读法说明:跟着表格走,字号与备注一致 */
+.heat-key { font-size: 12px; line-height: 1.65; margin: 8px 0 2px; }
+.heat-key-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-sunken);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
 /* 换热家族主表:状态/来源并排,徽标后跟简写来源 */
-.hx-cell .hx-src { display: block; margin-top: 2px; font-size: 11px; color: var(--text-2); }
+.hx-cell .hx-src { display: block; margin-top: 2px; font-size: 11px; color: var(--muted); }
+
+/* L2 操作按钮:inline 元素带 padding 换行后会上下堆叠,统一改成 flex 自动换行 */
+.heat-l2-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+.heat-l2-actions .btn { display: inline-flex; align-items: center; }
+/* 缺标准表时那一句:文字与"去首页"按钮同一行,窄了自动换行 */
+.heat-std-cta {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 6px 0 0; font-size: var(--fs-xs); line-height: 1.7;
+}
 .heat-config {
   position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
   background: rgba(8, 15, 24, 0.55); padding: 24px;
 }
 .heat-config.hidden { display: none; }
 .heat-config-card {
-  width: min(860px, 96vw); max-height: 90vh; overflow: auto; background: var(--bg-1);
+  width: min(860px, 96vw); max-height: 90vh; overflow: auto; background: var(--panel);
   border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: 0 24px 64px rgba(0,0,0,.35);
 }
 .heat-config-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .heat-config-head h3 { margin: 0 0 4px; font-size: 16px; }
 .heat-cfg-tabs { display: flex; gap: 6px; margin: 12px 0 6px; flex-wrap: wrap; }
-.heat-cfg-tab { border: 1px solid var(--line); background: var(--bg-2); color: var(--text-1); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
-.heat-cfg-tab.active { border-color: var(--accent); color: var(--accent); background: var(--bg-1); }
+.heat-cfg-tab { border: 1px solid var(--line); background: var(--surface-head); color: var(--text); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+.heat-cfg-tab.active { border-color: var(--accent); color: var(--accent); background: var(--panel); }
 .heat-cfg-wrap { max-height: 46vh; overflow: auto; }
 .heat-cfg-table td { vertical-align: top; }
-.heat-cfg-label { display: block; font-size: 11px; color: var(--text-2); }
+.heat-cfg-label { display: block; font-size: 11px; color: var(--muted); }
 .heat-cfg-table input, .heat-cfg-table select { width: 100%; min-width: 84px; }
 .heat-config-actions { display: flex; gap: 8px; margin-top: 10px; }

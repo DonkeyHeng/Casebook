@@ -2,9 +2,9 @@
 
 为什么单独一个模块
 ------------------
-以前靠全局作用域共享:普通 <script> 里 `const state` 其实不在 window 上,
-其它文件能读到全靠脚本加载顺序与全局词法环境 —— 换个加载方式就断。
-现在每个模块显式 `import { state }`,依赖关系在文件头上就能读出来。
+此前依赖全局作用域共享:普通 <script> 中 `const state` 不在 window 上,
+其他文件可读取依赖脚本加载顺序与全局词法环境,更换加载方式即失效。
+现各模块显式 `import { state }`,依赖关系可直接从文件头读取。
 
 这里只放**数据**,不放渲染。字段归属(谁读写谁,详见各视图模块的 docstring):
 
@@ -26,8 +26,8 @@ export const state = {
   blocks: [],
   tab: "streams",          // 数据页里的子视图:streams / blocks / compare
   page: "home",            // 当前页面:home / streams / blocks / compare
-  emptyText: "",           // 空态文案(读不到工况列表等错误也走这里)
-  emptyIsError: false,     // 空态是「出错」还是「本来就还没有工况」
+  emptyText: "",           // 空态文案(无法读取工况列表等错误亦经此处)
+  emptyIsError: false,     // 空态语义:错误,或本来无工况
   flow: {                  // 流程页:数据 + 布局 + 视图 + 聚焦
     caseId: null, data: null, layout: null, view: null, focus: null,
     center: null,          // 被点中的设备(和 2 层邻居分开配色)
@@ -35,6 +35,7 @@ export const state = {
   },
   filter: "",
   family: null,            // 设备页当前家族(column/heat/…),null = 还没挑
+  heatType: "all",         // 换热页通道筛选:all / heatx(HeatX) / heater(Heater)
   families: [],            // 家族表(/api/block-families)
   pumpSpec: null,          // 泵口径常量(/api/pump-spec):g / 电机效率 / 档位表 / 公式说明
   pump: {

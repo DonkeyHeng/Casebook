@@ -15,17 +15,21 @@ import { ZHONGLIAN_URL, closeDataDrawers, closePumpPromptTip, copyPlainText, fet
 import { resumeReadIfRunning, startRead } from "./views/read.js";
 import { checkForUpdate, closeUpdatePop, deleteCurrentCase, hideEmpty, loadAppVersion, loadCase, positionUpdatePop, quitApp, readHashPage, refreshCases, setPage, showEmpty, updatePopOpen } from "./views/shell.js";
 import { inheritPv, loadFamilies, loadPumpSpec, readPumpBar, renderCompare, renderTable, runCompare, schedulePvSave, scheduleTableRender, setCompareScope } from "./views/table.js";
+import { initStandards } from "./views/standards.js";
 import { api } from "./lib/core.js";
 import { initPipePanel } from "./pipe.js";
 import { installShellHooks, saveFromUrl } from "./download.js";
 import { state } from "./lib/store.js";
 import { initTheme } from "./lib/ui.js";
 import { bindReportPage } from "./views/report.js";
+import { initPropsGuide } from "./views/props.js";
 
 
 /* 所有按钮都只绑定一次 —— 即使库里一条工况都没有,也得能点「读取当前工况」 */
 function bindEvents() {
   initPipePanel();      // 管道页的参数面板与事件(pipe.js)
+  initStandards();      // 首页「标准表」卡片 + 统一导入弹窗(views/standards.js)
+  initPropsGuide();     // 首页「Aspen 物性组」教程弹窗(views/props.js)
   installShellHooks();  // 桌面壳里把外链转给系统浏览器(浏览器里什么都不做)
 
   document.getElementById("updateBtn").addEventListener("click", checkForUpdate);
@@ -79,7 +83,7 @@ function bindEvents() {
   });
 
   // p_v 与表格里的可点名称都挂在 #table tbody 上:表格整块重绘,委托一次就够。
-  // 以前每次重绘都要给每一行重绑 —— 120 行就是 120 个监听器,还都要被回收一遍。
+  // 此前每次重绘逐行重绑:120 行产生 120 个监听器,并需逐个回收。
   const tableBody = document.querySelector("#table tbody");
   if (tableBody) {
     tableBody.addEventListener("input", (e) => {
@@ -147,7 +151,7 @@ function bindEvents() {
   }
 
   // 泵页「复制选泵提示词」:正文从接口取,复制成功后弹操作指引浮层。
-  // 接口挂了(改了 Python 没重启)就把原因写在按钮上,不拿旧文案顶替。
+  // 接口不可用(修改 Python 后未重启)时将原因显示于按钮,不以旧文案替代。
   const promptBtn = document.getElementById("pumpPromptCopy");
   if (promptBtn) {
     const btnLabel = promptBtn.textContent;
@@ -227,7 +231,7 @@ function bindEvents() {
     });
   }
 
-  // 打开中联选型:只开页面,不拼参数(noopener/noreferrer,别让外站碰到本页)
+  // 打开中联选型:仅打开页面,不拼接参数(noopener/noreferrer,避免外站访问本页)
   document.getElementById("pumpZhonglian").addEventListener("click", () => {
     window.open(ZHONGLIAN_URL, "_blank", "noopener,noreferrer");
   });
@@ -261,7 +265,7 @@ function bindEvents() {
   document.getElementById("quitBtn").addEventListener("click", quitApp);
 
   // ---- 流程页:工具栏 + 缩放平移 + 聚焦 ----
-  // 缩放只有滚轮和「适应窗口」两个入口:+/- 按钮已去掉(有滚轮时纯占位)
+  // 缩放入口:滚轮、+/− 按钮、0 快捷键
   document.getElementById("flowFit").addEventListener("click", fitFlow);
   const labelsBtn = document.getElementById("flowLabels");
   labelsBtn.addEventListener("click", () => {
@@ -278,9 +282,8 @@ function bindEvents() {
 
   const flowSvg = document.getElementById("flowSvg");
   if (flowSvg) {
-    /* 交互全部走 pointer 事件,不用 click:
-       拖动结束后浏览器仍会补一个 click,若把"空白处 click"当取消聚焦,
-       用户拖到远处看邻居、一松手就会被拉回全图。改成 pointerup 里按位移判定。 */
+    /* 交互统一走 pointer 事件:拖动结束仍会触发 click,
+       若以空白 click 取消聚焦,拖动后会被拉回全图。改由 pointerup 按位移判定。 */
     let drag = null;
     const DRAG_THRESHOLD = 4;      // 像素:超过就算拖动,不算点击
 
@@ -334,9 +337,9 @@ function bindEvents() {
       flowSvg.classList.remove("dragging");
     });
     flowSvg.addEventListener("dblclick", fitFlow);
-    // Esc 只处理当前真正开着的东西。原来无条件 clearFlowFocus():
-    // 在任何页面按 Esc 都会重画一遍流程图,还抢在弹窗自己的 Esc 之前处理。
-    // 缩放按钮与快捷键:滚轮之外的第二条通道(键盘、触屏都要有)
+    // Esc 仅处理当前打开的浮层。此前无条件 clearFlowFocus():
+    //   任意页面按 Esc 都会重绘流程图,并抢在弹窗 Esc 之前处理。
+    // 缩放入口:滚轮、+/− 按钮、0 快捷键(键盘与触屏)
     const zoomIn = document.getElementById("flowZoomIn");
     const zoomOut = document.getElementById("flowZoomOut");
     if (zoomIn) zoomIn.addEventListener("click", () => zoomFlow(1.2));
@@ -380,7 +383,7 @@ async function init() {
   try {
     await refreshCases(null);
   } catch (err) {
-    showEmpty(`读不到工况列表:${err.message}\n\n后台服务可能没起来,重新双击桌面快捷方式。`);
+    showEmpty(`无法读取工况列表:${err.message}\n\n后台服务可能未启动,请重新启动桌面快捷方式。`);
     return;
   }
 

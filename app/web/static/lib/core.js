@@ -2,11 +2,10 @@
 
 为什么单独一个模块
 ------------------
-`app.js` 与 `pipe.js` 以前是两段普通脚本,共用全局作用域:pipe.js 调 app.js 里
-的 esc() 49 次、fmt() 10 次、api() 4 次,而 index.html 里 pipe.js 还排在 app.js
-**前面** —— 能跑只是因为那些调用都发生在事件回调里,晚于两侧加载完成。谁把它们
-提到顶层就是 ReferenceError。抽到这个模块后,依赖关系由 import 明说,与加载
-顺序无关。
+`app.js` 与 `pipe.js` 此前为两段普通脚本,共用全局作用域:pipe.js 调用 app.js 的
+esc() 49 次、fmt() 10 次、api() 4 次,且 index.html 中 pipe.js 位于 app.js **之前**;
+可运行仅因调用均发生在事件回调中,晚于两侧加载完成,上移至顶层即抛 ReferenceError。
+抽出本模块后,依赖由 import 显式声明,与加载顺序无关。
 
 只放"不依赖页面状态"的东西:这里不许读 `state`、不许碰 DOM。
 */

@@ -27,9 +27,30 @@ export function heatCaseName(row) {
   return row?.case?.block || row?.block || "";
 }
 
+// 标题口径:仅有需求面积而无公称面积时写「需求面积(估算)」,不写「缺面积」。
+function heatSourceText(row) {
+  const area = (row.case && row.case.area) || {};
+  let areaText;
+  if (area.source === "aspen") areaText = "Aspen简捷";
+  else if (area.source === "manual") areaText = "人工面积";
+  else if (area.source === "edr") areaText = "EDR校核";
+  else areaText = area.required_m2 ? "需求面积(估算)" : "缺面积";
+  const utility = row.case && row.case.utility;
+  const utilText = !utility
+    ? "无公用工程"
+    : utility.source === "aspen"
+      ? "公用工程实测"
+      : utility.source === "preset"
+        ? "公用工程预设"
+        : utility.source === "manual"
+          ? "公用工程人工"
+          : "缺公用工程温度";
+  return `管壳式 L1 参考 · 面积来源 ${areaText} · ${utilText}`;
+}
+
 function verdictBadge(verdict) {
   const [text, cls] = VERDICT_TEXT[verdict] || ["未判定", "warn"];
-  return `<span class="badge ${cls}" title="L1 只给参考结论;合格/不合格要 EDR rating,本期不做">${text}</span>`;
+  return `<span class="badge ${cls}" title="L1 仅给参考结论;合格判定需 EDR rating(本期未实现)">${text}</span>`;
 }
 
 function srcTag(source) {
@@ -49,7 +70,7 @@ function srcTag(source) {
 }
 
 async function loadHeat(force = false) {
-  if (!state.current?.id) throw new Error("还没载入工况");
+  if (!state.current?.id) throw new Error("未载入工况");
   if (!force && cache.caseId === state.current?.id && cache.rows) return cache;
   const [payload, config] = await Promise.all([
     api(`/api/cases/${state.current?.id}/heat`),
@@ -86,32 +107,69 @@ function renderHeatTable(row) {
   const u = c.u || {};
   const lmtd = c.lmtd || {};
 
+  const isHeatX = c.kind === "HeatX";
+  const proc = c.sides?.process || hot;
+  const util = c.sides?.utility || {};
+  // 公用工程非物料流股:Aspen 仅在 \Data\Utilities\<U> 提供温度。
+  // 判据:工艺侧有流股名;公用工程侧 stream 为空且带 utility_id。
+  const utilLabel = util.utility_id ? `(${esc(util.utility_id)})` : "";
+  const utilSource = util.source === "aspen"
+    ? `Aspen 公用工程${util.utility_id ? ` ${esc(util.utility_id)}` : ""}`
+    : util.source === "preset" ? "预设档"
+      : util.source === "manual" ? "人工" : "无";
+
   const rows = [
     kv("热负荷 kW", fmt(c.duty_kw, 2), "Aspen"),
-    kv("热侧温度 ℃", `${fmt(hot.t_in_c, 1)} → ${fmt(hot.t_out_c, 1)}`, "流股实测"),
-    kv("冷侧温度 ℃", `${fmt(cold.t_in_c, 1)} → ${fmt(cold.t_out_c, 1)}`, "流股实测"),
-    kv("ΔTm(自算) ℃", fmt(lmtd.self_c, 2), srcTag(lmtd.source), "逆流;未做 F 修正时按 F=1"),
-    kv("ΔTm(Aspen) ℃", fmt(lmtd.aspen_c, 2), "Aspen HX_DTLM", "是否含 F 未验证"),
-    kv("F 修正", fmt(lmtd.f, 3), lmtd.source === "computed" ? "未修正" : "Aspen"),
-    kv("面积 m²", fmt(area.used_m2, 2), srcTag(area.source),
-      area.source === "aspen" ? "Aspen 简捷面积 = 假设 U 推算,不是 rating 结果" : ""),
+  ];
+  if (isHeatX) {
+    rows.push(
+      kv(`热侧温度 ℃${hot.stream ? `(流股 ${esc(hot.stream)})` : ""}`,
+        `${fmt(hot.t_in_c, 1)} → ${fmt(hot.t_out_c, 1)}`, "流股读数"),
+      kv(`冷侧温度 ℃${cold.stream ? `(流股 ${esc(cold.stream)})` : ""}`,
+        `${fmt(cold.t_in_c, 1)} → ${fmt(cold.t_out_c, 1)}`, "流股读数"),
+    );
+  } else {
+    rows.push(
+      kv(`工艺侧温度 ℃${proc.stream ? `(流股 ${esc(proc.stream)})` : ""}`,
+        `${fmt(proc.t_in_c, 1)} → ${fmt(proc.t_out_c, 1)}`, "流股读数"),
+      kv(`公用工程侧温度 ℃${utilLabel}`,
+        `${fmt(util.t_in_c, 1)} → ${fmt(util.t_out_c, 1)}`, utilSource,
+        "公用工程侧非物料流股:Aspen 仅提供 Utilities 下进出口温度"),
+    );
+  }
+  rows.push(kv("ΔTm(自算) ℃", fmt(lmtd.self_c, 2), srcTag(lmtd.source), "逆流;未做 F 修正时按 F=1"));
+  if (isHeatX) {
+    // 这 6 项是 HeatX 专属节点(HX_DTLM/面积/HX_UAVD/HX_UA),Heater 在 Aspen 里没有,
+    // 硬显示只会是一排"—"。
+    rows.push(
+      kv("ΔTm(Aspen) ℃", fmt(lmtd.aspen_c, 2), "Aspen HX_DTLM", "是否含 F 未验证"),
+      kv("F 修正", fmt(lmtd.f, 3), lmtd.source === "computed" ? "未修正" : "Aspen"),
+      kv("面积 m²", fmt(area.used_m2, 2), srcTag(area.source),
+        area.source === "aspen" ? "Aspen 简捷面积:按假设 U 推算,非 rating 结果" : ""),
+      kv("U 反算 W/(m²·K)", fmt(u.back_calc_wm2k, 1), "计算 Q/(A·ΔTm)"),
+      kv("U(Aspen 设计) W/(m²·K)", fmt(u.aspen_wm2k, 1), "Aspen HX_UAVD",
+        "取值 850:来自简捷设计中人工输入的 U"),
+      kv("UA W/K", fmt(u.ua_wk, 1), "Aspen HX_UA"),
+    );
+  }
+  rows.push(
     kv("需求面积 A_req m²", fmt(area.required_m2, 2), "计算",
       `U=${fmt(u.aspen_wm2k || u.assumed_wm2k, 0)};裕量 ${fmt(area.margin, 2)}`),
-    kv("U 反算 W/(m²·K)", fmt(u.back_calc_wm2k, 1), "计算 Q/(A·ΔTm)"),
-    kv("U(Aspen 设计) W/(m²·K)", fmt(u.aspen_wm2k, 1), "Aspen HX_UAVD",
-      "实测 850,来自简捷设计里人工填的 U"),
-    kv("UA W/K", fmt(u.ua_wk, 1), "Aspen HX_UA"),
     kv("设计压力(管/壳) bar", `${fmt(c.design?.tube?.p_design_bar, 2)} / ${fmt(c.design?.shell?.p_design_bar, 2)}`, "规则"),
     kv("设计温度(管/壳) ℃", `${fmt(c.design?.tube?.t_design_c, 1)} / ${fmt(c.design?.shell?.t_design_c, 1)}`, "规则"),
     kv("允许压降(管/壳) bar", `${fmt(c.design?.tube?.dp_allow_bar, 2)} / ${fmt(c.design?.shell?.dp_allow_bar, 2)}`, "规则"),
     kv("污垢热阻(管/壳) m²·K/W", `${fmt(c.fouling?.tube, 6)} / ${fmt(c.fouling?.shell, 6)}`,
       c.fouling?.tube_key || c.fouling?.shell_key ? "查表" : "未选"),
-    kv("公用工程", c.utility ? `${c.utility.t_in_c} → ${c.utility.t_out_c} ℃` : "—",
-      c.utility ? srcTag(c.utility.source) : "无"),
+  );
+  if (isHeatX) {
+    rows.push(kv("公用工程", c.utility ? `${c.utility.t_in_c} → ${c.utility.t_out_c} ℃` : "—",
+      c.utility ? srcTag(c.utility.source) : "无"));
+  }
+  rows.push(
     kv("型号编码", row.model_code?.code || row.model_code?.code_partial || "—",
       row.model_code?.code ? "完整" : "缺项占位"),
     kv("判定", verdictBadge(c.verdict), c.verdict_note || ""),
-  ];
+  );
 
   document.querySelector("#heatTable thead").innerHTML =
     '<tr><th scope="col">参数</th><th scope="col" class="num">值</th><th scope="col">来源</th></tr>';
@@ -122,7 +180,7 @@ function renderHeatTable(row) {
   document.getElementById("heatBlockers").innerHTML = [
     ...blockers.map((b, i) => `<p class="heat-block">⛔ ${esc(c.blocker_text?.[i] || b)}</p>`),
     ...warnings.map((w, i) => `<p class="heat-warn">⚠ ${esc(c.warning_text?.[i] || w)}</p>`),
-  ].join("") || '<p class="muted">没有拦截项,也没有假设项。</p>';
+  ].join("") || '<p class="muted">无拦截项与假设项。</p>';
 }
 
 function renderHeatForm(row) {
@@ -165,7 +223,7 @@ function renderHeatForm(row) {
       <label class="heat-field">出口温度 ℃
         <input id="heatUtilOut" type="number" step="0.1" placeholder="出口" value="${manual ? esc(stored.utility_t_out_c) : ""}">
       </label>`}
-    <p class="muted heat-note">公用工程节点能读到温度时优先用实测;读不到才用预设或手填,并标「预设/人工」。</p>
+    <p class="muted heat-note">优先级:公用工程节点读数 > 预设 > 手填;后两者标注来源。</p>
     <button id="heatSave" class="btn primary" type="button">保存这台</button>
     <button id="heatWord" class="btn" type="button" title="§9.2 冻结十五列的《换热器选型一览表》">导出 Word 一览表</button>
     <button id="heatExport" class="btn" type="button" title="按冷热侧/压降/污垢/几何分组的 EDR 录入清单">导出 EDR 清单</button>
@@ -249,11 +307,10 @@ export async function openHeat(block) {
     const data = await loadHeat();
     const row = data.rows.find((r) => r.block === block);
     if (!row) {
-      document.getElementById("heatHint").textContent = `${block} 不在换热设备清单`;
+      document.getElementById("heatHint").textContent = `${block}:不在换热设备清单`;
       return;
     }
-    document.getElementById("heatHint").textContent =
-      `管壳式 L1 参考 · 面积来源 ${row.case.provenance.area} · 公用工程 ${row.case.provenance.utility}`;
+    document.getElementById("heatHint").textContent = heatSourceText(row);
     currentRow = row;
     renderHeatTable(row);
     renderHeatForm(row);
@@ -278,7 +335,7 @@ function loadDetail(block, force = false) {
 function renderL2Loading() {
   document.getElementById("heatL2").innerHTML =
     `<div class="pump-block-head"><span class="pump-block-title">L2 几何初选</span></div>
-     <p class="muted">正在按需读物性并枚举标准行…</p>`;
+     <p class="muted">正在读取物性并枚举标准行…</p>`;
 }
 
 const L2_VERDICT = {
@@ -303,18 +360,29 @@ function renderL2(detail) {
 
   if (std.state && std.state !== "ok") {
     banners.push(`<p class="heat-warn">⚠ 标准表:${esc(std.label || std.state)};${
-      esc(std.reason || "")}。已跳过标准规格圆整,只给 A_req 与经验推荐范围。</p>`);
+      esc(std.reason || "")} · 已跳过规格圆整,仅给 A_req 与经验范围。</p>`);
   }
   if (props.source === "unavailable" && props.note) {
-    banners.push(`<p class="heat-warn">⚠ 物性读不到:${esc(props.note).replace(/\n/g, "<br>")}</p>`);
+    banners.push(`<p class="heat-warn">⚠ 物性不可用:${esc(props.note).replace(/\n/g, "<br>")}</p>`);
   }
   if (props.missing?.length) {
-    banners.push(`<p class="muted">缺物性:${esc(props.missing.join("、"))};h 与 Pr 算不出,只给几何与面积。
-      可在 Aspen 物性集里勾 CP / THK,然后点「重新读物性」。</p>`);
+    banners.push(`<p class="muted">物性缺失:${esc(props.missing.join("、"))}。<br>
+      传热系数需物性齐备,当前仅给几何与面积。<br>
+      补法:物性组加 CPMX(摩尔基)或 CPMASS(质量基)与 KMX;步骤见首页「Aspen 物性组」。返回本页点「重新读物性」。</p>`);
+  }
+  const utilSide = detail?.row?.case?.sides?.utility;
+  if (utilSide && !utilSide.stream) {
+    banners.push(utilSide.utility_id
+      ? `<p class="muted">公用工程侧(${esc(utilSide.utility_id)})非物料流股:Aspen 仅在 Utilities 记录进出口温度,无 cp、λ、μ。<br>
+        传热系数需两侧物性,当前仅算工艺侧,判定止于「缺数据」。</p>`
+      : `<p class="muted"><b>未关联公用工程</b>(公用工程 ID 为空):缺冷/热侧温度,LMTD 与需求面积无法计算。<br>
+        补法:在 Aspen 配置公用工程,或在右侧「公用工程」面板选择预设。</p>`);
   }
   const assumptions = l2.assumptions || [];
   if (assumptions.length) {
-    banners.push(`<p class="muted">假设输入 ${assumptions.length} 项,判定封顶为「参考」:${esc(assumptions.join(";"))}</p>`);
+    banners.push(`<p class="muted">以下 ${assumptions.length} 条为程序假设,未经人工确认;
+      结论上限为「参考」,不出「合格」:</p>
+      <ul class="heat-assume">${assumptions.map((a) => `<li>${esc(a)}</li>`).join("")}</ul>`);
   }
 
   const rows = (l2.candidates || []).map((c) => {
@@ -340,15 +408,25 @@ function renderL2(detail) {
           <td>${x.count_min} ~ ${x.count_max}</td>
           <td>${fmt(estimate.shell_mm?.[String(x.tube_od_mm)] ?? estimate.shell_mm?.[String(Number(x.tube_od_mm))], 0)}</td></tr>`).join("")}
         </tbody></table>
-        <p class="muted">经验范围只回答「大概多大」,不是标准规格,不进型号。</p>`
+        <p class="muted">经验范围:仅估量级,非标准规格,不进型号。</p>`
     : "";
 
   const manual = detail?.manual;
   const manualHtml = manual
-    ? `<p class="muted">当前人工覆盖:壳径 ${fmt(manual.shell_id_mm, 0)} mm,φ${fmt(manual.tube_od_mm, 0)}×${fmt(manual.tube_wall_mm, 1)},
+    ? `<p class="muted">人工覆盖:壳径 ${fmt(manual.shell_id_mm, 0)} mm、φ${fmt(manual.tube_od_mm, 0)}×${fmt(manual.tube_wall_mm, 1)}、
        长 ${fmt(manual.tube_length_mm, 0)} mm,${fmt(manual.tube_count, 0)} 根,${fmt(manual.tube_passes, 0)} 管程
        ${manual.verdict ? `· ${l2Badge(manual.verdict)}` : ""}
        <button id="heatClearGeom" class="btn small" type="button">清除覆盖</button></p>`
+    : "";
+
+  // 键格式说明取首个标准行作示例,避免用户从键值反推字段。
+  const sample = (l2.candidates || []).find((c) => c.std_row_key) || null;
+  const wall = sample?.tube_wall_mm == null ? "" : `×${sample.tube_wall_mm}`;
+  // 无候选行(缺面积)时不显示,避免引用空表。
+  const keyHelp = sample
+    ? `<p class="muted heat-key">键格式:公称直径 | 管子外径 | 管心距 | 管程 | 管长(mm)。<br>
+      示例 <span class="heat-key-code">${esc(sample.std_row_key)}</span> = DN${fmt(sample.dn_mm, 0)} 壳体、φ${fmt(sample.tube_od_mm, 0)}${wall} 管、管心距 ${fmt(sample.tube_pitch_mm, 0)} mm、${fmt(sample.tube_passes, 0)} 管程、管长 ${fmt(sample.tube_length_mm, 0)} mm;标准面积 ${fmt(sample.area_std_m2, 1)} m²(已扣除两端管板)。<br>
+      标准行为厂家可制造的离散规格,按面积就近选取。</p>`
     : "";
 
   el.innerHTML = `
@@ -356,23 +434,24 @@ function renderL2(detail) {
       <span class="muted">${esc(l2.verdict_text || "")}</span></div>
     ${banners.join("")}
     ${rows ? `<div class="table-wrap small"><table>
-      <thead><tr><th scope="col">标准行</th><th scope="col" class="num">A_std m²</th>
-      <th scope="col" class="num">A/需求</th><th scope="col" class="num">U 计算</th>
+      <thead><tr><th scope="col">标准行</th><th scope="col" class="num">标准面积 m²</th>
+      <th scope="col" class="num" title="面积裕度比 = 标准公称面积 / 需求面积;越接近 1 越合适">面积比</th>
+      <th scope="col" class="num">U 计算</th>
       <th scope="col" class="num">Δp 管/壳 bar</th><th scope="col">判定</th><th></th></tr></thead>
-      <tbody>${rows}</tbody></table></div>` : ""}
+      <tbody>${rows}</tbody></table></div>
+      ${keyHelp}` : ""}
     ${estimateHtml}
     ${manualHtml}
-    <p class="muted heat-note">标准行按「公称面积/需求面积」最接近 1 排序;判定里的「简捷通过」也只是简捷级,
-      压降按 Darcy + Kern 口径估,未做振动与两相分区,送 EDR 复核。</p>
-    <div class="muted">标准表:${esc(std.label || std.state || "未加载")}${std.rows ? `(${std.rows} 行)` : ""}
-      ${std.version ? `· 版本 ${esc(std.version)}` : ""}</div>
+    <p class="muted heat-note">排序规则:按面积裕度比(A_std / A_req)趋近 1 优先。<br>
+      「简捷通过」仅基于 Darcy-Kern 单相粗算(未含两相分段与流致振动校核);<br>
+      终版设计须导入 EDR 复核。</p>
+    <div class="muted">标准系列表:${esc(std.label || std.state || "未加载")}${std.rows ? ` · ${std.rows} 条记录` : ""}
+      ${std.version ? ` (${esc(std.version)})` : ""}</div>
+    ${std.state === "ok" ? "" : `<p class="muted heat-std-cta"><span>标准表未导入:仅给需求面积与经验范围,无法排列标准规格。<br>
+      导入入口:首页 › 标准表(换热 2 张)。</span>
+      <button class="btn small" type="button" data-goto-std="hx">去首页 › 标准表</button></p>`}
     <div class="heat-l2-actions">
       <button id="heatPropsRefresh" class="btn" type="button">重新读物性</button>
-      <button id="heatEdrPrompt" class="btn" type="button">复制 EDR 送审提示词</button>
-      <button id="heatStdPrompt" class="btn small" type="button" title="让 AI 把标准原文整理成 CSV">复制标准表填写提示词</button>
-      <a class="btn small" href="/api/hx-standards-template.zip" download>下载空模板</a>
-      <label class="btn small" for="heatStdFile">导入标准表 CSV</label>
-      <input id="heatStdFile" type="file" accept=".csv,text/csv" multiple hidden>
     </div>
     <p id="heatL2Msg" class="muted"></p>
   `;
@@ -391,39 +470,6 @@ function renderL2(detail) {
       document.getElementById("heatL2Msg").textContent = `读物性失败:${err.message}`;
     }
   });
-  document.getElementById("heatEdrPrompt").addEventListener("click", copyEdrPrompt);
-  document.getElementById("heatStdPrompt").addEventListener("click", async () => {
-    try {
-      const data = await api("/api/hx-standards-prompt");
-      await navigator.clipboard.writeText(data.text || "");
-      document.getElementById("heatL2Msg").textContent = "标准表填写提示词已复制";
-    } catch (err) {
-      document.getElementById("heatL2Msg").textContent = `复制失败:${err.message}`;
-    }
-  });
-  document.getElementById("heatStdFile").addEventListener("change", importStandards);
-}
-
-async function importStandards(event) {
-  const files = Array.from(event.target.files || []);
-  if (!files.length) return;
-  const msg = document.getElementById("heatL2Msg");
-  msg.textContent = `正在校验并导入 ${files.length} 个文件…`;
-  const payload = { files: {} };
-  for (const file of files) {
-    payload.files[file.name] = await file.text();
-  }
-  try {
-    const result = await apiPost("/api/hx-standards", payload);
-    msg.textContent = result.ok
-      ? `已导入 ${result.loaded?.rows ?? 0} 行,版本 ${result.loaded?.version || ""}`
-      : `导入被拒:${(result.errors || []).slice(0, 3).join(";")}`;
-    if (result.ok) renderL2(await loadDetail(currentRow.block));
-  } catch (err) {
-    msg.textContent = `导入失败:${err.message}`;
-  } finally {
-    event.target.value = "";
-  }
 }
 
 async function pickGeometry(key, l2) {
@@ -477,28 +523,18 @@ async function clearGeometry() {
   }
 }
 
-async function copyEdrPrompt() {
-  try {
-    const data = await api("/api/hx-edr-prompt");
-    await navigator.clipboard.writeText(data.text || "");
-    document.getElementById("heatL2Msg").textContent = "EDR 送审提示词已复制";
-  } catch (err) {
-    document.getElementById("heatL2Msg").textContent = `复制失败:${err.message}`;
-  }
-}
-
 
 /* --------------------------------------------------------- 默认参数库 */
 
 const CONFIG_TABS = {
   fouling: {
     label: "污垢热阻",
-    hint: "单位 m²·K/W;值按规范取值,界面只改数值不改键名。",
+    hint: "单位 m²·K/W;仅改数值,不改键名。",
     fields: [["value", "热阻 m²·K/W", "number"]],
   },
   "u-reference": {
     label: "经验 U 区间",
-    hint: "单位 W/(m²·K);default 必须落在 min~max 之间。",
+    hint: "单位 W/(m²·K);default 须落在 min–max 之间。",
     fields: [
       ["min", "U 下限", "number"],
       ["default", "U 取值", "number"],
@@ -507,7 +543,7 @@ const CONFIG_TABS = {
   },
   "utility-presets": {
     label: "公用工程预设",
-    hint: "温度单位 ℃;相态决定是否按等温相变放行(仅工艺侧拦截)。",
+    hint: "单位 ℃;相态决定是否按等温相变放行(仅工艺侧拦截)。",
     fields: [
       ["label", "名称", "text"],
       ["t_in_c", "进口 ℃", "number"],
@@ -560,7 +596,7 @@ function renderConfigEditor(message = "") {
       <header class="heat-config-head">
         <div>
           <h3>换热器默认参数库</h3>
-          <p class="muted">当前「${tab.label}」:${source}。保存后写入 data/config,只覆盖本页。</p>
+          <p class="muted">当前「${tab.label}」:${source}。保存写入 data/config,仅覆盖本页。</p>
         </div>
         <button type="button" class="close" id="heatConfigClose" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
       </header>
@@ -568,7 +604,7 @@ function renderConfigEditor(message = "") {
       <p class="muted heat-note">${tab.hint}</p>
       <div class="table-wrap small heat-cfg-wrap">
         <table class="heat-cfg-table"><thead><tr><th>键</th>${tab.fields.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead>
-        <tbody>${cells || '<tr><td colspan="9" class="muted">这份配置没有条目</td></tr>'}</tbody></table>
+        <tbody>${cells || '<tr><td colspan="9" class="muted">当前配置无条目</td></tr>'}</tbody></table>
       </div>
       <p id="heatConfigMsg" class="muted">${esc(message)}</p>
       <div class="heat-config-actions">

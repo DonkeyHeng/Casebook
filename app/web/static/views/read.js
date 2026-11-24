@@ -17,12 +17,12 @@ import { SEVERITY } from "../lib/ui.js";
 
 /* ------------------------------------------------------------ 读取当前工况 */
 
-/* 读数要 9–25 s(1000 流股约 76 s),所以不阻塞页面:
-   POST /api/read 起一个后台任务 → 每 0.6 s 问一次 /api/read/status → 完成后自动切到新工况。 */
+/* 读取耗时 9–25 s(1000 流股约 76 s),不阻塞页面:
+   POST /api/read 启动后台任务 → 每 0.6 s 轮询 /api/read/status → 完成后切换至新工况。 */
 export const READ_POLL_MS = 600;
 export const READ_DONE_HIDE_MS = 9000;
-/* 读到这个秒数还没结束就提示"可能卡住了" —— 121 流股约 25 s,1000 流股约 76 s,
-   2 分钟以上基本只有两种情况:Aspen 在忙/弹了对话框,或者许可证在排队。 */
+/* 超过该时长仍未结束则提示可能阻塞:121 流股约 25 s,1000 流股约 76 s;
+   >2 min 通常为 Aspen 忙、弹出对话框或许可证排队。 */
 export const READ_STALL_SEC = 120;
 export const readState = { timer: null, hideTimer: null, busy: false };
 
@@ -46,7 +46,7 @@ export function hideReadStatus(delay = 0) {
   else hide();
 }
 
-/* 失败提示照原样显示:connect.py 里那句提示本来就是分好行的人话(该查哪几项) */
+/* 失败提示原样显示:connect.py 的输出已按排查项分行。 */
 export function showReadError(message) {
   const el = readStatusEl();
   el.className = "read-status error";
@@ -68,9 +68,8 @@ export function renderReadRunning(snap) {
 
   const stalled = elapsed >= READ_STALL_SEC;
   const hint = stalled
-    ? `<span class="read-hint">已经读了 ${fmtSeconds(elapsed)},比正常慢很多 ——
-         可能是 Aspen 正在忙、弹出了对话框,或者许可证在排队。
-         请看一眼 Aspen 窗口;实在不行点右上角「退出」重开后再读。</span>`
+    ? `<span class="read-hint">已读取 ${fmtSeconds(elapsed)},显著超出常规耗时。<br>
+         可能原因:Aspen 忙、弹出对话框、许可证排队。请检查 Aspen 窗口;必要时退出重开后再读。</span>`
     : "";
   // 同时开着几个模型时,attach() 取的是 ROT 里第一个 —— 显示出来才能发现读错了对象
   const model = snap.model_path ? baseName(snap.model_path) : "";
@@ -103,11 +102,11 @@ export function renderReadDone(snap) {
   const units = (snap.unit_units || []).filter(Boolean);
   const model = snap.model_path ? baseName(snap.model_path) : "";
 
-  // 老模型的单位集可能不是 METCBAR,换算不了就只能留空 —— 必须说清楚,别让人以为模型没结果
+  // 旧模型单位集可能非 METCBAR:无法换算时留空,并在界面说明,避免误判为模型无结果
   const gapHint = gaps > 0
-    ? `<span class="read-hint warn">⚠️ 有 ${gaps} 个字段的原始单位不认识、已留空${
-        units.length ? `(${esc(units.join("、"))})` : "(单位为空)"}。
-        表里的「—」可能是这个原因,不代表模型没结果。</span>`
+    ? `<span class="read-hint warn">⚠ ${gaps} 个字段的原始单位未识别,已留空${
+        units.length ? `(${esc(units.join("、"))})` : "(单位为空)"}。<br>
+        表中「—」可能由此产生,不代表模型无结果。</span>`
     : "";
 
   el.className = `read-status done ${sev.cls}`;

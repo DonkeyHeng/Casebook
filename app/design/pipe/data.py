@@ -750,7 +750,7 @@ SETUP_GUIDE: dict = {
         "分页怎么拼,见 docs/pipe-standards-index.md。",
         "整理时可以整段复制 docs/pipe-standards-extract-prompt.md 里的提示词给一个能看图的 AI,"
         "连同标准页面一起交给它,让它照格式抄成 CSV。",
-        "把 3 个 CSV 导进来:点「管道」页顶部的「标准表」按钮,选文件 → 导入,"
+        "把 3 个 CSV 导进来:回首页点「标准表 › 导入 / 更新」,选管路那组的文件 → 导入,"
         "马上就能用;也可以手工放进 data/preview/std/docx/ 后重启服务。",
         "回到「管道」页,上面的状态会变成「已录」,管道表自动算出来。",
     ],
@@ -1426,9 +1426,9 @@ def import_standards(
         status["warnings"] = warnings
         return ok, errs, status
 
-    # 正式路径:先在 versions/ 下拼一份**完整**目录,试加载通过再原子切指针。
-    # 以前是逐个 CSV 覆盖到生效目录:第二个文件失败时第一个已经生效,页面就会
-    # 拿到新的壁厚表配旧的许用应力表。
+    # 正式路径:先在 versions/ 下组装**完整**目录,试加载通过后原子切换指针。
+    # 此前逐文件覆盖生效目录:后续文件失败时前者已生效,页面会得到新壁厚表
+    # 配旧许用应力表。
     stamp = time.strftime("%Y%m%d-%H%M%S")
     staging = _VERSIONS_DIR / stamp
     seq = 1

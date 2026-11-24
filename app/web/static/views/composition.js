@@ -16,15 +16,18 @@ import { chartHead, chartIndex, chartSVG, columnState, setHover } from "./column
 
 export async function openColumn(block) {
   const panel = document.getElementById("columnPanel");
-  document.getElementById("compPanel").classList.add("hidden");  // 两个抽屉不叠着
+  document.getElementById("compPanel").classList.add("hidden");  // 三个抽屉不叠着
   document.getElementById("pumpPanel").classList.add("hidden");
+  document.getElementById("heatPanel").classList.add("hidden");
   document.getElementById("columnTitle").textContent = `塔剖面 · ${block}`;
+  document.getElementById("columnSub").textContent = "左栏:逐级温度与液/气流量 · 右栏:逐级塔板读数";
   panel.classList.remove("hidden");
   markDrawerOpened();
   focusIntoDrawer(panel);
-  panel.scrollTop = 0;   // 看另一座塔时别带着上一座的滚动位置
+  // 看另一座塔时别带着上一座的滚动位置(现在滚动的是左右两列,不是面板本身)
+  panel.querySelectorAll(".pump-modal-col").forEach((col) => { col.scrollTop = 0; });
 
-  // 先给占位:接口慢或失败时原来是一块白板(openColumn 的 reject 没人接)
+  // 先渲染占位:接口慢或失败时此前为空白(openColumn 的 reject 未处理)。
   document.getElementById("columnCharts").innerHTML = '<p class="comp-note">正在读取…</p>';
   document.querySelector("#columnTable thead").innerHTML = "";
   document.querySelector("#columnTable tbody").innerHTML = "";
@@ -35,18 +38,24 @@ export async function openColumn(block) {
       () => api(`/api/cases/${state.current.id}/columns/${encodeURIComponent(block)}`));
   } catch (err) {
     document.getElementById("columnCharts").innerHTML =
-      `<div class="comp-error">读不到 ${esc(block)} 的塔剖面:${esc(err.message)}</div>`;
+      `<div class="comp-error">无法读取 ${esc(block)} 的塔剖面:${esc(err.message)}</div>`;
     return;
   }
   state.column = { block, rows };
   columnState.rows = rows;
   columnState.charts = [];
+  document.getElementById("columnSub").textContent =
+    `左栏:逐级温度与液/气流量 · 右栏:逐级塔板读数 · 共 ${rows.length} 级`;
 
   const temps = rows.map((r) => ({ x: r.stage, y: r.temperature_c }));
   const liq = rows.map((r) => ({ x: r.stage, y: r.liq_flow }));
   const vap = rows.map((r) => ({ x: r.stage, y: r.vap_flow }));
 
   const chartsEl = document.getElementById("columnCharts");
+  const chartHint = document.getElementById("columnChartHint");
+  // 流量单位随 Aspen 的设置变(kmol/hr、kg/hr 都可能),直接取读数自带的单位,不写死
+  const flowUnit = rows[0]?.liq_flow_unit ? ` ${rows[0].liq_flow_unit}` : "";
+  if (chartHint) chartHint.textContent = `横轴:级序 · 纵轴:温度 ℃ / 流量${flowUnit}`;
   // 系列定义提到外面:顶部标题行的图例和曲线用的是同一份 label 与颜色,别写两遍
   const tempSeries = [{ points: temps, color: cssVar("--chart-1"), label: "温度" }];
   const flowSeries = [
@@ -71,6 +80,8 @@ export async function openColumn(block) {
 
   const thead = document.querySelector("#columnTable thead");
   const tbody = document.querySelector("#columnTable tbody");
+  const hint = document.getElementById("columnTableHint");
+  if (hint) hint.textContent = `${rows.length} 级 · 列多时可横向滚动`;
   thead.innerHTML = `<tr><th scope="col">级</th><th scope="col" class="num">温度 ℃</th><th scope="col" class="num">压力 bar</th>
     <th scope="col" class="num">液流量</th><th scope="col" class="num">气流量</th><th scope="col" class="num">热负荷 kW</th></tr>`;
   tbody.innerHTML = rows.map((r) => `<tr>
@@ -85,8 +96,8 @@ export async function openColumn(block) {
 
 /* ------------------------------------------------------------ 流股组成 */
 
-/* 摩尔分数可能是 1e-9 量级的痕量:固定 6 位小数会全变成 0.000000,
-   所以小的改用科学计数法,大的保留 6 位。 */
+/* 摩尔分数含 1e-9 量级痕量:固定 6 位小数会归零,
+   故小值用科学计数法,其余保留 6 位。 */
 export function fmtFrac(v) {
   if (v === null || v === undefined) return "—";
   if (typeof v !== "number") return esc(v);
@@ -94,7 +105,7 @@ export function fmtFrac(v) {
   return v.toFixed(6);
 }
 
-/* 百分比:99.6% / 0.21% / 0.0007% —— 按量级换精度,别把痕量写成 0.00% */
+/* 百分比按量级调整精度(99.6% / 0.21% / 0.0007%),避免痕量显示为 0.00%。 */
 export function pctText(fraction) {
   if (fraction === null || fraction === undefined) return "—";
   const p = fraction * 100;
@@ -149,11 +160,9 @@ export function phaseRow(label, key, comps, sum) {
   </div>`;
 }
 
-/* 气相 / 液相各占多少 —— 一条独立的 "气液比"。
-   除以摩尔流量: Aspen 的汽化率(VFRAC)本身就是摩尔基准,直接乘总摩尔流量就是
-   两相各自的摩尔流量,不用估;换成质量基准要按每个组分的分子量折算,而抽屉里
-   没有分子量,那样算出来是估数,不如不给。
-   组分条回答"气相里有什么",这一条回答"气相有多少" —— 两个问题不一样。 */
+/* 气液比:按摩尔基准。Aspen 汽化率(VFRAC)为摩尔基准,
+   乘以总摩尔流量即得两相摩尔流量;质量基准需组分分子量,抽屉内无该数据,故不给出。
+   组分条表示气相组成,本条表示气相量。 */
 export function flowSplitRow(row) {
   const vf = row && typeof row.vap_frac === "number" ? row.vap_frac : null;
   const total = row && typeof row.mole_flow_kmolh === "number" ? row.mole_flow_kmolh : null;
@@ -183,7 +192,7 @@ export async function openComposition(stream) {
   document.getElementById("columnPanel").classList.add("hidden");
   document.getElementById("compTitle").textContent = `流股组成 · ${stream}`;
   document.getElementById("compBody").innerHTML =
-    '<p class="comp-note">正在读取…(工况里存过就直接取;没存过会去当前打开的 Aspen 现读一次,约 0.3 秒)</p>';
+    '<p class="comp-note">正在读取…<br>(工况中已存则直接取;未存则从当前打开的 Aspen 读取一次,约 0.3 秒)</p>';
   panel.classList.remove("hidden");
   markDrawerOpened();
   focusIntoDrawer(panel);
@@ -205,7 +214,7 @@ export async function openComposition(stream) {
 }
 
 /* 含量为 0 的组分默认收起来:一屏几十行 0 既占地方又没信息量。
-   只把"真正的数值 0"算作空;null 表示没读到,不能当 0 藏掉(那会把缺数据伪装成没有)。 */
+   仅将数值 0 视为空;null 表示未读到,不得按 0 隐藏(否则缺数据被伪装为无数据)。 */
 export let compShowAll = false;
 
 export function compIsZero(c) {
@@ -235,15 +244,12 @@ export function renderComposition(data, streamName) {
 
   const rows = shown.map((c) => {
     const zero = (v) => (v === 0 ? " comp-zero" : "");
-    // 组分名的显示规则(2026-11-15 定):
-    //   认得出来(CAS 在字典里)→ 第一行中文名、第二行 CAS,悬浮给 Aspen 原名;
-    //   认不出来(自定义组分没有 CAS)→ 只显示 Aspen 原名,不给悬浮,免得让人以为工具认得。
+    // 组分名显示规则(2026-11-15):CAS 命中字典时,首行中文名、次行 CAS,悬浮显示 Aspen 原名;
+    //   无 CAS 的自定义组分仅显示 Aspen 原名,不提供悬浮,避免误示为已识别。
     const cn = c.cn ? String(c.cn) : "";
     const cas = c.cas ? String(c.cas) : "";
-    // 悬浮只给 Aspen 原名(2026-11-15 定):页面上已经是中文名+CAS,
-    // 悬浮的用处是"回到模型里的叫法",别再把中文和 CAS 重复一遍。
-    // 手填的 CAS 往往查不到中文名,这时第一行用原名、第二行照旧显示 CAS —— 不能因为
-    // 没有中文名就把 CAS 一起吞掉(那会让用户以为"填了没用")。
+    // 悬浮仅显示 Aspen 原名(2026-11-15):页面已含中文名与 CAS,悬浮用于对应模型内命名。
+    // 手填 CAS 常无对应中文名:首行用原名,次行仍显示 CAS,避免因缺少中文名而隐藏 CAS。
     const head = cn || c.component;
     const title = cn ? esc(c.component) : "";
     const nameCell =
@@ -302,7 +308,7 @@ export function renderComposition(data, streamName) {
   if (casBtn) casBtn.addEventListener("click", () => renderCasEditor(data));
 }
 
-/* 手填 CAS:只列"读不到 CAS"的组分。
+/* 手填 CAS:仅列无 CAS 的组分。
    存到按模型挂的 component_cas 表,重读工况不会丢;读得到时仍以读数为准。 */
 export function renderCasEditor(data) {
   const body = document.getElementById("compBody");
@@ -319,8 +325,8 @@ export function renderCasEditor(data) {
 
   body.innerHTML = `
     <div class="comp-tools"><button class="link-btn" id="casBack">← 返回组成</button></div>
-    <p class="comp-note">这些组分在 Aspen 和模型文件里都没读到 CAS。手填按<b>模型</b>保存,重读工况不会丢;
-    读得到 CAS 时仍以读数为准。</p>
+    <p class="comp-note">以下组分在 Aspen 与模型文件中均无 CAS。<br>
+    手填值按<b>模型</b>保存,重读工况不丢失;有读数时以读数为准。</p>
     <div class="cas-edit-list">${rows}</div>
     <div class="comp-tools">
       <button class="link-btn" id="casSave">保存全部</button>

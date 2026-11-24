@@ -23,9 +23,9 @@ import { renderReport } from "./report.js";
 /* ------------------------------------------------------------ 初始化 */
 
 export const EMPTY_HINT = [
-  "还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。",
+  "无工况:左上「读取当前工况」读取 Aspen。",
   "",
-  "没有 Aspen 也能先看界面:点下面的「载入示例工况」。",
+  "无 Aspen:点「载入示例工况」。",
 ].join("\n");
 
 export function showEmpty(text) {
@@ -45,7 +45,7 @@ export function hideEmpty() {
   document.getElementById("empty").classList.add("hidden");
 }
 
-/* 没有工况时三个按钮点了也没反应,不如直接禁用,免得像"坏了" */
+/* 无工况时禁用导出与删除,避免点击无响应。 */
 export function setCaseButtonsEnabled(on) {
   document.getElementById("exportBtn").disabled = !on;
   document.getElementById("aiPackBtn").disabled = !on;
@@ -69,7 +69,7 @@ export async function refreshCases(preferId = null) {
 }
 
 export async function loadCase(id) {
-  // 失败时不清空表:旧数据留着更有用,但必须说清它是哪一份,别被当成新工况读
+  // 加载失败时保留旧数据,并标明其工况来源,避免误读为新工况。
   const prevId = state.current ? state.current.id : null;
   showNotice(`正在加载工况 #${id}…`);
   let payload;
@@ -78,12 +78,12 @@ export async function loadCase(id) {
       api(`/api/cases/${id}`),
       api(`/api/cases/${id}/streams`),
       api(`/api/cases/${id}/blocks`),
-      // 波及范围是锦上添花:接口不通(老版本服务)不该拖垮整页
+      // 影响范围为附加信息:接口不可用(旧版服务)不应阻断整页加载。
       api(`/api/cases/${id}/impact`).catch(() => null),
     ]));
   } catch (err) {
-    showNotice(`工况 #${id} 没加载成功:${err.message}。`
-      + (prevId ? `表格里仍是 #${prevId} 的数据。` : ""), { err: true });
+    showNotice(`工况 #${id} 加载失败:${err.message}。`
+      + (prevId ? `表格仍为 #${prevId} 的数据。` : ""), { err: true });
     return;
   }
   const [detail, streams, blocks, impact] = payload;
@@ -91,8 +91,9 @@ export async function loadCase(id) {
   state.streams = streams;
   state.blocks = blocks;
   state.impact = impact;
-  // 换工况:家族回到默认、关键词清空 —— 否则会停在旧家族/旧关键词上,新工况显示 0 行
+  // 换工况:重置家族与关键词,避免旧筛选导致新工况显示 0 行。
   state.family = null;
+  state.heatType = "all";
   state.filter = "";
   const filterBox = document.getElementById("filter");
   if (filterBox) filterBox.value = "";
@@ -105,12 +106,12 @@ export async function loadCase(id) {
   setCaseInfo();
   renderBanner();
   if (state.page === "flow") {
-    state.flow.caseId = null;        // 逼着下次进流程页按新工况重新拉图
+    state.flow.caseId = null;        // 使流程页下次按新工况重新拉图
     renderFlow();
   } else if (state.page === "pipes") {
     renderPipes();                   // 管道页按新工况重算(pipe.js)
   } else if (state.page === "report") {
-    state.report.picked = new Set(); // 换工况先清勾选,免得把旧位号带过去
+    state.report.picked = new Set(); // 换工况清空勾选,避免携带旧位号
     renderReport();
   } else if (state.page === "home") {
     renderHome();
@@ -118,7 +119,7 @@ export async function loadCase(id) {
     renderTable();
   }
   clearNotice();
-  resetTableScroll();   // 换工况也从第一行看起
+  resetTableScroll();   // 换工况后回到首行
 }
 
 /* ------------------------------------------------------------ 路由与首页 */
@@ -134,11 +135,11 @@ export function readHashPage() {
 
 export function setPage(page, { push = true } = {}) {
   if (!PAGES.includes(page)) page = "home";
-  // 换页就把详情收掉:数据页的抽屉是挂在 #pageData 里的,
-  // 只是把整页藏起来的话,绕一圈回到设备页它又会冒出来
+  // 换页关闭详情:数据页抽屉挂在 #pageData 内,
+  // 仅隐藏整页会导致返回设备页时抽屉重新出现。
   closeDataDrawers();
   state.page = page;
-  // aria-current 与 .active 同步:视觉上"你在这页"只靠底色,读屏听不出来
+  // aria-current 与 .active 同步:当前页仅由底色区分,读屏无法识别。
   document.querySelectorAll(".side-nav .nav-item").forEach((b) => {
     const on = b.dataset.tab === page;
     b.classList.toggle("active", on);
@@ -186,7 +187,7 @@ export function setCaseInfo() {
   if (!c) { el.textContent = ""; return; }
   const s = SEVERITY[c.severity] || SEVERITY.warning;
   const conn = c.connection_count;
-  // 侧栏只有 220px,一行塞不下 —— 状态一行,数字分两行,免得"连接"被拆两半
+  // 侧栏宽 220px:状态一行,数字分行,避免「连接」折行。
   el.innerHTML = `<span class="badge ${s.cls}">${s.text}</span>`
     + `<div>${c.stream_count} 流股 · ${c.block_count} 设备</div>`
     + (conn ? `<div>${conn} 连接</div>` : "");
@@ -210,12 +211,12 @@ export function renderHome() {
   if (!c) {
     const hint = state.emptyText || EMPTY_HINT;
     cards.innerHTML = `<section class="card wide">
-        <h3>${state.emptyIsError ? "读不到工况" : "还没有工况"}</h3>
+        <h3>${state.emptyIsError ? "无法读取工况" : "无工况"}</h3>
         <p class="muted" style="margin:0;line-height:1.8;white-space:pre-wrap">${esc(hint)}</p>
         ${state.emptyIsError ? "" : `
         <div class="empty-actions">
           <button id="loadSampleBtn" class="btn primary" type="button">载入示例工况(无需 Aspen)</button>
-          <span class="muted">121 流股 / 77 模块的异常工况样本;会先把你现在的库备份成 <code>cases.db.bak</code></span>
+          <span class="muted">121 流股 / 77 模块异常工况样本;当前库先备份为 <code>cases.db.bak</code></span>
         </div>`}
       </section>`;
     const sampleBtn = document.getElementById("loadSampleBtn");
@@ -286,8 +287,8 @@ export function renderHome() {
         ${metric("不校验", bs.skip)}
       </div>
       <div class="muted" style="margin-top:10px">
-        ${passRate === null ? "还没有可校验的设备" : `可校验 ${checked} 台,通过率 ${passRate}%`}
-        ${bs.bad ? `;<a href="#blocks" class="inline-link">去看哪几台超差</a>` : ""}
+        ${passRate === null ? "无可校验设备" : `可校验 ${checked} 台,通过率 ${passRate}%`}
+        ${bs.bad ? `;<a href="#blocks" class="inline-link">查看超差设备</a>` : ""}
       </div>
     </section>`;
 
@@ -301,14 +302,12 @@ export function renderHome() {
     problemsCard.classList.add("hidden");
   }
 
-  /* 卡片画完再对一次判定条:首页既然有数据,判定条就不该是 hidden。
-     它俩是一个整体(横幅说"能不能用",卡片说"用了哪些数"),任何一路把横幅
-     收起来都是不自洽的状态。renderBanner 很便宜(几百个字符),多画一次换掉
-     一整类"横幅不见了但卡片还在"的怪状态。 */
+  /* 卡片渲染后同步判定条:有工况数据时判定条不应隐藏。
+     横幅表达可用性,卡片表达数据构成,二者须一致;重复渲染代价极低。 */
   if (state.current) renderBanner();
 }
 
-/* 删除当前工况:不可恢复,所以确认框里把"删的是哪一个"写全(模型名 + 时间 + 规模)*/
+/* 删除不可恢复:确认框须写明对象(模型名、读取时间、规模)。 */
 export async function deleteCurrentCase() {
   const c = state.current;
   if (!c) return;
@@ -317,7 +316,7 @@ export async function deleteCurrentCase() {
     + `模型:${c.model_name || "-"}\n`
     + `读取时间:${c.read_at || "-"}\n`
     + `规模:${c.stream_count} 流股 / ${c.block_count} 设备\n\n`
-    + "明细(流股/设备/塔剖面/组成)会一起删除,不可恢复 —— 要用得重新读一次 Aspen。";
+    + "明细(流股 / 设备 / 塔剖面 / 组成)一并删除,不可恢复;如需再用须重新读取 Aspen。";
   if (!confirm(msg)) return;
 
   const btn = document.getElementById("deleteBtn");
@@ -350,10 +349,10 @@ export async function deleteCurrentCase() {
 }
 
 /* ================================================================
-   侧栏「检查更新」:只有用户点按钮才产生出站请求。
-   结果放在按按钮位置定位的浮层里,不占侧栏布局;点空白 / Esc / ✕ 关闭。
-   服务端固定访问 GitHub 的 /releases/latest,只带版本号做 User-Agent,
-   不发送任何本地工况数据;不下载、不解压、不安装(见 app/api/update_check.py)。
+   侧栏「检查更新」:仅用户点击时发起出站请求。
+   结果置于按钮上方浮层,不占侧栏布局;点空白 / Esc / ✕ 关闭。
+   服务端固定访问 GitHub /releases/latest,User-Agent 仅含版本号,
+   不发送本地工况数据;不下载、不解压、不安装(见 app/api/update_check.py)。
    ================================================================ */
 export let updateReleasesUrl = "https://github.com/DonkeyHeng/Casebook/releases";
 export let updatePopOpen = false;
@@ -364,8 +363,8 @@ export function verLabel(value) {
   return text.startsWith("v") ? text : `v${text}`;
 }
 
-/* 远端返回的地址一律过白名单:只认本仓库的 Releases 前缀。
-   万一 GitHub 改了重定向格式,页面也不会出现来路不明的链接。 */
+/* 远端地址经白名单校验:仅接受本仓库 Releases 前缀,
+   防止 GitHub 重定向格式变更后出现非预期链接。 */
 export function updateLink(url, text) {
   const base = updateReleasesUrl;
   const safe = typeof url === "string" && (url === base || url.startsWith(`${base}/`))
@@ -449,7 +448,7 @@ export async function checkForUpdate() {
   updateDismissed = false;   // 新的一次检查:之前手动关掉的不影响这次展示
   if (btn) btn.disabled = true;
   if (label) label.textContent = "正在检查…";
-  showUpdateNote("正在向 GitHub 查询最新版本号…");
+  showUpdateNote("正在查询 GitHub 最新版本…");
   try {
     const res = await fetch("/api/update/check", writeInit({ method: "POST" }));
     const data = await res.json();
@@ -482,7 +481,7 @@ export async function checkForUpdate() {
       );
     }
   } catch (err) {
-    // fetch 本身失败时浏览器抛的是 "Failed to fetch" 这类英文串,不能直接给用户看
+    // 浏览器 fetch 失败抛出英文串,需转写为可读原因。
     const raw = String((err && err.message) || "");
     const reason = /^(failed to fetch|networkerror|load failed|fetch failed)$/i.test(raw)
       ? "无法连接到本地服务" : (raw || "未知错误");
@@ -493,9 +492,9 @@ export async function checkForUpdate() {
   }
 }
 
-/* 退出:壳里由主进程关窗(页面不用变白);浏览器里停服务 + 关标签页,关不掉就留一张"已退出"页 */
+/* 退出:桌面壳由主进程关窗;浏览器内停止服务并关闭标签页,无法关闭时显示「已退出」页。 */
 export async function quitApp() {
-  if (!confirm("确定退出 Casebook 吗?\n后台服务会一起停止。")) return;
+  if (!confirm("退出 Casebook?\n后台服务将一并停止。")) return;
   const btn = document.getElementById("quitBtn");
   btn.disabled = true;
   btn.textContent = "正在退出…";
@@ -506,19 +505,18 @@ export async function quitApp() {
     // 服务已经关掉,连接被丢弃属于正常
   }
   window.close();
-  // 如果窗口没被关掉(普通标签页不允许脚本关闭),退化成一张空白的"已退出"页
+  // 普通标签页不允许脚本关闭窗口,退化为「已退出」页。
   setTimeout(() => {
     document.body.innerHTML = '<div class="exit-screen">已退出</div>';
   }, 500);
 }
-/* 首页空态的「载入示例工况」:把内置示例库装进当前库(等价于 --sample,先备份原库)。
-   放在 shell.js 里而不是 app.js —— 空态是这里渲染的,按钮回调也该归这里,
-   否则跨模块引用会变成未定义的裸标识符(空库首屏会直接抛 ReferenceError)。 */
+/* 首页空态「载入示例工况」:内置示例库装入当前库(等价 --sample,先备份原库)。
+   回调置于 shell.js:空态由本模块渲染,避免跨模块裸标识符(空库首屏抛 ReferenceError)。 */
 export async function installSampleData() {
   const ok = confirm(
     "载入内置示例工况?\n\n"
-    + "会先用示例数据覆盖当前工况库,原库自动备份成 cases.db.bak。\n"
-    + "如果你已经读过自己的模型,点「取消」即可。"
+    + "示例数据将覆盖当前工况库,原库自动备份为 cases.db.bak。\n"
+    + "已有自建工况时请点「取消」。"
   );
   if (!ok) return;
 
@@ -532,7 +530,7 @@ export async function installSampleData() {
     if (state.cases.length) {
       await loadCase(res.case_id ?? state.cases[0].id);
     } else {
-      showEmpty("示例库装好了,但没读到工况。刷新一下页面试试。");
+      showEmpty("示例库已载入,但未读到工况。请刷新页面。");
     }
   } catch (err) {
     alert(`载入示例失败:${err.message}`);

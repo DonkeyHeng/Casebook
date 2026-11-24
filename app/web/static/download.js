@@ -1,9 +1,8 @@
 /* Casebook · download —— 导出文件的"往哪存"
 
-浏览器里:导出靠跳转/锚点,由浏览器的下载栏接手。
-桌面壳(app/desktop.py,内置 WebView 窗口)里:没有下载栏,文件会默默躺在别人的
-下载目录里,用户根本找不到。所以壳里改由主进程写进 data/exports/ 并打开文件夹
-(Windows 资源管理器)。
+浏览器内:导出经跳转/锚点,由下载栏接手。
+桌面壳(app/desktop.py,内置 WebView)无下载栏,文件会落入默认下载目录且难以定位;
+壳内改由主进程写入 data/exports/ 并打开文件夹(Windows 资源管理器)。
 
 调用方只需要一行,剩下的都不变:
 
@@ -55,7 +54,7 @@ export async function saveFromUrl(url) {
 let hooked = false;
 
 /* 壳里点「退出」:直接让主进程销毁窗口。返回 true 表示"壳已接手"。
-   WebView 里页面的 window.close() 关不掉自己,浏览器里则照老路径走。 */
+   WebView 内 window.close() 无法关闭自身;浏览器内按原路径处理。 */
 export function quitShell() {
   const shell = bridge();
   if (!shell || typeof shell.quit !== "function") return false;

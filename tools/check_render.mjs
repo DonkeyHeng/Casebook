@@ -10,7 +10,7 @@
    后拼成一段,装进 vm 用 DOM 桩跑一遍纯渲染函数与保存逻辑,把这类空白挡在提交前。
 
    前端现在是 ES Module:入口 `app.js` 只做事件绑定与 init,页面实现在
-   `views/`(table / pump / composition / read / flow / shell / column / report),
+   `views/`(table / pump / composition / read / flow / shell / column / report / standards / props),
    共享状态在 `lib/store.js`。vm 不支持 import,所以这里按模块顺序拼接并去掉
    模块语法 —— 跑的还是同一份源码,只是换了装载方式;模块间的 import 可达性
    由上面的静态检查兜住。`pipe.js` 不进这轮覆盖(它要真浏览器,归
@@ -48,6 +48,8 @@ const MODULES = [
   path.join(STATIC, "views", "pump.js"),
   path.join(STATIC, "views", "heat.js"),
   path.join(STATIC, "views", "composition.js"),
+  path.join(STATIC, "views", "standards.js"),
+  path.join(STATIC, "views", "props.js"),
   path.join(STATIC, "views", "read.js"),
   path.join(STATIC, "views", "flow.js"),
   path.join(STATIC, "views", "shell.js"),
@@ -467,10 +469,23 @@ vm.runInContext("state.current = null;", ctx);
 vm.runInContext("renderHome()", ctx);
 const emptyHome = byId("homeCards").innerHTML;
 ok("⑦ 无工况时首页不静默空白", emptyHome.length > 0);
-has("⑦ 无工况时渲染出引导卡片", emptyHome, "还没有工况");
+has("⑦ 无工况时渲染出引导卡片", emptyHome, "无工况:左上");
 // 空态按钮的回调是 views/shell.js 导出的 installSampleData;谁引用谁 import,
 // 漏 import 时浏览器里首屏会直接抛 ReferenceError(2026-11-19 空库首屏事故)
 ok("⑦ 空态给出载入示例按钮", !!byId("loadSampleBtn"));
+
+// ⑦c 物性组教程:首页卡片 + 全局弹窗 + 两张截图;数据页浮层复用同一入口
+//     (本脚本的 DOM 是桩,静态区块直接查 index.html 源码)
+const indexForAssets = fs.readFileSync(path.join(ROOT, "app", "web", "index.html"), "utf8");
+has("⑦ 首页物性组卡片有入口", indexForAssets, 'id="homePropOpen"');
+has("⑦ 数据页浮层指向同一教程", indexForAssets, "见首页「Aspen 物性组」教程");
+ok(
+  "⑦ 物性组弹窗两张截图齐全",
+  (indexForAssets.match(/src="\/static\/assets\/aspen-property-/g) || []).length === 2,
+);
+["aspen-property-set.png", "aspen-property-qualifiers.png"].forEach((name) => {
+  ok(`⑦ 教程截图存在:${name}`, fs.existsSync(path.join(STATIC, "assets", name)));
+});
 
 // ⑦b 判定条:empty 状态必须用 verdict 专属类名,不能撞上 .empty 空表占位样式
 //     (padding:40px + text-align:center 会把首屏判定条撑成巨型居中卡片)
@@ -528,6 +543,44 @@ ok("⑧ 缺字段时页签不静默空白", sparseFam.length > 0);
 has("⑧ 缺字段时仍渲染出 data-family", sparseFam, 'data-family="pump"');
 ok("⑧ 缺字段时不出现 undefined", !sparseFam.includes("undefined"));
 ok("⑧ 缺字段时不出现 NaN", !sparseFam.includes("NaN"));
+
+// ⑧b 流体输送的进/出口压力列 / 混合分流的进出流股列
+console.log("\n[新增组 ⑧b] renderBlocks —— 入口/出口压力 / 进出口流股");
+vm.runInContext(`
+  state.tab = "blocks";
+  state.families = [{ key: "move", label: "流体输送" }, { key: "mix", label: "混合分流" }];
+  state.filter = "";
+  state.family = "move";
+  state.blocks = [
+    { name: "C-STUB", type: "Compr", family: "move", status: 1, power_kw: 12,
+      inlet_pressure_bar: 1.2, outlet_pressure_bar: 1.7 },
+    { name: "V-STUB", type: "Valve", family: "move", status: 1, outlet_pressure_bar: 0.4 },
+  ];
+`, ctx);
+vm.runInContext("renderBlocks()", ctx);
+const moveHead = byId("__table-thead").innerHTML;
+const moveBody = byId("__table-tbody").innerHTML;
+has("⑧b 流体输送含入口压力列", moveHead, "入口压力 bar");
+has("⑧b 流体输送含出口压力列", moveHead, "出口压力 bar");
+has("⑧b 压缩机入口压力按 3 位显示", moveBody, "1.200");
+has("⑧b 压缩机出口压力按 3 位显示", moveBody, "1.700");
+has("⑧b 阀门出口压力按 3 位显示", moveBody, "0.400");
+
+vm.runInContext(`
+  state.family = "mix";
+  state.blocks = [
+    { name: "M-STUB", type: "Mixer", family: "mix", status: 1,
+      in_streams: ["0106", "0109"], out_streams: ["0110"], outlet_temp_c: 35.0 },
+  ];
+`, ctx);
+vm.runInContext("renderBlocks()", ctx);
+const mixHead = byId("__table-thead").innerHTML;
+const mixBody = byId("__table-tbody").innerHTML;
+has("⑧b 混合分流含进口流股列", mixHead, "进口流股");
+has("⑧b 混合分流含出口流股列", mixHead, "出口流股");
+has("⑧b 进口流股渲染为可点胶囊", mixBody, 'data-stream="0106"');
+has("⑧b 出口流股渲染为可点胶囊", mixBody, 'data-stream="0110"');
+ok("⑧b 流股胶囊带 stream-chip 类", mixBody.includes("stream-chip"));
 
 // ⑨ 设计扬程 / 选型台账:悬浮窗里不再折叠,标题常驻、内容直接可见
 console.log("\n[新增组 ⑨] 常驻区块 —— 设计扬程 / 选型台账");
@@ -857,8 +910,8 @@ ok("⑫ 报告勾选不含 NaN", !(famTexts + listTexts + hint.textContent).incl
 vm.runInContext("state.report.picked = new Set(); state.report.filter = 'NO-MATCH-STUB';", ctx);
 vm.runInContext("renderReportPick()", ctx);
 ok("⑫ 无匹配时设备列表只留一条空提示", listBox.children.length === 1);
-has("⑫ 无匹配时显示没有匹配的设备", listBox.children[0].textContent, "没有匹配的设备");
-has("⑫ 未勾选时提示全部台数", hint.textContent, "未勾选 = 全部 3 台");
+has("⑫ 无匹配时显示「无匹配设备」", listBox.children[0].textContent, "无匹配设备");
+has("⑫ 未勾选时提示全部台数", hint.textContent, "未勾选:全部 3 台");
 ok("⑫ 无匹配分支不含 undefined/NaN",
   !(listBox.children[0].textContent + hint.textContent).includes("undefined")
   && !(listBox.children[0].textContent + hint.textContent).includes("NaN"));

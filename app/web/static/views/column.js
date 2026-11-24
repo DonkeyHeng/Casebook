@@ -6,10 +6,9 @@ import { cssVar } from "../lib/ui.js";
 
 /* ------------------------------------------------------------ 塔剖面 */
 
-/* 画布尺寸跟着"两图并排"走:抽屉内容宽 584,两列各 ≈286。
-   viewBox 收窄到 300×150 后缩放比 ≈0.95,轴文字 11px 落到 ~10.5px;
-   若沿用 480×170 再并排,文字会被压回 6px 级(第 1 批刚修好的正是这个)。
-   padL 要留够最长的刻度(如 1282.4),否则左边缘会切字。 */
+/* 画布按两图并排定尺寸:内容宽 584,两列各约 286。
+   viewBox 300×150 时缩放比约 0.95,11px 轴文字约 10.5px;
+   沿用 480×170 并排时文字会压至 6px。padL 需容纳最长刻度(如 1282.4)。 */
 export const COL_CHART = { width: 300, height: 150, padL: 54, padR: 12, padT: 16, padB: 22 };
 export const columnState = { rows: [], charts: [] };
 
@@ -47,9 +46,8 @@ export function chartSVG(series) {
   </svg>`;
 }
 
-/* 图表顶上那一行:标题 + 图例。
-   图例原来画在 SVG 里、紧挨着左侧最大刻度,并排后单图只有 285px,那一角就挤了。
-   挪成 HTML 一行后,标题靠左、图例靠右,和曲线画布彻底分开,也能换行。 */
+/* 图表标题行:标题 + 图例。图例改为 HTML 单行,
+   标题居左、图例居右,与画布分离;原 SVG 内图例在 285px 宽度下拥挤。 */
 export function chartHead(title, series) {
   const items = series.map((s) =>
     `<span class="lg"><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join("");
@@ -138,9 +136,9 @@ export function positionTip(tip, evt) {
   tip.style.top = `${Math.max(8, top)}px`;
 }
 
-/* 图 ↔ 表联动:高亮同一级,并把它滚到可见区。
-   只滚表格自己的容器 —— scrollIntoView 会把整条可滚动祖先链都滚一遍,
-   抽屉跟着滚、图表就被顶出视口(40 级塔实测面板 scrollTop 0→395)。 */
+/* 图 ↔ 表联动:高亮同一级并滚入可见区。
+   仅滚动表格容器:scrollIntoView 会滚动整条祖先链,导致抽屉滚动、图表移出视口
+   (40 级塔实测 scrollTop 0→395)。 */
 export function highlightRow(idx) {
   const rows = document.querySelectorAll("#columnTable tbody tr");
   rows.forEach((tr, i) => tr.classList.toggle("hl", i === idx));

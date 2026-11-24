@@ -15,7 +15,7 @@
 
 import { api, esc, fmt } from "./lib/core.js";
 import { state } from "./lib/store.js";
-import { copyPlainText } from "./views/pump.js";
+import { goToStandards } from "./views/standards.js";
 import { saveFromUrl } from "./download.js";
 
 /* ------------------------------------------------------------ 常量 */
@@ -203,7 +203,7 @@ function fillPipeSelects(tables) {
     const pc = (tables && tables.piping_class) || {};
     hint.textContent = pc.configured
       ? `等级表 ${pc.rule_count} 条`
-      : "等级表:未配置(全部按默认材质)";
+      : "等级表:未配置(全部按默认管材)";
   }
 }
 
@@ -305,38 +305,17 @@ function bindPipeEvents() {
     window.location.href = url;
   });
 
-  // ---- 标准表导入(三张国标表格的 CSV) ----
-  const stdOpen = document.getElementById("pipeStdOpen");
-  if (stdOpen) stdOpen.addEventListener("click", openPipeStd);
-  const stdClose = document.getElementById("pipeStdClose");
-  if (stdClose) stdClose.addEventListener("click", closePipeStd);
-  const stdCancel = document.getElementById("pipeStdCancel");
-  if (stdCancel) stdCancel.addEventListener("click", closePipeStd);
-  const stdImport = document.getElementById("pipeStdImport");
-  if (stdImport) stdImport.addEventListener("click", doPipeStdImport);
-  const stdPrompt = document.getElementById("pipeStdPrompt");
-  if (stdPrompt) stdPrompt.addEventListener("click", copyPipeStdPrompt);
-  const stdModal = document.getElementById("pipeStdModal");
-  if (stdModal) {
-    stdModal.addEventListener("click", (e) => {
-      if (e.target === stdModal) closePipeStd();
+  // ---- 标准表:已统一到首页「标准表」模块,这里不再有导入入口。
+  // 表变了(在首页导入完)让本页清缓存重算;缺表时只提示去首页,不在这里另开一套导入。
+  window.addEventListener("casebook:pipe-standards-changed", () => {
+    pipeState.tables = null;
+    pipeState.data = null;
+    pipeState.status = "idle";
+    loadPipeTableStatus().then(() => {
+      if (state.current) runPipeCalc({ force: true });
+      else renderPipes();
     });
-  }
-  const stdFiles = document.getElementById("pipeStdFiles");
-  if (stdFiles) {
-    ["dragenter", "dragover"].forEach((type) => stdFiles.addEventListener(type, (e) => {
-      e.preventDefault();
-      stdFiles.classList.add("dragging");
-    }));
-    ["dragleave", "drop"].forEach((type) => stdFiles.addEventListener(type, (e) => {
-      e.preventDefault();
-      stdFiles.classList.remove("dragging");
-    }));
-    stdFiles.addEventListener("drop", (e) => {
-      const list = (e.dataTransfer && e.dataTransfer.files) || [];
-      if (list.length) onPipeStdDrop(list);
-    });
-  }
+  });
 }
 
 /* ------------------------------------------------------------ 弹窗焦点(共用) */
@@ -366,7 +345,6 @@ function restoreModalFocus() {
 const PIPE_CLASS_GRADES = ["20#", "Q345A", "Q345B", "S30408", "S31603"];
 
 let pipeClassAutoOpened = false;   // #pipes/class 深链只自动开一次
-let pipeStdAutoOpened = false;     // #pipes/standards 深链只自动开一次
 let pipeClassGroups = [];          // 表 B.1 的母材类别分组,弹窗里加行时沿用
 
 function openPipeClass() {
@@ -391,7 +369,7 @@ function openPipeClass() {
     if (tbody) tbody.innerHTML = "";
     ((data && data.rules) || []).forEach((rule) => addPipeClassRow(rule, grades, codes));
     if (!((data && data.rules) || []).length) addPipeClassRow({}, grades, codes);
-  }).catch((err) => showPipeClassError(`读不到当前配置:${err.message}`));
+  }).catch((err) => showPipeClassError(`无法读取当前配置:${err.message}`));
 }
 
 function closePipeClass() {
@@ -401,7 +379,7 @@ function closePipeClass() {
   restoreModalFocus();
 }
 
-/* 等级表弹窗原来没有 Esc:标准表导入有,只有它要摸鼠标去点 ✕ */
+/* 等级表弹窗补充 Esc 关闭:此前仅标准表导入弹窗支持,本弹窗须点 ✕。 */
 function pipeClassEsc(e) {
   if (e.key === "Escape") closePipeClass();
 }
@@ -426,7 +404,7 @@ function gradeLabel(grade, codes) {
 }
 
 /* 牌号 <option>:有分组就按母材类别 optgroup 排,默认只留钢管(steel=true);
-   已选的铸铁牌号补一条到最前面,免得打开弹窗时选择被悄悄改掉 */
+   已选铸铁牌号补至首位,避免打开弹窗时选择被静默改写。 */
 function gradeOptionsHtml(grades, codes, groups, { current = "", showAll = false } = {}) {
   const opt = (g) =>
     `<option value="${esc(g)}"${g === current ? " selected" : ""}>${esc(gradeLabel(g, codes))}</option>`;
@@ -456,7 +434,7 @@ function addPipeClassRow(rule, grades, codes, groups) {
     })}</select></td>
     <td><input class="pc-c2" type="number" step="0.1" min="0" max="20" value="${rule.corrosion_mm ?? 0}"></td>
     <td><input class="pc-note" placeholder="可选" value="${esc(rule.note || "")}"></td>
-    <td><button class="btn pc-del" type="button" title="删掉这一条"><svg class="ico"><use href="#i-close"/></svg></button></td>`;
+    <td><button class="btn pc-del" type="button" title="删除本行"><svg class="ico"><use href="#i-close"/></svg></button></td>`;
   tr.querySelector(".pc-del").addEventListener("click", () => tr.remove());
   tbody.appendChild(tr);
 }
@@ -507,272 +485,11 @@ async function clearPipeClass() {
   if (state.current) loadPipeTableStatus().then(() => runPipeCalc({ force: true }));
 }
 
-/* ------------------------------------------------------------ 标准表导入弹窗
-   三张表的数值受著作权保护,不能随项目分发;这一屏只做「选 CSV → 校验 → 导入」,
-   导入后服务端立即重新加载,不用重启服务。 */
-
-let pipeStdInfo = null;      // {dir, files:[{name,label,from,columns,exists,rows,mtime}], status}
-const pipeStdPicked = {};    // 文件名 → {text, fileName, rows, warn, error}
-
-function openPipeStd() {
-  const modal = document.getElementById("pipeStdModal");
-  if (!modal) return;
-  modal.classList.remove("hidden");
-  showPipeStdError("");
-  showPipeStdWarn("");
-  showPipeStdOk("");
-  Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
-  focusIntoModal(modal);
-  document.addEventListener("keydown", pipeStdEsc);
-  loadPipeStdInfo();
-}
-
-function closePipeStd() {
-  const modal = document.getElementById("pipeStdModal");
-  if (modal) modal.classList.add("hidden");
-  document.removeEventListener("keydown", pipeStdEsc);
-  // 关窗即复位:下次打开是干净状态,不会停在上次那条复制提示上
-  const msg = document.getElementById("pipeStdPromptMsg");
-  if (msg) msg.textContent = "";
-  restoreModalFocus();
-}
-
-function pipeStdEsc(e) {
-  if (e.key === "Escape") closePipeStd();
-}
-
-function showPipeStdError(text) {
-  const el = document.getElementById("pipeStdError");
-  if (!el) return;
-  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
-  el.classList.remove("hidden");
-  el.textContent = text;
-}
-
-function showPipeStdWarn(text) {
-  const el = document.getElementById("pipeStdWarn");
-  if (!el) return;
-  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
-  el.classList.remove("hidden");
-  el.textContent = text;
-}
-
-function showPipeStdOk(text) {
-  const el = document.getElementById("pipeStdOk");
-  if (!el) return;
-  if (!text) { el.classList.add("hidden"); el.textContent = ""; return; }
-  el.classList.remove("hidden");
-  el.textContent = text;
-}
-
-/* 「复制填写提示词」:正文由后端按 STD_FILES 与模板 CSV 现拼,JS 里不存第二份。
-   与「复制选泵提示词」同一套理由:那段字里有反引号、温度列名和表格样例,
-   内联会反复转义,且必然与校验逻辑漂移。 */
-async function copyPipeStdPrompt() {
-  const msg = document.getElementById("pipeStdPromptMsg");
-  const say = (text) => { if (msg) msg.textContent = text; };
-  say("正在取提示词…");
-  try {
-    const res = await fetch("/api/pipe-standards-prompt");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    const text = typeof data.text === "string" ? data.text : "";
-    if (!text) throw new Error("提示词为空");
-    const ok = await copyPlainText(text);
-    say(ok
-      ? `已复制 ${text.length} 字 —— 粘进 AI 对话框,再把标准表格的截图或文字一并给它`
-      : "复制失败:浏览器不允许写剪贴板,可打开 docs/pipe-standards-extract-prompt.md 手动复制");
-  } catch (err) {
-    say(`取提示词失败:${err.message}(后台服务是不是没起来?)`);
-  }
-}
-
-async function loadPipeStdInfo() {
-  try {
-    pipeStdInfo = await api("/api/pipe-standards");
-  } catch (err) {
-    showPipeStdError(`读不到标准表状态:${err.message}(后台服务是不是没起来?)`);
-    return;
-  }
-  const dirEl = document.getElementById("pipeStdDir");
-  if (dirEl && pipeStdInfo.dir) dirEl.textContent = pipeStdInfo.dir;
-  const statusEl = document.getElementById("pipeStdStatus");
-  if (statusEl) {
-    const files = pipeStdInfo.files || [];
-    const has = files.filter((f) => f.exists).length;
-    statusEl.textContent = has === files.length
-      ? `本机 ${files.length} 张表都已录入 —— 导入只会覆盖成新版本`
-      : `本机已录 ${has} / ${files.length} 张 —— 缺的那些选上 CSV 导入就能用`;
-    statusEl.className = has === files.length ? "pipe-std-status ok" : "pipe-std-status";
-  }
-  renderPipeStdFiles();
-}
-
-function pipeStdFileInfo(name) {
-  return ((pipeStdInfo && pipeStdInfo.files) || []).find((f) => f.name === name) || null;
-}
-
-/* 前端先粗筛一遍(空文件 / 编码 / 明显缺列),真正的判定在服务端。
-   这里只做「瞬时反馈」,服务端拒绝的提示更细,以服务端为准。 */
-function pipeStdCheckText(name, text) {
-  if (!text || !text.trim()) return { error: "文件是空的" };
-  if (text.includes("\ufffd")) {
-    return { error: "里面有乱码:多半不是 UTF-8。用 Excel「另存为 → CSV UTF-8」再试一次" };
-  }
-  if (text.length > 8 * 1024 * 1024) return { error: "文件太大(超过 8 MB),不像标准表" };
-  const lines = text.replace(/^\ufeff/, "").split(/\r?\n/).filter((l) => l.trim());
-  const spec = pipeStdFileInfo(name);
-  const need = (spec && spec.columns) || [];
-  const header = (lines[0] || "").split(",").map((s) => s.replace(/^"|"$/g, "").trim());
-  const missing = need.filter((c) => !header.includes(c));
-  const rows = Math.max(0, lines.length - 1);
-  const warn = missing.length
-    ? `表头里没看到 ${missing.join("、")} 列(现在是 ${header.slice(0, 6).join("、")});以服务端校验为准`
-    : "";
-  return { rows, warn };
-}
-
-function renderPipeStdFiles() {
-  const box = document.getElementById("pipeStdFiles");
-  const files = (pipeStdInfo && pipeStdInfo.files) || [];
-  if (!box) return;
-  box.innerHTML = files.map((f) => {
-    const picked = pipeStdPicked[f.name];
-    const badge = f.exists ? '<span class="badge ok">已录</span>'
-      : '<span class="badge err">未录</span>';
-    let state;
-    if (picked && picked.error) {
-      state = `<span class="pipe-std-bad">${esc(picked.error)}</span>`;
-    } else if (picked) {
-      const warn = picked.warn ? ` <span class="pipe-std-warn">${esc(picked.warn)}</span>` : "";
-      state = `<span class="pipe-std-good">已选中 ${esc(picked.fileName)} · ${picked.rows} 行</span>${warn}`;
-    } else if (f.exists) {
-      state = `本机已有 ${f.rows} 行${f.mtime ? ` · ${esc(f.mtime)}` : ""}`;
-    } else {
-      state = "本机还没有这个文件";
-    }
-    return `<div class="pipe-std-row${picked && !picked.error ? " picked" : ""}" data-name="${esc(f.name)}">
-      <div class="pipe-std-head"><b>${esc(f.label)}</b> ${badge}
-        <span class="muted">${esc(f.from)}</span></div>
-      <div class="pipe-std-cols muted">需要列:${(f.columns || []).map((c) => `<code>${esc(c)}</code>`).join("、")}
-        <code class="pipe-std-file">${esc(f.name)}</code></div>
-      <div class="pipe-std-state">${state}</div>
-      <label class="btn pipe-std-pick">选文件<input type="file" accept=".csv,text/csv" data-std="${esc(f.name)}" hidden></label>
-    </div>`;
-  }).join("");
-  box.querySelectorAll('input[type="file"]').forEach((inp) => {
-    inp.addEventListener("change", (e) => onPipeStdFile(inp.dataset.std, e.target.files[0]));
-  });
-  const btn = document.getElementById("pipeStdImport");
-  if (btn) {
-    btn.disabled = !Object.keys(pipeStdPicked).some((k) => !pipeStdPicked[k].error);
-    btn.textContent = "导入并立即生效";
-  }
-}
-
-/* Excel 二次保存常把 CSV 变成 GBK/UTF-16;先认 BOM,无 BOM 再按 UTF-8 → gb18030 降级。
-   UTF-16 必须放在最前面:它的字节序列用 UTF-8 硬解会先炸,不能留到最后兜底。 */
-async function readPipeStdFile(file) {
-  const buf = await file.arrayBuffer();
-  const u8 = new Uint8Array(buf);
-  const has = (a, b, c) => u8.length >= 3 && u8[0] === a && u8[1] === b && u8[2] === c;
-  const decode = (label, bytes, fatal = false) => new TextDecoder(label, { fatal }).decode(bytes);
-  if (has(0xef, 0xbb, 0xbf)) return decode("utf-8", u8.subarray(3));
-  if (u8.length >= 2 && u8[0] === 0xff && u8[1] === 0xfe) return decode("utf-16le", u8.subarray(2));
-  if (u8.length >= 2 && u8[0] === 0xfe && u8[1] === 0xff) return decode("utf-16be", u8.subarray(2));
-  try {
-    return decode("utf-8", u8, true);
-  } catch {
-    try {
-      return decode("gb18030", u8, true);
-    } catch {
-      throw new Error("认不出文件编码(支持 UTF-8 / GBK / UTF-16,请用 Excel 另存为 CSV UTF-8)");
-    }
-  }
-}
-
-async function onPipeStdFile(name, file) {
-  if (!file) return;
-  showPipeStdError("");
-  showPipeStdOk("");
-  try {
-    const text = await readPipeStdFile(file);
-    pipeStdPicked[name] = { text, fileName: file.name, ...pipeStdCheckText(name, text) };
-  } catch (err) {
-    pipeStdPicked[name] = { error: `读不出这个文件:${err.message}` };
-  }
-  renderPipeStdFiles();
-}
-
-/* 拖进来的文件按名字对号入座;名字对不上就明说,不猜 */
-async function onPipeStdDrop(list) {
-  const names = ((pipeStdInfo && pipeStdInfo.files) || []).map((f) => f.name);
-  const unknown = [];
-  for (const file of [...list]) {
-    if (!names.includes(file.name)) { unknown.push(file.name); continue; }
-    await onPipeStdFile(file.name, file);
-  }
-  if (unknown.length) {
-    showPipeStdError(`这些文件名对不上:${unknown.join("、")}`
-      + `;请改成 ${names.join(" / ")}。改不了就用每张表右侧的「选文件」。`);
-  }
-}
-
-async function doPipeStdImport() {
-  const files = {};
-  Object.keys(pipeStdPicked).forEach((name) => {
-    if (!pipeStdPicked[name].error) files[name] = pipeStdPicked[name].text;
-  });
-  if (!Object.keys(files).length) {
-    showPipeStdError("先选至少一个 CSV 再导入");
-    return;
-  }
-  const btn = document.getElementById("pipeStdImport");
-  if (btn) { btn.disabled = true; btn.textContent = "导入中…"; }
-  showPipeStdError("");
-  showPipeStdWarn("");
-  showPipeStdOk("");
-  try {
-    const res = await fetch("/api/pipe-standards", {
-      method: "POST",
-      headers: { "X-Casebook-Client": "1", "Content-Type": "application/json" },
-      body: JSON.stringify({ files }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (body.files) {
-      pipeStdInfo = { ...(pipeStdInfo || {}), dir: body.dir, files: body.files,
-                       status: body.status };
-    }
-    if (!res.ok || !body.ok) {
-      showPipeStdError((body.errors || []).join("\n") || `导入失败:HTTP ${res.status}`);
-      return;
-    }
-    Object.keys(pipeStdPicked).forEach((k) => delete pipeStdPicked[k]);
-    showPipeStdOk(`写入了 ${Object.keys(files).length} 个文件,标准表已重新加载 —— 关掉这个窗口就能看到管道表。`);
-    const warns = body.warnings || [];
-    if (warns.length) {
-      showPipeStdWarn(`已导入,但有 ${warns.length} 处需复核(不影响使用):\n${warns.join("\n")}`);
-    }
-    // 状态变了:清掉缓存、重算管道表,下一次算就用新表
-    pipeState.tables = null;
-    pipeState.data = null;
-    pipeState.status = "idle";
-    await loadPipeTableStatus();
-    if (state.current) runPipeCalc({ force: true });
-    else renderPipes();
-  } catch (err) {
-    showPipeStdError(`导入失败:${err.message}(后台服务是不是没起来?)`);
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = "导入并立即生效"; }
-    renderPipeStdFiles();
-  }
-}
-
 function onPipeParamInput(evt) {
   const bad = readPipeParamsFromDom();
   if (bad.length) {
     pipeState.status = "invalid";
-    pipeState.error = "有参数填得不对(标红的格子),改好就会自动重算。";
+    pipeState.error = "参数错误(标红单元格):修正后自动重算。";
     renderPipeNotice();
     return;
   }
@@ -785,8 +502,8 @@ function onPipeParamInput(evt) {
   pipeState.timer = setTimeout(() => runPipeCalc({ force: true }), PIPE_DEBOUNCE_MS);
 }
 
-/* 管道页参数按模型存一套(D19);改之前先算影响(D20),确认后才落库。
-   取消 = 回到库里那套参数,而不是让界面停在"看起来改了、其实没存"的状态。 */
+/* 管道页参数按模型存储(D19):变更前先预演影响(D20),确认后落库。
+   取消:恢复库中已存参数,避免界面显示未保存值。 */
 async function savePipeParamsWithPreview() {
   const c = state.current;
   if (!c) return;
@@ -820,10 +537,10 @@ async function savePipeParamsWithPreview() {
     }
     const impact = preview.impact || {};
     const freeze = preview.freeze || {};
-    let text = `将影响 ${impact.pumps_changed || 0} / ${impact.pumps_total || 0} 台泵`;
-    if (impact.max_delta_head_m) text += `,设计扬程最大变化 ${impact.max_delta_head_m} m`;
-    if (freeze.count) text += `\n${freeze.count} 条管段已人工选 DN,不会跟着变`;
-    text += "\n\n保存这套参数并重算?";
+    let text = `影响泵:${impact.pumps_changed || 0} / ${impact.pumps_total || 0} 台`;
+    if (impact.max_delta_head_m) text += `;设计扬程最大变化 ${impact.max_delta_head_m} m`;
+    if (freeze.count) text += `\n${freeze.count} 条管段为人工选 DN,不随参数变更`;
+    text += "\n\n保存参数并重算?";
     if (!window.confirm(text)) {
       await restorePipeParams(c.id);
       return;
@@ -863,7 +580,7 @@ async function loadPipeSettings(caseId) {
       floor: Number.isFinite(opt.pressure_floor_mpa)
         ? opt.pressure_floor_mpa : PIPE_DEFAULT_PARAMS.floor,
       // 最大管径不再开放:固定按内置 DN1000(仅超出上限时给提示,不截断选档)。
-      // 旧存档里可能存过 600,这里一律按默认覆盖,免得老工况冒出一堆"超出上限"。
+      // 旧存档可能存有 600:统一按默认覆盖,避免旧工况产生大量超限提示。
       max_dn: PIPE_DEFAULT_PARAMS.max_dn,
       material: opt.material || PIPE_DEFAULT_PARAMS.material,
     };
@@ -905,7 +622,7 @@ async function runPipeCalc({ force = false } = {}) {
   } catch (err) {
     if (err.name === "AbortError" || seq !== pipeState.seq) return;
     pipeState.status = "error";
-    pipeState.error = `连不上后台服务:${err.message}(服务可能已经关掉,重新启动后再试)`;
+    pipeState.error = `无法连接后台服务:${err.message}(服务可能已关闭,请重启后重试)`;
     renderPipes();
     return;
   }
@@ -915,7 +632,7 @@ async function runPipeCalc({ force = false } = {}) {
 
   if (out.status === 409) {
     pipeState.status = "not-ready";
-    pipeState.error = out.body.error || "标准表未录入,暂时算不出管道表。";
+    pipeState.error = out.body.error || "标准表未录入,无法计算管道表。";
     pipeState.setup = out.body.setup || null;
     pipeState.data = null;
     renderPipes();
@@ -1006,7 +723,7 @@ function pipePressureTitle(row) {
   if (row.design_pressure_mpa !== null && row.design_pressure_mpa !== undefined) {
     bits.push(`设计 ${pipePressure(row.design_pressure_mpa)} ${pipeUnitLabel()}`);
     if (Math.abs(row.design_pressure_mpa - pipeState.params.floor) < 1e-9) {
-      bits.push(`已钳到下限 ${fmt(pipeState.params.floor, 2)} MPa`);
+      bits.push(`已钳制至下限 ${fmt(pipeState.params.floor, 2)} MPa`);
     }
   }
   return bits.join(";");
@@ -1059,7 +776,7 @@ function pipeCellValue(row, col, ctx) {
         ? `DN${line.dn}`
         : (line.dn_source === "custom" && line.od_mm ? `Φ${fmt(line.od_mm, 1)}` : "—");
       const label = line.dn_source === "custom" ? "自定义" : "人工";
-      return `${text}${manual ? ` <span class="badge warn" title="${label}规格,已冻结,不随管道页参数变">${label}</span>` : ""}`;
+      return `${text}${manual ? ` <span class="badge warn" title="${label}规格:已冻结,不随管道页参数变化">${label}</span>` : ""}`;
     }
     case "pump_side": {
       if (!line) return '<span class="muted">—</span>';
@@ -1233,7 +950,7 @@ function highlightPipeRow(stream) {
   if (!tbody) return;
   tbody.querySelectorAll("tr.pipe-row-hl").forEach((tr) => tr.classList.remove("pipe-row-hl"));
   const tr = [...tbody.rows].find((x) => x.dataset.stream === stream);
-  if (!tr) return;                       // 被筛掉了:不硬跳,免得看起来像点了没反应
+  if (!tr) return;                       // 已被筛选隐藏:不强制跳转,避免无响应观感
   tr.classList.add("pipe-row-hl");
   tr.scrollIntoView({ block: "center" });
 }
@@ -1327,7 +1044,7 @@ function renderPipeNotice() {
     cls = "err"; text = pipeState.error;
   } else if (pipeState.status === "ok" && pipeState.drift) {
     cls = "warn";
-    text = `服务端实际用了另一组口径:${pipeState.drift.map(([k, a, b]) => `${k} ${a} → ${b}`).join("、")}`;
+    text = `服务端口径不一致:${pipeState.drift.map(([k, a, b]) => `${k} ${a} → ${b}`).join("、")}`;
   }
   if (!text) { el.className = "pipe-notice hidden"; el.innerHTML = ""; return; }
   el.className = `pipe-notice ${cls}`;
@@ -1371,12 +1088,12 @@ function renderPipeTablesHint() {
   const t2 = pipeState.tables && pipeState.tables.od_to_walls;
   if (!pipeState.data || !t2 || t2.loaded) { el.classList.add("hidden"); return; }
   el.className = "pipe-notice warn";
-  el.innerHTML = "<span><b>标准壁厚序列(T2)未录入</b>:壁厚列会全是「—」,备注里每行也会写一句。"
+  el.innerHTML = "<span><b>标准壁厚序列(T2)未录入</b>:壁厚列显示「—」,备注逐行标注;"
     + "DN、等级号、设计压力不受影响。"
-    + "补录办法:点顶部的「标准表」按钮导入 GB/T 17395-2024 表 1、表 4 的 CSV"
-    + "(文件名 <code>t1-17395-table1.csv</code> / <code>t4-17395-table4.csv</code>),"
-    + "导入后立即生效;也可以手工放进 <code>data/preview/std/docx/</code> 再重启服务"
-    + "(页码见 <code>docs/pipe-standards-index.md</code>)。</span>";
+    + "补法:<b>首页 › 标准表</b>导入 GB/T 17395-2024 表 1、表 4 的 CSV"
+    + "(<code>t1-17395-table1.csv</code> / <code>t4-17395-table4.csv</code>);"
+    + "导入后立即生效,本页自动重算。</span>"
+    + '<span class="pipe-setup-cta"><button type="button" class="btn small" data-goto-std="pipe">去首页 › 标准表</button></span>';
 }
 
 /* 409 卡片:三张标准表录入状态 + 下一步。这里要明确说「改参数没用」,并把补录办法列全 */
@@ -1402,21 +1119,21 @@ function pipeBlockedHtml(message, tables, setup) {
       </table>
       <ol class="pipe-setup-steps">${(setup.steps || []).map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
       <p class="muted">表格页码、分页结构与数据校验方法见 <code>${esc(setup.doc)}</code>${
-        setup.prompt ? `;要交给 AI 帮着抄数,可以用 <code>${esc(setup.prompt)}</code> 里的提示词` : ""
+        setup.prompt ? `;需 AI 辅助抄录时,使用 <code>${esc(setup.prompt)}</code> 中的提示词` : ""
       }。</p>
     </div>` : "";
   return `<div class="pipe-blocked">
-    <h3>管道表暂时算不出来:标准表没录全</h3>
+    <h3>管道表无法计算:标准表未录全</h3>
     <p class="muted">${esc(message)}</p>
     <ul class="pipe-table-status">
-      ${line("DN → 外径(T1)", t1, t1.loaded ? ` ${t1.count} 档,其中 ${(t1.verified || []).length} 档已在标准里核对` : "")}
+      ${line("DN → 外径(T1)", t1, t1.loaded ? ` ${t1.count} 档;${(t1.verified || []).length} 档已核对` : "")}
       ${line("外径 → 标准壁厚(T2)", t2, t2.loaded ? ` ${t2.count} 个外径` : "")}
       ${line("许用应力(T3)", t3, t3.loaded ? ` ${t3.count} 个温度点,牌号 ${(t3.grades || []).join("、")}` : "")}
     </ul>
-    <p class="muted">表没录全之前,这一页不会显示任何「估出来」的管径 —— 宁可空着。</p>
+    <p class="muted">标准表未录全:不显示任何估算管径,仅列已录规格。</p>
     <p class="pipe-setup-cta">
-      <button type="button" class="btn primary" data-open-std>导入标准表 CSV</button>
-      <span class="muted">已经有 CSV 就点这里直接导入:不用手工放文件,也不用重启服务。</span>
+      <button type="button" class="btn primary" data-goto-std="pipe">去首页 › 标准表</button>
+      <span class="muted">标准表:首页统一导入(管路 3 张、换热 2 张)。<br>导入后立即生效,无需重启服务。</span>
     </p>
     ${guide}
   </div>`;
@@ -1441,10 +1158,9 @@ export function renderPipes() {
     pipeClassAutoOpened = true;
     openPipeClass();
   }
-  // #pipes/standards 直接打开标准表导入(表没录时不用先找按钮)
-  if (!pipeStdAutoOpened && location.hash.endsWith("/standards")) {
-    pipeStdAutoOpened = true;
-    openPipeStd();
+  // #pipes/standards:标准表导入已挪到首页,深链改为跳首页那个模块(等本页画完再切)
+  if (location.hash.endsWith("/standards")) {
+    setTimeout(() => goToStandards("pipe"), 0);
   }
 
   const hideExtras = () => {
@@ -1460,7 +1176,7 @@ export function renderPipes() {
     drawPipeTable();
     document.getElementById("pipeCount").textContent = "";
     hideExtras();
-    empty.innerHTML = "还没有工况。先读取一个工况,这一页会按它的流股自动生成管道表。";
+    empty.innerHTML = "无工况:先读取工况,本表按流股生成。";
     empty.classList.remove("hidden");
     loadPipeTableStatus();
     return;
@@ -1488,9 +1204,6 @@ export function renderPipes() {
     drawPipeTable();
     hideExtras();
     empty.innerHTML = pipeBlockedHtml(pipeState.error, pipeState.tables, pipeState.setup);
-    empty.querySelectorAll("[data-open-std]").forEach((btn) => {
-      btn.addEventListener("click", openPipeStd);
-    });
     empty.classList.remove("hidden");
     document.getElementById("pipeCount").textContent = "";
     return;
@@ -1498,7 +1211,7 @@ export function renderPipes() {
   if (pipeState.status === "error") {
     drawPipeTable();
     empty.innerHTML = esc(pipeState.error)
-      + "<br><br>后台服务可能没起来,重新启动后再试。";
+      + "<br><br>后台服务可能未启动,请重启后重试。";
     empty.classList.remove("hidden");
     return;
   }

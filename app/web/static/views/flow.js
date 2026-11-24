@@ -80,7 +80,7 @@ export function layoutFlow(data, viewAspect = 1.8) {
   data.nodes.forEach((n) => layerLists[depth.get(n.name)].push(n.name));
   layerLists.forEach((l) => l.sort());
 
-  // ---- 层内排序:邻居平均位置(重心法),两轮就够,再看不出交叉就那样了
+  // ---- 层内排序:按邻居平均位置(重心法),迭代两轮;残余交叉不再处理。
   const pos = new Map();
   layerLists.forEach((list) => list.forEach((name, i) => pos.set(name, i)));
   const bary = (name) => {
@@ -245,7 +245,7 @@ export function fitFlowTo(names, centerName = null) {
   let view = fitBoxToAspect(box, aspect);
   if (centerName) {
     const full = fitBoxToAspect(layout.bbox, aspect);
-    const maxW = full.w / 1.9;          // 聚焦至少放大 1.9 倍,免得"点了跟没点一样"
+    const maxW = full.w / 1.9;          // 聚焦至少放大 1.9 倍,保证可辨识
     if (view.w > maxW) {
       const p = layout.positions.get(centerName);
       const cx = p ? p.x + p.w / 2 : box.x + box.w / 2;
@@ -312,7 +312,7 @@ export function drawFlow() {
       const dx = Math.max(30, (tx - sx) * 0.5);
       d = `M ${sx} ${sy} C ${sx + dx} ${sy}, ${tx - dx} ${ty}, ${tx} ${ty}`;
     } else {
-      // 回边 / 回流(往后走或同行折返):绕下方,别和正向线叠在一起
+      // 回边 / 回流(逆向或同行折返):绕行下方,避免与正向线重叠
       const dy = Math.max(46, Math.abs(ty - sy) * 0.5 + 22);
       d = `M ${sx} ${sy} C ${sx + 64} ${sy + dy}, ${tx - 64} ${ty + dy}, ${tx} ${ty}`;
     }
@@ -373,7 +373,7 @@ export function drawFlow() {
     const tip = `${n.name} · ${n.type || "?"}`
       + (n.dh_kw === null || n.dh_kw === undefined ? "" : ` · ΔH ${fmt(n.dh_kw, 1)} kW`);
     // tabindex/role:SVG 里的 <g> 默认不可聚焦,键盘用户选不到设备。
-    // aria-label 把"位号 + 类型 + 状态"念出来,别只念一个位号。
+    // aria-label 播报「位号 + 类型 + 状态」,避免仅播报位号。
     const stateText = FLOW_STATE_TEXT[n.state] || "未知";
     parts.push(`<g class="${nodeCls(n.name)} st-${n.state || "unknown"}"
         data-node="${esc(n.name)}" transform="translate(${p.x} ${p.y})"
@@ -494,7 +494,7 @@ export async function renderFlow() {
 
   if (!c) {
     if (svg) svg.innerHTML = "";
-    empty.textContent = "还没有工况。先读取一个工况,流程图会按它的设备连接关系自动生成。";
+    empty.textContent = "无工况:先读取工况,按设备连接生成。";
     empty.classList.remove("hidden");
     setFlowPanel(null);
     renderFlowLegend();
@@ -515,7 +515,7 @@ export async function renderFlow() {
       setFlowPanel(null);
     } catch (err) {
       if (svg) svg.innerHTML = "";
-      empty.textContent = `读不到流程图数据:${err.message}`;
+      empty.textContent = `无法读取流程图数据:${err.message}`;
       empty.classList.remove("hidden");
       return;
     }
@@ -535,9 +535,9 @@ export async function renderFlow() {
 
 /* ------------------------------------------------------------ 流程图导出 */
 
-/* 导出的 SVG 是独立文件,读不到 style.css —— 所以导出时把当前生效的 token 值
-   取出来内联一份。以前这里抄了一份硬编码 + 一句"改 style.css 记得同步",
-   字体栈还和屏幕不一致(屏幕 Segoe UI 优先、导出 YaHei 优先,同一串设备名宽度不同)。 */
+/* 导出 SVG 为独立文件,无法读取 style.css:导出时内联当前生效的 token。
+   此前使用硬编码副本,字体栈与屏幕不一致(屏幕 Segoe UI 优先、导出 YaHei 优先),
+   同一设备名宽度不同。 */
 export function flowExportCss() {
   const v = cssVar;
   return `
@@ -592,7 +592,7 @@ export function flowExportSvg() {
   html.dataset.theme = keepTheme || "light";
   const style = document.createElementNS(SVG_NS, "style");
   style.textContent = exportCss;
-  // 白底:SVG 默认透明,贴进 Word/PPT 会变成看不清的"白线浮在白纸"
+  // 白底:SVG 默认透明,贴入 Word/PPT 后白色线条不可见
   const bg = document.createElementNS(SVG_NS, "rect");
   bg.setAttribute("x", view.x);
   bg.setAttribute("y", view.y);
@@ -627,7 +627,7 @@ export function flowFileName(ext) {
 }
 
 export function flowExportMissing() {
-  alert("流程页还没有图。先读取一个工况,等流程图出来再导出。");
+  alert("流程页无图。请先读取工况,待流程图生成后再导出。");
 }
 
 export function exportFlowSvg() {
@@ -637,8 +637,8 @@ export function exportFlowSvg() {
     flowFileName("svg"));
 }
 
-/* PNG 走"SVG → Image → canvas → toBlob",不引第三方库;
-   2 倍像素是为了贴进报告/PPT 时不发虚 */
+/* PNG 走「SVG → Image → canvas → toBlob」,不引第三方库;
+   2 倍像素:贴入报告/PPT 保持清晰。 */
 export function exportFlowPng() {
   const out = flowExportSvg();
   if (!out) { flowExportMissing(); return; }
@@ -657,12 +657,12 @@ export function exportFlowPng() {
     URL.revokeObjectURL(url);
     canvas.toBlob((png) => {
       if (png) downloadBlob(png, flowFileName("png"));
-      else alert("导出 PNG 失败:浏览器没能把这张图转成 PNG。可以改用「导出 SVG」。");
+      else alert("导出 PNG 失败:浏览器无法将图转为 PNG;请改用「导出 SVG」。");
     }, "image/png");
   };
   img.onerror = () => {
     URL.revokeObjectURL(url);
-    alert("导出 PNG 失败:浏览器渲染这张图时出错。可以改用「导出 SVG」。");
+    alert("导出 PNG 失败:浏览器渲染出错;请改用「导出 SVG」。");
   };
   img.src = url;
 }

@@ -17,8 +17,8 @@ import { reportNotice } from "./report.js";
 /* 点抽屉外面的空白处关掉详情。
    判定顺序:抽屉内 → 不动;可交互元素 → 不动(那是要干别的事);
    另一台设备的入口 → 由它自己"换人",这里也不管。
-   两个坑:打开抽屉的那一次点击会冒泡到 document(用时间戳跳过);
-   拖选文字时的 click 不该收面板(看选区是否为空)。 */
+   两处边界:打开抽屉的点击会冒泡至 document(按时间戳跳过);
+   拖选文字时的 click 不应关闭面板(检查选区是否为空)。 */
 export const DRAWER_CLICKABLE = "a, button, input, select, textarea, label, thead, .btn, .icon-btn, .chart-svg";
 export let drawerOpenedAt = 0;
 
@@ -42,7 +42,7 @@ export function isOutsideDrawerClick(evt) {
    换页、换页签、点空白这些"用户已经去了别处"的收法不还,否则焦点会被抢回来。 */
 export function closeDataDrawers({ restore = false } = {}) {
   let closed = false;
-  ["columnPanel", "pumpPanel", "compPanel"].forEach((id) => {
+  ["columnPanel", "pumpPanel", "compPanel", "heatPanel"].forEach((id) => {
     const el = document.getElementById(id);
     if (el && !el.classList.contains("hidden")) {
       el.classList.add("hidden");
@@ -54,7 +54,7 @@ export function closeDataDrawers({ restore = false } = {}) {
 }
 
 /* 抽屉的焦点接管 —— 与 pipe.js 的 focusIntoModal / restoreModalFocus 同一口径。
-   抽屉不是 modal(点外面能关),所以不做焦点陷阱,但必须:
+   抽屉非 modal(点击外部可关闭):不设焦点陷阱,但须:
    打开时把焦点移进去(否则 Tab 还在背后的表格里走),关闭时还回触发它的那一行。 */
 export const drawerFocus = { trigger: null };
 
@@ -78,12 +78,12 @@ export function restoreDrawerFocus() {
 
 /* ------------------------------------------------------------ 泵参数卡 */
 
-/* 中联水泵选型页。**不带任何参数** —— 工艺参数不进厂商日志和浏览器历史,
-   流量/扬程由用户自己敲进去。 */
+/* 中联选型页:**不携带工艺参数**,避免进入厂商日志与浏览器历史;
+   流量/扬程由用户填写。 */
 export const ZHONGLIAN_URL = "https://www.cipump.com/sbxx.html";
 
-/* 把中联表单要的三个数合成一行:粘贴比照抄不容易错。
-   数值用**显示值**(含余量系数),和参数卡上看到的一致。 */
+/* 合并中联表单三项参数为单行文本,减少抄录误差。
+   取**显示值**(含余量系数),与参数卡一致。 */
 export function pumpSpecLine(row) {
   const margin = state.pump.margin || 1;
   const scaled = (v, d) => (v === null || v === undefined ? "—" : fmt(v * margin, d));
@@ -115,9 +115,9 @@ export async function copyPlainText(text) {
   }
 }
 
-/* 选泵提示词的正文由后端下发,JS 里不留第二份:这段字含 $…$、|、× 与反引号,
-   内联进模板字符串要反复转义,且必然与导出的「选泵提示词」工作表漂移。
-   首次点击才请求,之后走 state 缓存。 */
+/* 提示词正文由后端下发,JS 不保留副本:文本含 $…$、|、× 与反引号,
+   内联需反复转义,且易与导出的「选泵提示词」工作表漂移。
+   首次点击请求,之后走 state 缓存。 */
 export async function fetchPumpPromptText() {
   if (state.pump.promptText) return state.pump.promptText;
   const res = await fetch("/api/pump-prompt");
@@ -129,7 +129,7 @@ export async function fetchPumpPromptText() {
   return text;
 }
 
-/* 复制成功后的操作指引浮层。不自动消失 —— 里面的步骤要照着做 */
+/* 复制成功后的操作指引浮层:不自动消失,步骤需用户执行。 */
 export function showPumpPromptTip() {
   const tip = document.getElementById("pumpPromptTip");
   if (!tip) return;
@@ -142,8 +142,8 @@ export function closePumpPromptTip() {
   if (tip) tip.classList.add("hidden");
 }
 
-/* 泵参数卡:把要抄进中联表单的那几个数摆出来。余量只影响显示,不改库 */
-/* 详细参数折叠头收起时的一行摘要。缺数据走 fmt 的「—」,不拿 0 顶替。 */
+/* 泵参数卡:列出中联表单所需参数。余量仅影响显示,不写入库。 */
+/* 折叠态摘要:缺数据取「—」,不以 0 替代。 */
 export function pumpParamsBrief(row) {
   const motorValue = row.motor_suggested_kw === undefined ? row.motor_kw : row.motor_suggested_kw;
   return `流量 ${fmt(row.flow_m3h, 2)} m³/h · 压升扬程 ${fmt(row.head_m, 2)} m`
@@ -155,8 +155,8 @@ export function fillPumpParamsBrief(row) {
   if (brief) brief.textContent = pumpParamsBrief(row);
 }
 
-/* 悬浮窗顶部的切泵下拉。只列泵,不把塔/换热器混进来;切换时走同一个 openPump,
-   这样表格、设计扬程、选型台账都按新泵重读,而不是在旧状态上改个标题。 */
+/* 切泵下拉仅列泵,不混入塔/换热器;切换走同一 openPump,
+   使表格、设计扬程、选型台账按新泵重读。 */
 function fillPumpSwitch(current) {
   const sel = document.getElementById("pumpSwitch");
   if (!sel) return;
@@ -193,7 +193,7 @@ export function openPump(block) {
   const spec = state.pumpSpec;
   const scaled = (v) => (v === null || v === undefined ? null : v * margin);
   const npsh = pumpNpsh(row);
-  // 来源只写一个词,细节放悬浮提示里,别把抽屉塞满
+  // 来源列只写一词,细节入悬浮提示,控制抽屉信息密度。
   const kv = (k, v, source, tip = "") =>
     `<tr><td class="name">${esc(k)}</td><td class="num">${v}</td>`
     + `<td class="msg"${tip ? ` title="${esc(tip)}"` : ""}>${esc(source)}</td></tr>`;
@@ -201,13 +201,13 @@ export function openPump(block) {
 
   const rows = [
     kv("流量 m³/h", fmt(scaled(row.flow_m3h), 2), `Aspen${marginTag}`,
-       row.flow_m3h == null ? "没读到" : `原值 ${fmt(row.flow_m3h, 2)}`),
-    // 名称写明"压升":Aspen 的 HEAD_CAL 只等于 Δp/(ρg),不含位压头与管路阻力。
-    // 实测(2026-11-15)两例:head_m 与 Δp/(ρg) 差 0.0015 m / 0.143 m,就是纯压升那一项。
+       row.flow_m3h == null ? "未读到" : `原值 ${fmt(row.flow_m3h, 2)}`),
+    // 命名「压升」:Aspen HEAD_CAL 仅等于 Δp/(ρg),不含位压头与管路阻力。
+    // 2026-11-15 两例偏差 0.0015 m / 0.143 m,即该项。
     kv("压升扬程 m", fmt(scaled(row.head_m), 2), `Aspen${marginTag}`,
        row.head_m == null
-         ? "没读到"
-         : `原值 ${fmt(row.head_m, 2)};这只是 Δp/(ρg),不含位压头与管路阻力。`
+         ? "未读到"
+         : `原值 ${fmt(row.head_m, 2)}:仅为 Δp/(ρg),不含位压头与管路阻力。`
            + "设计扬程 = 本值 + ΔZ + Σhf,见下方「设计扬程」"),
     kv(
       "轴功率 kW",
@@ -233,12 +233,12 @@ export function openPump(block) {
     kv("密度 kg/m³", fmt(row.rho_kgm3, 1), "计算", "进口流股 m/V;两相或缺流量时用 RHO_LIQ×MW_LIQ"),
     kv("粘度 cP", fmtVisc(row.mu_cp), "进口流股",
        row.mu_cp == null
-         ? "模型没给出粘度:物性组加 MUMX(cP)并重跑,再重读工况;下方「管路阻力」也可手填"
-         : "MUMX(混合物粘度);泵设计里算 Re 与 Σhf 用它"),
-    kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 视为两相,不给 NPSHₐ"),
+         ? "模型未输出粘度:物性组加 MUMX(cP),重跑后重读工况;或在下方「管路阻力」手填"
+         : "MUMX(混合物粘度):用于泵设计中的 Re 与 Σhf"),
+    kv("进口汽化率", fmt(row.pump_vap_frac, 4), "进口流股", "> 0 判为两相:不计算 NPSHₐ"),
     kv("p_v bar", row.pv_bar == null ? "—" : fmt(row.pv_bar, 3), pvSourceText(row),
        row.pv_bar == null
-         ? "模型没给出泡点压力:物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况;详见 docs/pump-selection-plan.md §3.6"
+         ? "模型未输出泡点压力:新建物性组 Donkey,加 PL、PBUB(bar)、MUMX(cP),在报告选项中选入,重置并运行,再重读工况;步骤见首页「Aspen 物性组」"
          : "单相液相时泡点压力就是蒸气压"),
     kv("NPSHₐ m", fmt(npsh, 2), "计算", npsh == null ? npshWhy(row) : (spec ? spec.npsh_rule : "")),
   ];
@@ -296,8 +296,8 @@ export function bindPumpFold(box, key) {
   box.open = !!state.pumpFold[key];
 }
 
-/* 常用管件的局部阻力系数 ζ。数值取自设计手册的常用值(同一份算例里两种取法并存),
-   只作为"数管件"的辅助,勾完仍可手改 Σζ —— 不给任何默认数量,没勾就是 0。 */
+/* 局部阻力系数 ζ:取自设计手册常用值。仅作管件计数辅助,Σζ 仍可手改;
+   不设默认数量,未勾选即为 0。 */
 export const PUMP_FITTINGS = [
   { key: "el90", label: "90° 弯头", zeta: 0.75 },
   { key: "gate", label: "闸阀", zeta: 0.17 }, // 全开闸阀;半开需按实际开度另计
@@ -402,7 +402,7 @@ export function refreshPumpDesignSum(row) {
         { ok: "满足", bad: "不满足", unknown: "无法判定" }[npsh.state] || "无法判定"
       }</span>`;
   if (head === null) {
-    el.textContent = "压升扬程没读到,算不了";
+    el.textContent = "压升扬程未读到,无法计算";
     return;
   }
   if (totals.reverse) {
@@ -421,7 +421,7 @@ export function refreshPumpDesignSum(row) {
   if (est.check_kw != null) estBits.push(`压升扬程 ${fmt(est.check_kw, 2)} kW`);
   if (est.design_kw != null) estBits.push(`设计扬程 ${fmt(est.design_kw, 2)} kW`);
   const estText = estBits.length
-    ? `<br><span class="muted">估算轴功率(照会,不参与电机选档):${estBits.join(" · ")}</span>`
+    ? `<br><span class="muted">估算轴功率(仅供参考,不参与电机选档):${estBits.join(" · ")}</span>`
     : "";
   el.innerHTML =
     `${fmt(head, 2)} + ΔZ ${fmt(totals.dz_m, 2)} + Σhf ${fmt(totals.hf_m, 2)}`
@@ -536,7 +536,7 @@ function renderLineDetail(side, label) {
       }).join("")}
       <span class="muted">合计 Σζ = ${fmt(editFittingsZeta(side), 2)}</span>
     </div>
-    ${line.dn_source === "custom" ? '<p class="pump-design-note">自定义外径 / 壁厚按专项设计,壁厚不再自动圆整。</p>' : ""}
+    ${line.dn_source === "custom" ? '<p class="pump-design-note">自定义外径 / 壁厚按专项设计:壁厚不自动圆整。</p>' : ""}
   </div>`;
 }
 
@@ -558,7 +558,7 @@ export function renderPumpDesign(row) {
     : "";
   const legacy = state.pumpDesign.legacy;
   const legacyNote = legacy && legacy.needs_choice
-    ? `<p class="pump-design-note">这台泵还有旧的一组 Σhf（${fmt(legacy.hf_m, 2)} m）没归到吸入 / 排出。
+    ? `<p class="pump-design-note">存在旧 Σhf(${fmt(legacy.hf_m, 2)} m)未归入吸入 / 排出。
         <button class="link-btn pump-legacy-open">迁移</button></p>`
     : "";
   const tablesError = state.pumpDesign.view && state.pumpDesign.view.tables_error
@@ -647,7 +647,7 @@ export function renderPumpDesign(row) {
         await loadPumpDesign(row);
         loadPumpSelection(row);
       } catch (err) {
-        reportNotice(`流股没保存:${err.message}`, "warn");
+        reportNotice(`流股未保存:${err.message}`, "warn");
       }
     });
   });
@@ -669,7 +669,7 @@ export function renderPumpDesign(row) {
 async function migrateLegacy(row) {
   const legacy = state.pumpDesign.legacy || {};
   const pick = window.prompt(
-    `旧 Σhf ${fmt(legacy.hf_m, 2)} m 归到哪一侧?输入 suction / discharge / total(合计)`,
+    `旧 Σhf ${fmt(legacy.hf_m, 2)} m 归入哪一侧?输入 suction / discharge / total(合计)`,
     "suction",
   );
   if (!pick) return;
@@ -720,7 +720,7 @@ export async function savePumpDesign(row) {
       );
     }
   } catch (err) {
-    reportNotice(`管段没保存:${err.message}`, "warn");
+    reportNotice(`管段未保存:${err.message}`, "warn");
     return;
   }
   await loadPumpDesign(row);
@@ -745,7 +745,7 @@ export async function loadPumpDesign(row) {
     state.pumpDesign.source = saved.source || null;
     renderPumpDesign(row);
   } catch (err) {
-    // 读不到就是没填过 / 老服务:保持空,不影响主功能
+    // 无法读取:视为未填写或旧版服务;保持空值,不影响主功能。
   }
 }
 
@@ -758,8 +758,8 @@ export function renderPumpSelection(row, data) {
   const box = document.getElementById("pumpSelection");
   if (!box) return;
   const s = data.saved || {};
-  // 台账可能来自同模型旧版本(模型保存一次哈希就变):必须标出来源,
-  // 不能让人以为是自己这一版填的。保存后即写入当前工况。
+  // 台账可能来自同模型旧版本(模型保存后哈希即变):须标注来源,
+  // 避免误认为本版填写;保存后写入当前工况。
   const selSrc = data.sources && data.sources.selection;
   const srcTime = selSrc ? String(selSrc.read_at || "").slice(0, 16) : "";
   const srcNote = selSrc
@@ -830,7 +830,7 @@ export async function loadPumpSelection(row) {
     state.pumpSelection = data;
     renderPumpSelection(row, data);
   } catch (err) {
-    if (box) box.innerHTML = `<p class="muted">台账读不到:${esc(err.message)}</p>`;
+    if (box) box.innerHTML = `<p class="muted">台账不可用:${esc(err.message)}</p>`;
   }
 }
 
@@ -857,6 +857,7 @@ export async function savePumpSelection(row) {
     );
     await loadPumpSelection(row);
   } catch (err) {
-    if (msg) msg.textContent = `没保存:${err.message}`;
+    if (msg) msg.textContent = `未保存:${err.message}`;
   }
 }
+

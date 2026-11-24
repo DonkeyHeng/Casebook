@@ -33,6 +33,7 @@ async function ensureHeatSummary() {
         area: row.case.provenance.area,
         utility: row.case.provenance.utility,
         utilitySource: row.case.utility ? row.case.utility.source : null,
+        areaReq: row.case.area ? row.case.area.required_m2 : null,
         warnings: row.case.warnings || [],
       };
     }
@@ -61,6 +62,7 @@ function heatBadgeFor(row) {
   if (info.area === "aspen") parts.push("Aspen简捷");
   else if (info.area === "manual") parts.push("人工面积");
   else if (info.area === "edr") parts.push("EDR校核");
+  else if (info.areaReq) parts.push("需求面积估算");
   else parts.push("缺面积");
   if (row.type === "Heater" || row.type === "HeaterX") {
     if (info.utilitySource === "aspen") parts.push("公用工程实测");
@@ -134,6 +136,12 @@ export const BLOCK_COLS = {
   pv:      { key: "pv_bar", label: "p_v bar", num: true, pvInput: true },
   // 粘度:进口流股 MUMX(混合物粘度),泵设计里算 Re 与 Σhf 用;模型没挂 MUMX 时为空
   visc:    { key: "mu_cp", label: "粘度 cP", num: true, visc: true },
+  // 入口 / 出口压力:取连接流股 Pressure(实测),Compr / Valve 的主目标量;老工况由接口现算
+  pIn:     { key: "inlet_pressure_bar", label: "入口压力 bar", num: true, digits: 3 },
+  pOut:    { key: "outlet_pressure_bar", label: "出口压力 bar", num: true, digits: 3 },
+  // 混合分流的进出流股名:后端按连接关系给出,[data-stream] 点击走流股组分抽屉
+  inS:     { key: "in_streams", label: "进口流股", chips: true },
+  outS:    { key: "out_streams", label: "出口流股", chips: true },
 };
 
 /* 塔页保持原样(用户对塔页满意):只去掉"类型"和"功率"两个恒定/无关列 */
@@ -151,8 +159,8 @@ export const FAMILY_COLS = {
   pump:   ["name", "status", "flow", "head", "eff", "power", "motor", "visc", "pv", "npsh", "message"],
   // 涡轮机:只关心流量/扬程/回收功率;NPSHₐ、选型电机对透平没有意义
   turbine: ["name", "type", "status", "flow", "head", "power", "message"],
-  move:   ["name", "type", "status", "power", "inT", "outT", "dh", "ref", "balance", "message"],
-  mix:    ["name", "type", "status", "outT", "message"],
+  move:   ["name", "type", "status", "power", "pIn", "pOut", "inT", "outT", "dh", "ref", "balance", "message"],
+  mix:    ["name", "type", "status", "inS", "outS", "outT", "message"],
   other:  ["name", "type", "status", "message"],
 };
 
@@ -218,6 +226,51 @@ export function renderFamilyBar() {
   ).join("");
   box.querySelectorAll("button").forEach((b) =>
     b.addEventListener("click", () => setFamily(b.dataset.family)));
+  renderHeatTypeBar();
+}
+
+/* ------------------------------------------------------------ 换热通道筛选 */
+/* 换热家族里混着两类设备:HeatX(工艺-工艺,有 Aspen 面积)与 Heater(工艺-公用工程,
+   只有需求面积)。列表默认全显示,这里给一个三档开关,方便分开核对。 */
+const HEAT_TYPE_TABS = [
+  { key: "all", label: "全部" },
+  { key: "heatx", label: "HeatX" },
+  { key: "heater", label: "Heater" },
+];
+
+function heatTypeOf(row) {
+  const type = String(row?.type || "");
+  if (type === "HeatX" || type === "MHeatX") return "heatx";
+  if (type === "Heater" || type === "HeaterX") return "heater";
+  return null;
+}
+
+function setHeatType(key) {
+  if (state.heatType === key) return;
+  state.heatType = key;
+  renderHeatTypeBar();
+  renderTable();
+}
+
+function renderHeatTypeBar() {
+  const box = document.getElementById("heatTypeBar");
+  if (!box) return;
+  const show = state.tab === "blocks" && state.family === "heat";
+  box.classList.toggle("hidden", !show);
+  if (!show) return;
+  const rows = state.blocks.filter((r) => blockFamilyOf(r) === "heat");
+  const counts = { all: rows.length, heatx: 0, heater: 0 };
+  rows.forEach((r) => {
+    const kind = heatTypeOf(r);
+    if (kind) counts[kind] += 1;
+  });
+  box.innerHTML = HEAT_TYPE_TABS.map((t) =>
+    `<button type="button" role="tab" data-heat-type="${t.key}"
+       aria-selected="${t.key === state.heatType}"
+       class="${t.key === state.heatType ? "active" : ""}">${esc(t.label)}<b>${counts[t.key]}</b></button>`
+  ).join("");
+  box.querySelectorAll("button").forEach((b) =>
+    b.addEventListener("click", () => setHeatType(b.dataset.heatType)));
 }
 
 export function blockColumns() {
@@ -238,8 +291,8 @@ export async function loadFamilies() {
 
 /* ------------------------------------------------------------ 泵口径 */
 
-/* 重力加速度、电机效率、档位表、公式说明都从后端拿,免得 JS 里再抄一遍抄错。
-   取不到时 NPSHₐ 一律显示「—」, 不用猜的 g。 */
+/* 重力加速度、电机效率、档位表、公式说明均由后端下发,JS 不复制常量。
+   取不到时 NPSHₐ 显示「—」,不以假定值替代。 */
 export async function loadPumpSpec() {
   try {
     state.pumpSpec = await api("/api/pump-spec");
@@ -253,7 +306,7 @@ export async function loadPumpSpec() {
    缺 p_v、进口两相、缺密度 → 返回 null(显示「—」),绝不拿 0 顶替。
    两相门禁与后端 app/design/pump.npsh_available_m 同一阈值(app/values.py 的
    TWO_PHASE_VAP_EPS = 1e-4),三处(管道相态、泵 NPSH、读取层 ρ)同步改。
-   泡点进料时 p_v ≈ p_in,结果会有 -0.0 这种浮点噪声,归零免得显示成「-0.00」。 */
+   泡点进料时 p_v ≈ p_in,浮点结果含 -0.0,归零以避免显示「-0.00」。 */
 const TWO_PHASE_VAP_EPS = 1e-4;   // 与 app/values.py 同一常量
 
 export function pumpNpsh(row) {
@@ -273,18 +326,18 @@ export function pvSourceText(row) {
   if (row.pv_bar === null || row.pv_bar === undefined) return "—";
   if (row.pv_source === "aspen") return "Aspen 泡点压力";
   if (row.pv_source === "manual") return "手填";
-  return "老工况未标注";
+  return "旧工况未标注";
 }
 
-/* 为什么这格是「—」:直接写在悬浮提示里,别让人猜 */
+/* 「—」的成因写入悬浮提示,避免用户自行猜测。 */
 export function npshWhy(row) {
-  if (!state.pumpSpec) return "泵口径常量没取到(后端可能是旧版本)";
+  if (!state.pumpSpec) return "泵口径常量不可用(后端为旧版本)";
   const vap = row.pump_vap_frac;
   if (vap !== null && vap !== undefined && vap > TWO_PHASE_VAP_EPS) {
-    return "进口是两相,不计算汽蚀余量";
+    return "进口两相:不计算 NPSHₐ";
   }
   if (row.pv_bar === null || row.pv_bar === undefined) {
-    return "缺 p_v:模型没给出泡点压力 —— 物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况;也可直接在这格手填";
+    return "缺 p_v:模型未输出泡点压力。补法:新建物性组 Donkey,加 PL、PBUB(bar)、MUMX(cP),在报告选项中选入,重置并运行,再重读工况;或直接在本格手填。";
   }
   return "缺进口压力或密度";
 }
@@ -317,7 +370,7 @@ export async function savePv(block, text) {
     row.pv_source = pv === null ? null : "manual";
     updateNpshCell(block);
   } catch (err) {
-    // 存不上就把格子标红,别让人以为已经存进去了
+    // 保存失败标红,避免误认为已写入。
     const tr = [...document.querySelectorAll("#table tbody tr")]
       .find((el) => el.dataset.block === block);
     const input = tr && tr.querySelector("input[data-pv]");
@@ -343,12 +396,12 @@ export function updateNpshCell(block) {
   }
 }
 
-/* 沿用上一工况的 p_v:同一个模型位号相同、液体相同,重读工况后不用重填。
-   只认"同模型 + 更早工况",只在点了之后才执行,不自动搬。 */
+/* 沿用 p_v:同模型同位号为同一液体,重读后无需重填。
+   限同模型更早工况,仅手动触发,不自动继承。 */
 export async function inheritPv() {
   if (!state.current) return;
   const msg = document.getElementById("pumpInheritMsg");
-  if (!confirm("把同一模型更早工况里填过的 p_v 按位号搬过来?\n\n只填空着的格子,已填的不会被覆盖。")) return;
+  if (!confirm("按位号继承同模型更早工况的 p_v?\n\n仅填空格,已有值不覆盖。")) return;
   try {
     const res = await fetch(`/api/cases/${state.current.id}/pumps/inherit-pv`, writeInit({ method: "POST" }));
     const data = await res.json();
@@ -357,7 +410,7 @@ export async function inheritPv() {
     renderTable();
     if (msg) {
       const how = data.match ? "(同模型旧版本)" : "";
-      msg.textContent = `已从 #${data.source_case_id}(${data.source_read_at})${how}沿用 ${data.copied} 台,跳过 ${data.skipped} 台已填/不存在`;
+      msg.textContent = `已沿用 #${data.source_case_id}(${data.source_read_at})${how}:${data.copied} 台;跳过 ${data.skipped} 台(已填或不存在)`;
     }
   } catch (err) {
     if (msg) msg.textContent = `沿用失败:${err.message}`;
@@ -372,7 +425,7 @@ export function renderPumpBar() {
   if (!show) closePvHelp();
 }
 
-/* 「?」指南收起来(切页 / 切家族时也要收,不然回来它还开着) */
+/* 收起「?」指南(切页 / 切家族时同步收起,避免返回后仍展开)。 */
 export function closePvHelp() {
   const help = document.getElementById("pvHelp");
   const body = document.getElementById("pvHelpBody");
@@ -403,6 +456,10 @@ export function rowsForTab() {
   // 设备页按家族筛;名称搜索只对流股页生效 —— 否则在流股页打过的关键词,
   // 切到设备页会"看不见地"把行筛掉。
   if (state.tab === "blocks") rows = rows.filter((r) => blockFamilyOf(r) === state.family);
+  // 换热家族再按通道细分;选「全部」时不受影响
+  if (state.tab === "blocks" && state.family === "heat" && state.heatType !== "all") {
+    rows = rows.filter((r) => heatTypeOf(r) === state.heatType);
+  }
   const q = state.filter.trim().toLowerCase();
   if (q) rows = rows.filter((r) => String(r.name).toLowerCase().includes(q));
 
@@ -487,6 +544,13 @@ export function renderBlocks() {
       if (c.status) return `<td>${blockBadge(row.status)}</td>`;
       if (c.balance) return `<td>${balanceBadge(row.balance_state)}</td>`;
       if (c.key === "hx") return `<td class="hx-cell">${heatBadgeFor(row)}</td>`;
+      if (c.chips) {
+        const list = Array.isArray(row[c.key]) ? row[c.key] : [];
+        return `<td><span class="mix-streams">${list.length
+          ? list.map((s) => `<a href="#" class="stream-link stream-chip" data-stream="${esc(s)}"
+              title="查看 ${esc(s)} 的组分">${esc(s)}</a>`).join("")
+          : '<span class="muted">—</span>'}</span></td>`;
+      }
       if (c.key === "name" && isPump) {
         return `<td class="name"><a href="#" class="pump-link" data-block="${esc(row.name)}">${esc(row.name)}</a></td>`;
       }
@@ -518,7 +582,7 @@ export function renderBlocks() {
         const val = pv === null || pv === undefined ? "" : fmt(pv, 3);
         return `<td class="pv-cell"><input class="pv-input" type="number" step="0.001" min="0"
                    value="${val}" data-pv="${esc(row.name)}"
-                   title="饱和蒸气压(bar):读取工况时自动取 Aspen 进口流股的泡点压力;这里填值会覆盖它。模型读不到时:物性组新建 CBPROP → 加 PL、PBUB(bar)与 MUMX(cP)→ 报告选项→流股→物性组 选中 CBPROP → 重置并运行,再重读工况"></td>`;
+                   title="饱和蒸气压 bar:读取工况时自动取 Aspen 进口流股泡点压力;此处填值覆盖读数。补法:物性组加 PBUB(bar),步骤见首页「Aspen 物性组」"></td>`;
       }
       if (c.scaled) {
         const raw = row[c.key];
@@ -535,7 +599,7 @@ export function renderBlocks() {
       }
       const value = c.num ? fmt(row[c.key], c.digits) : esc(row[c.key] ?? "");
       // 说明 / 平衡说明这两列会被 ellipsis 截断,原文挂 title
-      // (以前只有 balance_note 有,「说明」里放的是 Aspen 原始报错,截断了就看不到)
+      // (此前仅 balance_note 带完整说明;「说明」列为截断的 Aspen 原始报错)
       const tipText = c.cls === "msg" ? row[c.key] : null;
       const title = tipText ? ` title="${esc(tipText)}"` : "";
       return `<td class="${c.cls || ""} ${c.num ? "num" : ""}"${title}>${value}</td>`;
@@ -729,9 +793,9 @@ export function scheduleTableRender() {
   });
 }
 
-/* 表画完再决定 #empty 露不露。
-   原来这里无条件 add("hidden"),把「还没有工况」的引导也一起藏了 ——
-   空库点进流股页只剩一张只有表头、写着「0 行」的白表,没有任何下一步。 */
+/* 表格渲染后决定 #empty 是否显示。
+   此前无条件 add("hidden"),空工况引导一并隐藏;空库进入流股页只剩表头与「0 行」,
+   无后续操作入口。 */
 export function syncTableEmpty() {
   const el = document.getElementById("empty");
   if (!el) return;
@@ -788,7 +852,7 @@ export async function runCompare() {
   const otherId = Number(document.getElementById("otherSelect").value);
   if (!baseId || !otherId) return;
   if (state.cases.length < 2) {
-    document.getElementById("compareSummary").textContent = "至少需要两个工况才能对比。";
+    document.getElementById("compareSummary").textContent = "需至少两个工况方可对比。";
     state.compare.data = null;
     renderCompare();
     return;
@@ -798,10 +862,10 @@ export async function runCompare() {
     next = await withBusy("tableWrap",
       () => api(`/api/compare?base=${baseId}&other=${otherId}`));
   } catch (err) {
-    // 同样保留上一次的结果(清空只会让人以为"没数据"),但摘要里必须写清本次失败
+    // 保留上次结果(清空易被误读为无数据),摘要中注明本次失败。
     document.getElementById("compareSummary").textContent =
       `对比失败:${err.message}`
-      + (state.compare.data ? "(表格里仍是上一次的对比结果)" : "");
+      + (state.compare.data ? "(表格仍为上次对比结果)" : "");
     syncTableEmpty();
     return;
   }
@@ -811,7 +875,7 @@ export async function runCompare() {
   syncTableEmpty();
 }
 
-/* 顶部那行摘要跟着 流股 / 设备 切换,不然看设备表时还写着"共同流股 N 条" */
+/* 顶部摘要随 流股 / 设备 切换,避免设备表仍显示流股口径。 */
 export function updateCompareSummary() {
   const el = document.getElementById("compareSummary");
   const data = state.compare.data;
@@ -839,8 +903,8 @@ export function setCompareScope(scope) {
 
 /* ------------------------------------------------------------ 页签 */
 
-/* 三个页签共用同一个滚动容器(#tableWrap),换内容时必须把滚动条拨回顶部,
-   否则会带着上一个页签的位置 —— 新表看起来像"从中间开始",第一行都看不到。 */
+/* 三个页签共用滚动容器 #tableWrap:换内容须复位到顶部,
+   否则沿用上页签位置,新表从中间开始显示。 */
 export function resetTableScroll() {
   const wrap = document.getElementById("tableWrap");
   if (wrap) wrap.scrollTop = 0;
@@ -850,10 +914,10 @@ export function setTab(tab) {
   state.tab = tab;
   renderPumpBar();      // 离开泵页立刻收掉参数条,不等表格重绘
   syncToolbar(tab);
-  closeDataDrawers();   // 三个抽屉一起收(原来漏了泵参数)
+  closeDataDrawers();   // 三个抽屉一并关闭(此前遗漏泵参数)
   renderBanner();
   if (tab === "compare") {
-    // 筛选框在对比页是隐藏的,不清空就会"看不见地"把对比行筛掉
+    // 对比页隐藏筛选框:须清空,否则仍会静默过滤对比行。
     state.filter = "";
     document.getElementById("filter").value = "";
     fillCompareSelects();
@@ -864,10 +928,10 @@ export function setTab(tab) {
   resetTableScroll();
 }
 
-/* 对比入口:平时是工具栏右上角一个小图标;进对比页后,同一行换成两个下拉框。
-   整行高度不变,所以切页签时下面的内容不会上下跳。
-   左边原本放筛选框的位置,在对比页换成「流股 / 设备」开关,
-   在设备页换成「类型页签」—— 三态一起管,免得某个控件"看不见地"还在生效。 */
+/* 对比入口:工具栏右侧图标;进入对比页后同一行替换为两个下拉框。
+   行高固定,切换页签时内容不跳动。
+   左侧位置按页签切换为「流股 / 设备」开关或「类型页签」,三者统一管理,
+   避免隐藏控件仍生效。 */
 export function syncToolbar(tab) {
   const isCompare = tab === "compare";
   const isBlocks = tab === "blocks";
@@ -877,6 +941,9 @@ export function syncToolbar(tab) {
   // 设备页也放开搜索框(2026-11-15):79 台泵里找一台,不放开只能翻页
   document.getElementById("filter").classList.toggle("hidden", isCompare);
   document.getElementById("blockFamilies").classList.toggle("hidden", !isBlocks);
+  // 换热通道开关仅在「设备 → 换热」页签显示:切走即收起,避免残留无效筛选
+  if (isBlocks) renderHeatTypeBar();
+  else document.getElementById("heatTypeBar").classList.toggle("hidden", true);
   document.getElementById("count").classList.toggle("hidden", isCompare);
   // 设备页右上角「导出 Excel」:只导当前分类;没有工况时禁用
   const exportBtn = document.getElementById("exportFamily");
@@ -885,3 +952,4 @@ export function syncToolbar(tab) {
     exportBtn.disabled = !state.current;
   }
 }
+

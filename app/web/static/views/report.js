@@ -92,15 +92,15 @@ export function renderReportPick() {
   if (!shown.length) {
     const empty = document.createElement("div");
     empty.className = "muted";
-    empty.textContent = "没有匹配的设备";
+    empty.textContent = "无匹配设备";
     listBox.appendChild(empty);
   }
 
   if (hint) {
     const n = reportSelectedCount();
     hint.textContent = n
-      ? `已勾选 ${n} 台(逐设备表只出这些)`
-      : `未勾选 = 全部 ${blocks.length} 台`;
+      ? `已勾选 ${n} 台(逐设备表仅出这些)`
+      : `未勾选:全部 ${blocks.length} 台`;
   }
 }
 
@@ -129,20 +129,20 @@ export function reportRenderSections(payload) {
   const parts = (payload && payload.merged) || {};
   const keys = Object.keys(parts);
   if (payload && payload.deleted && payload.deleted.length) {
-    reportNotice(`已删除的工段:${payload.deleted.join("、")}（保存在 data/config/sections.json）`);
+    reportNotice(`已删除工段:${payload.deleted.join("、")}(写入 data/config/sections.json)`);
   }
 
   if (hint) {
     hint.textContent = payload.auto
-      ? "当前是自动草稿,未人工确认"
-      : "已载入 data/config/sections.json 的人工确认结果";
+      ? "当前为自动草稿(未人工确认)"
+      : "已载入人工确认结果(data/config/sections.json)";
   }
 
   box.innerHTML = "";
   if (!keys.length) {
     const empty = document.createElement("div");
     empty.className = "muted";
-    empty.textContent = "这个工况没有推出任何工段(设备位号里没有段号),可以先确认设备命名。";
+    empty.textContent = "未生成任何工段:设备位号缺段号。请先核对设备命名。";
     box.appendChild(empty);
     return;
   }
@@ -158,7 +158,7 @@ export function reportRenderSections(payload) {
     const input = document.createElement("input");
     input.className = "report-label";
     input.value = info.label || key;
-    input.title = "工段标题,报告小节就用它";
+    input.title = "工段标题:用于报告小节标题";
     const chip = document.createElement("span");
     chip.className = "report-chip";
     chip.textContent = `${(info.in || []).length} 进 / ${(info.out || []).length} 出`;
@@ -169,21 +169,21 @@ export function reportRenderSections(payload) {
     del.type = "button";
     del.className = "report-del";
     del.textContent = "删除此工段";
-    del.title = "从本次报告里去掉这个工段;保存后下次也不会再从草稿里冒出来";
+    del.title = "移除本工段;保存后不再由草稿恢复";
     del.addEventListener("click", () => {
       state.report.removed.add(key);
       row.remove();
       const left = box.querySelectorAll(".report-section").length;
       reportNotice(left
-        ? `已删除「${key} 工段」，还剩 ${left} 个；记得点「保存工段边界」。`
-        : "所有工段都删掉了。保存后报告只出全流程表；点「重置为草稿」可恢复。");
-      if (hint) hint.textContent = `已删除 ${state.report.removed.size} 个工段（未保存）`;
+        ? `已删除工段「${key}」,剩余 ${left} 个;请点「保存工段边界」。`
+        : "工段已全部删除:保存后仅出全流程表;「重置为草稿」可恢复。");
+      if (hint) hint.textContent = `已删除 ${state.report.removed.size} 个工段(未保存)`;
     });
     head.appendChild(del);
 
     const fields = document.createElement("div");
     fields.className = "report-fields";
-    [["in", "进界流股(逗号或空格分隔)"], ["out", "出界流股(逗号或空格分隔)"]].forEach(([field, text]) => {
+    [["in", "进界流股(逗号 / 空格分隔)"], ["out", "出界流股(逗号 / 空格分隔)"]].forEach(([field, text]) => {
       const label = document.createElement("label");
       label.textContent = text;
       const area = document.createElement("textarea");
@@ -205,7 +205,7 @@ export async function renderReport() {
   reportNotice("");
   if (!c) {
     reportRenderSections({ merged: {}, auto: true });
-    reportNotice("还没有工况:先在左上角读取一个工况,或载入示例。", "warn");
+    reportNotice("无工况:请先在左上读取工况,或载入示例。", "warn");
     return;
   }
   renderReportPick();
@@ -215,20 +215,20 @@ export async function renderReport() {
     reportRenderSections(payload);
     if (payload.error) reportNotice(payload.error, "warn");
   } catch (err) {
-    reportNotice(`工段边界没读到:${err.message}`, "warn");
+    reportNotice(`无法读取工段边界:${err.message}`, "warn");
   }
 }
 
 export async function saveReportSections() {
   const c = state.current;
-  if (!c) { reportNotice("还没有工况", "warn"); return; }
+  if (!c) { reportNotice("无工况", "warn"); return; }
   const btn = document.getElementById("reportSave");
   if (btn) btn.disabled = true;
   try {
     const body = reportCollectSections();
     const payload = await apiPost(`/api/cases/${c.id}/sections`, body);
     if (!payload.ok) {
-      reportNotice(`没保存:${(payload.errors || []).join(";")}`, "warn");
+      reportNotice(`未保存:${(payload.errors || []).join(";")}`, "warn");
       return;
     }
     const fresh = await api(`/api/cases/${c.id}/sections`);
@@ -237,7 +237,7 @@ export async function saveReportSections() {
     reportRenderSections(fresh);
     reportNotice(`已保存到 ${payload.config.path}(工况 #${c.id})`);
   } catch (err) {
-    reportNotice(`没保存:${err.message}`, "warn");
+    reportNotice(`未保存:${err.message}`, "warn");
   } finally {
     if (btn) btn.disabled = false;
   }
@@ -246,7 +246,7 @@ export async function saveReportSections() {
 /* kind: mass 物料册 / energy 能量册。两个按钮共用这一个下载函数 */
 export async function downloadReport(kind) {
   const c = state.current;
-  if (!c) { reportNotice("还没有工况", "warn"); return; }
+  if (!c) { reportNotice("无工况", "warn"); return; }
   const picked = [...state.report.picked];
   const query = new URLSearchParams({ kind });
   if (picked.length) query.set("blocks", picked.join(","));
@@ -272,7 +272,7 @@ export function bindReportPage() {
     inheritBtn.addEventListener("click", async () => {
       const c = state.current;
       if (!c) {
-        reportNotice("还没有工况", "warn");
+        reportNotice("无工况", "warn");
         return;
       }
       inheritBtn.disabled = true;
@@ -284,10 +284,10 @@ export function bindReportPage() {
         reportRenderSections(fresh);
         const how = payload.match ? "(同模型旧版本)" : "";
         reportNotice(
-          `已从工况 #${payload.from_case}${how} 沿用 ${(payload.zones || []).length} 个工段,记得核对后保存`
+          `已沿用工况 #${payload.from_case}${how} 的 ${(payload.zones || []).length} 个工段;请核对后保存`
         );
       } catch (err) {
-        reportNotice(`没沿用:${err.message}`, "warn");
+        reportNotice(`沿用失败:${err.message}`, "warn");
       } finally {
         inheritBtn.disabled = false;
       }
@@ -300,7 +300,7 @@ export function bindReportPage() {
       const payload = state.report.data || { merged: {}, auto: true };
       state.report.removed = new Set();
       reportRenderSections({ merged: payload.draft || {}, auto: true });
-      reportNotice("已恢复成自动草稿(删除过的工段也回来了),还没保存");
+      reportNotice("已恢复为自动草稿(删除的工段已还原),未保存");
     });
   }
 

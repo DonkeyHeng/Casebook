@@ -47,9 +47,9 @@
     <div class="side-case">
       <label class="side-label" for="caseSelect">当前工况</label>
       <select id="caseSelect"></select>
-      <button id="readBtn" class="btn primary block" title="从已经打开的 Aspen 里读一次当前工况(约 10–30 秒)">读取当前工况</button>
+      <button id="readBtn" class="btn primary block" title="读取当前工况:从已打开的 Aspen 读取一次(约 10–30 s)">读取当前工况</button>
       <label class="side-check" for="readComposition"
-             title="勾选后这次读取会把每条流股的组成一起读完(液相 x + 气相 y + 各组分质量流量,每条流股 54 次 COM 调用,百条流股总时长约 30–50 s);不勾选也能出衡算报告,只是组分质量流量那一段为空。">
+             title="读取流股组成:液相 x、气相 y、各组分质量流量(54 次 COM 调用/流股,100 条约 30–50 s)。不勾选时,衡算报告的组分质量流量段为空。">
         <input type="checkbox" id="readComposition">
         <span>读全部流股组成</span>
       </label>
@@ -93,9 +93,9 @@
       <header class="page-head">
         <h2>首页</h2>
         <div class="page-actions">
-          <button id="exportBtn" class="btn" title="把当前工况导出成 Excel(概要/流股/设备/连接/塔剖面)">导出 Excel</button>
-          <button id="aiPackBtn" class="btn" title="导出给 AI 读的一组文件(Markdown 说明 + CSV 数据)">AI 分析包</button>
-          <button id="deleteBtn" class="btn danger" title="删除当前工况及其全部明细(不可恢复)">删除工况</button>
+          <button id="exportBtn" class="btn" title="导出 Excel:概要、流股、设备、连接、塔剖面">导出 Excel</button>
+          <button id="aiPackBtn" class="btn" title="AI 分析包:Markdown 说明 + CSV 数据">AI 分析包</button>
+          <button id="deleteBtn" class="btn danger" title="删除工况:含全部明细,不可恢复">删除工况</button>
         </div>
       </header>
 
@@ -109,6 +109,37 @@
         <h3>异常模块</h3>
         <div id="homeProblems"></div>
       </section>
+
+      <!-- 标准表:管路 3 张 + 换热器 2 张,统一在首页导入。数据受著作权保护,
+           不随项目分发;管道页与换热详情不再各开一套导入,缺表时只提示到这里。 -->
+      <section id="homeStdCard" class="card wide home-std-card">
+        <header class="panel-head pump-modal-head">
+          <div class="pump-modal-title">
+            <h3>标准表</h3>
+            <span class="muted pump-modal-sub" id="homeStdHint">管路选型与换热器选型要查的国标表格,导入后才有数据</span>
+          </div>
+          <div class="pump-modal-actions">
+            <button id="homeStdOpen" class="btn" type="button" title="导入或更新管路 / 换热器标准表的 CSV">导入 / 更新</button>
+          </div>
+        </header>
+        <div id="homeStdStatus" class="home-std-status">正在读取…</div>
+      </section>
+
+      <!-- 物性组:泵 p_v / 粘度、换热 cp / λ 的读数来源。配置在 Aspen 侧完成,
+           本工具只读数,故不给「导入」,只给一次性教程(配图两张)。 -->
+      <section id="homePropCard" class="card wide home-std-card">
+        <header class="panel-head pump-modal-head">
+          <div class="pump-modal-title">
+            <h3>Aspen 物性组</h3>
+            <span class="muted pump-modal-sub" id="homePropHint">泵 p_v / 粘度、换热 cp / λ 的读数来源;一次性配置</span>
+          </div>
+          <div class="pump-modal-actions">
+            <button id="homePropOpen" class="btn" type="button"
+                    title="配置教程:五项物性、相态限定符、报告选项与影响范围">配置教程</button>
+          </div>
+        </header>
+        <div class="home-std-status">五项物性:<code>PL</code> · <code>PBUB</code> · <code>MUMX</code> · <code>CPMX</code> · <code>KMX</code>;相态 <code>Vapor</code> / <code>Liquid</code> 两列</div>
+      </section>
     </section>
 
     <!-- 衡算报告页:确认工段边界 + 选设备 → 生成 Word -->
@@ -117,13 +148,13 @@
         <h2>衡算报告</h2>
         <div class="page-actions">
           <div class="btn-group">
-            <button id="reportReset" class="btn" title="丢掉本次编辑,重新按设备名段号推草稿">重置为草稿</button>
-          <button id="reportInherit" class="btn" title="把同一模型上一个工况保存过的工段边界搬过来,不用重新确认一遍">沿用上一工况</button>
-            <button id="reportSave" class="btn" title="把下面填的进/出界流股存进 data/config/sections.json">保存工段边界</button>
+            <button id="reportReset" class="btn" title="重置为草稿:丢弃本次编辑,按设备名段号重新生成">重置为草稿</button>
+          <button id="reportInherit" class="btn" title="沿用上一工况:继承同模型上一工况的工段边界">沿用上一工况</button>
+            <button id="reportSave" class="btn" title="保存工段边界:写入 data/config/sections.json">保存工段边界</button>
           </div>
           <div class="btn-group">
-            <button id="reportDownloadMass" class="btn primary" title="只导出物料衡算册(.docx):工段/全流程物料平衡宽表 + 消耗产出汇总">导出物料衡算册</button>
-            <button id="reportDownloadEnergy" class="btn primary" title="只导出能量衡算册(.docx):逐设备能量表 + 全流程汇总 + 塔负荷明细">导出能量衡算册</button>
+            <button id="reportDownloadMass" class="btn primary" title="导出物料衡算册:工段/全流程物料平衡表 + 消耗产出汇总(.docx)">导出物料衡算册</button>
+            <button id="reportDownloadEnergy" class="btn primary" title="导出能量衡算册:逐设备能量表 + 全流程汇总 + 塔负荷明细(.docx)">导出能量衡算册</button>
           </div>
         </div>
       </header>
@@ -136,9 +167,9 @@
           <span id="reportSectionHint" class="muted"></span>
         </header>
         <p class="muted report-hint">
-          工段是界区,不是一组设备:进界流股 = 从界区外(别的工段、外部进料、公用工程)进来的流股,
-          出界流股 = 从本工段出去的流股。判据 Σ(进界) = Σ(出界),相对误差 ≤ 0.5% 判通过。
-          下面默认按设备名段号自动推草稿,改完点「保存工段边界」才算人工确认。
+          工段 = 界区。进界流股:自界区外(其他工段、外部进料、公用工程)进入;出界流股:自本工段流出。<br>
+          判据 Σ进界 = Σ出界,相对误差 ≤ 0.5% 通过。<br>
+          默认按设备名段号生成草稿;修改后点「保存工段边界」视为人工确认。
         </p>
         <div id="reportSections" class="report-sections"></div>
       </section>
@@ -149,7 +180,7 @@
           <span id="reportPickHint" class="muted"></span>
         </header>
         <p class="muted report-hint">
-          逐设备物料衡算表按这里勾选的设备出;工段界区表与能量衡算表始终覆盖全流程。
+          逐设备物料衡算表:仅出勾选设备。工段界区表、能量衡算表:覆盖全流程。
         </p>
         <div id="reportFamilies" class="btn-group report-families"></div>
         <div class="report-pick">
@@ -165,7 +196,7 @@
     <section id="pageFlow" class="page hidden">
       <header class="page-head">
         <h2>流程</h2>
-        <!-- 缩放按钮曾经被拿掉(说"占地方"),结果滚轮成了唯一入口:键盘和触屏都用不了 -->
+        <!-- 缩放按钮为键盘与触屏入口;滚轮与快捷键仅作补充 -->
         <div class="page-actions">
           <div class="btn-group">
             <button id="flowZoomOut" class="icon-btn" type="button" title="缩小(快捷键 -)"><svg class="ico"><use href="#i-minus"/></svg></button>
@@ -183,7 +214,7 @@
       </header>
 
       <div class="flow-bar">
-        <span class="muted" id="flowHint">滚轮或 +/− 缩放、拖动平移、0 适应窗口;点击(或 Tab 选中后回车)设备聚焦它上下游 2 层,Esc 取消。</span>
+        <span class="muted" id="flowHint">缩放:滚轮 / +− / 0(适应窗口) · 平移:拖动 · 聚焦:点击设备或 Tab 后回车(上下游 2 层) · 取消:Esc</span>
         <span class="spacer"></span>
         <span id="flowLegend" class="legend"></span>
       </div>
@@ -206,20 +237,19 @@
     <section id="pagePipes" class="page hidden">
       <header class="page-head">
         <h2>管道</h2>
-        <!-- 三组:算 / 出 / 配。原来七个同级按钮连成一排,导出和"恢复默认"挨着,容易误点 -->
+        <!-- 三组:算 / 出 / 配。此前七个同级按钮同排,导出与「恢复默认」相邻,易误点 -->
         <div class="page-actions">
           <div class="btn-group">
-            <button id="pipeRecalc" class="btn" title="参数改了会自动重算,这里用于手动再算一次">重算</button>
-            <button id="pipeReset" class="btn" title="把流速与压力口径恢复成默认值">恢复默认</button>
+            <button id="pipeRecalc" class="btn" title="重算:参数变更自动触发,此处手动重算一次">重算</button>
+            <button id="pipeReset" class="btn" title="恢复默认:流速与压力口径">恢复默认</button>
           </div>
           <div class="btn-group">
-            <button id="pipeExportDocx" class="btn" title="把这张管道选型表导成 Word(.docx),版式对齐报告附录:宋体五号、居中、三线表">导出 Word</button>
-            <button id="pipeCalcDoc" class="btn" title="导出《管路选型计算说明书》Word(.docx):十步流程、公式、校验码、数据来源与已知局限(想核对算法时看)">导出计算书</button>
-            <button id="pipeExportAi" class="btn" title="导出 AI 分析包(含 pipe_schedule.csv)">AI 分析包</button>
+            <button id="pipeExportDocx" class="btn" title="导出 Word:管道选型表(宋体五号、居中、三线表)">导出 Word</button>
+            <button id="pipeCalcDoc" class="btn" title="导出计算书:十步流程、公式、校验码、数据来源与已知局限(.docx)">导出计算书</button>
+            <button id="pipeExportAi" class="btn" title="导出 AI 分析包:含 pipe_schedule.csv">AI 分析包</button>
           </div>
           <div class="btn-group">
-            <button id="pipeStdOpen" class="btn" title="导入 GB/T 17395 表 1/表 4 与 GB/T 20801.1 表 B.1 的 CSV(数据受著作权保护,需要你自己整理)">标准表</button>
-            <button id="pipeClassOpen" class="btn" title="配置管道等级表(可选:不配就全部按默认材质)">等级表</button>
+            <button id="pipeClassOpen" class="btn" title="配置管道等级表:可选覆盖规则;未配置时全部按默认管材">等级表</button>
           </div>
         </div>
       </header>
@@ -229,16 +259,16 @@
       <form id="pipeParams" class="pipe-params" autocomplete="off">
         <fieldset class="pipe-group">
           <legend>流速(米/秒)</legend>
-          <label title="液体在管子里跑多快。一般 1.0–2.5 米/秒">液<input id="ppLiquid" type="number" step="0.1" inputmode="decimal"></label>
-          <label title="气体在管子里跑多快。一般 10–25 米/秒">气<input id="ppGas" type="number" step="0.5" inputmode="decimal"></label>
-          <label title="气体和液体混在一起时用。一般 5–10 米/秒">两相<input id="ppTwo" type="number" step="0.5" inputmode="decimal"></label>
-          <label title="进入泵之前的管段要慢一点,避免泵抽空。一般 0.5–1.0 米/秒">泵入口<input id="ppPumpInlet" type="number" step="0.1" inputmode="decimal"></label>
+          <label title="液体流速:推荐 1.0–2.5 m/s">液<input id="ppLiquid" type="number" step="0.1" inputmode="decimal"></label>
+          <label title="气体流速:推荐 10–25 m/s">气<input id="ppGas" type="number" step="0.5" inputmode="decimal"></label>
+          <label title="两相流速:推荐 5–10 m/s">两相<input id="ppTwo" type="number" step="0.5" inputmode="decimal"></label>
+          <label title="泵入口流速:推荐 0.5–1.0 m/s(抑制汽蚀)">泵入口<input id="ppPumpInlet" type="number" step="0.1" inputmode="decimal"></label>
         </fieldset>
         <fieldset class="pipe-group">
           <legend>设计压力</legend>
-          <label title="按操作压力再放一点余量,一般 1.1 倍">放大系数<input id="ppFactor" type="number" step="0.05" min="1"></label>
-          <label title="不管实际压力多低,设计压力不低于这个值。常规取 1.0 MPa">最低值 MPa<input id="ppFloor" type="number" step="0.1" min="0"></label>
-          <label title="不改计算结果,只换表格里「压力」和「设计压力」两列的单位">压力单位<select id="ppUnit">
+          <label title="压力放大系数:设计压力 = 操作压力 × 系数,常规 1.1">放大系数<input id="ppFactor" type="number" step="0.05" min="1"></label>
+          <label title="最低设计压力:设计压力下限,常规 1.0 MPa">最低值 MPa<input id="ppFloor" type="number" step="0.1" min="0"></label>
+          <label title="压力单位:仅影响「压力」「设计压力」两列显示">压力单位<select id="ppUnit">
             <option value="kpa">kPa</option>
             <option value="mpa">MPa</option>
             <option value="bar">bar</option>
@@ -246,18 +276,18 @@
         </fieldset>
         <fieldset class="pipe-group">
           <legend>其他</legend>
-          <label title="没有配置管道等级表时,所有流股都用这个管材">默认管材<select id="ppMaterial"></select></label>
-          <label class="pipe-toggle" title="表 B.1 按母材类别分组(Fe-1、Fe-4…);勾上才把铸铁/非钢管牌号(HT200、QT400-18 等)也列出来">
+          <label title="默认管材:未配置等级表时适用">默认管材<select id="ppMaterial"></select></label>
+          <label class="pipe-toggle" title="显示全部牌号:含铸铁/非钢管牌号(HT200、QT400-18);表 B.1 按母材类别分组">
             <input id="ppAllGrades" type="checkbox"> 显示全部牌号(含铸铁)
           </label>
         </fieldset>
-        <label class="pipe-toggle" title="在「备注」列右侧多出 7 列中间结果:管外径、设计压力、设计温度、许用应力、计算厚度、加裕量后厚度、最小壁厚下限。想核对每个数字怎么来的就勾上。&#10;壁厚 = 承压需要(计算厚度 + 腐蚀裕量)圆整到标准壁厚,且不低于小口径的最小壁厚下限(DN10–100 为 2–3 mm);下限那列显示「—」表示这一档不设限">
+        <label class="pipe-toggle" title="显示计算过程:增加 7 列中间结果(管外径、设计压力、设计温度、许用应力、计算厚度、加裕量厚度、最小壁厚下限)。&#10;壁厚 = 计算厚度 + 腐蚀裕量,圆整至标准壁厚,且不低于小口径下限(DN10–100:2–3 mm);「—」表示该档不设下限">
           <input id="ppShowCalc" type="checkbox"> 显示计算过程
         </label>
-        <label class="pipe-toggle" title="只显示有校验提示的行(流速不合适、真空、超温等)"><input id="ppOnlyBad" type="checkbox"> 只看有提示的</label>
+        <label class="pipe-toggle" title="筛选:仅显示含校验提示的行(流速、真空、超温等)"><input id="ppOnlyBad" type="checkbox"> 只看有提示的</label>
         <input id="ppFilter" type="search" placeholder="按流股名筛选…">
         <span id="pipeStatus" class="pipe-status"></span>
-        <span id="pipeClassHint" class="muted" title="管道等级表:可选的覆盖规则(材质 / 腐蚀裕量)"></span>
+        <span id="pipeClassHint" class="muted" title="管道等级表:可选覆盖规则(管材 / 腐蚀裕量)"></span>
         <span id="pipeCount" class="muted"></span>
       </form>
 
@@ -279,7 +309,7 @@
         <div id="pipeFindingsBody"></div>
       </section>
 
-      <!-- 管道等级表:可选的覆盖规则。关掉这个弹窗就还是"全部按默认管材" -->
+      <!-- 管道等级表:可选覆盖规则;关闭弹窗后全部按默认管材 -->
       <div id="pipeClassModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pipeClassTitle">
         <div class="pipe-modal-box">
           <header class="panel-head">
@@ -287,21 +317,20 @@
             <button id="pipeClassClose" class="close" title="关闭,不保存"><svg class="ico"><use href="#i-close"/></svg></button>
           </header>
           <p class="pipe-class-hint">
-            <b>不知道这是什么就不用管它</b> —— 关掉这个窗口,所有管子都按页面上的「默认管材」计算。<br>
-            只有当某些流股要用别的管材时才需要填:一行写一条规则,<b>流股名开头</b>或<b>介质类型</b>对上的流股,
-            就用这一行指定的管材和"多留的厚度"。
-            比如:开头填 <code>CW</code>、管材选 <code>20#</code>、多留 <code>1</code> mm → 冷却水管(名字以 CW 开头)按碳钢算,壁厚多留 1 mm。<br>
-            <span class="muted">工具只按表套用,<b>不判断介质会不会腐蚀</b> —— 用哪种管材由你(或材料专业)定。</span>
+            <b>可选项</b>。关闭本窗口后,全部管段按页面「默认管材」计算。<br>
+            规则:一行一条;<b>流股名前缀</b>或<b>介质类型</b>匹配的管段,套用本行管材与附加腐蚀裕量。
+            示例:前缀 <code>CW</code>、管材 <code>20#</code>、裕量 <code>1</code> mm → 冷却水管按碳钢计,壁厚 +1 mm。<br>
+            <span class="muted">管材适用性:工具仅按表套用,<b>不判定介质腐蚀性</b>;选材由设计者或材料专业确定。</span>
           </p>
           <div class="table-wrap small">
             <table id="pipeClassTable">
               <thead>
                 <tr>
-                  <th title="流股名的开头,多个用逗号隔开,如 CW,CWR;不按名字匹配就留空">流股名的开头</th>
-                  <th title="PL=液体、PG=气体、PGL=气液都有;不按类型匹配就留空">介质类型</th>
-                  <th title="下拉里是 GB/T 20801.1 表 B.1 收录的牌号">用哪种管材</th>
-                  <th title="估计会被腐蚀掉的厚度;不锈钢一般填 0,碳钢常见填 1">多留厚度 mm</th>
-                  <th title="给自己看;只保存在本机的配置文件里">备注</th>
+                  <th title="流股名前缀:逗号分隔(如 CW,CWR);留空表示不按名称匹配">流股名的开头</th>
+                  <th title="介质类型:PL 液体 / PG 气体 / PGL 两相;留空表示不按类型匹配">介质类型</th>
+                  <th title="管材:GB/T 20801.1 表 B.1 收录牌号">用哪种管材</th>
+                  <th title="附加腐蚀裕量 mm:不锈钢常取 0,碳钢常取 1">多留厚度 mm</th>
+                  <th title="备注:仅存入本机配置文件">备注</th>
                   <th></th>
                 </tr>
               </thead>
@@ -312,7 +341,7 @@
             <button id="pipeClassAdd" class="btn" type="button">+ 加一条</button>
             <label class="pipe-class-default">上面都没对上时用
               <select id="pipeClassDefault">
-                <option value="">(不指定,走页面上的默认管材)</option>
+                <option value="">(未指定:沿用页面默认管材)</option>
               </select>
             </label>
             <span class="spacer"></span>
@@ -324,45 +353,6 @@
         </div>
       </div>
 
-      <!-- 标准表导入:三张国标表格的 CSV。数据受著作权保护,不进仓库,只能由使用者自己导入 -->
-      <div id="pipeStdModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="pipeStdTitle">
-        <div class="pipe-modal-box pipe-std-box">
-          <header class="panel-head">
-            <h3 id="pipeStdTitle">导入标准表</h3>
-            <button id="pipeStdClose" class="close" title="关闭,不导入"><svg class="ico"><use href="#i-close"/></svg></button>
-          </header>
-          <p class="pipe-class-hint">
-            管路选型要查 <b>GB/T 17395-2024 的表 1、表 4</b> 和 <b>GB/T 20801.1-2025 的表 B.1</b>。
-            这些数值受著作权保护,本工具不附带,得你自己取得标准后整理成 CSV 再导进来 ——
-            导入的文件<b>只写在本机</b> <code id="pipeStdDir">data/preview/std/docx</code> 下,不上传、不外发。
-          </p>
-          <!-- 格式辅助:不想翻文档对列名的人走这两个入口。模板只有表头与 2 行虚构数值 -->
-          <div class="pipe-std-tools" role="group" aria-label="格式辅助">
-            <a id="pipeStdZip" class="btn" href="/api/pipe-standards-template.zip" download
-               title="下载三份只有表头与虚构示例值的 CSV,按同样列名填真实数据">下载 CSV 模板</a>
-            <button id="pipeStdPrompt" class="btn" type="button"
-                    title="复制一段提示词:交给能看图的 AI,让它按三张表的列名直接输出 CSV">复制填写提示词</button>
-            <span id="pipeStdPromptMsg" class="muted" role="status" aria-live="polite"></span>
-          </div>
-          <div id="pipeStdStatus" class="pipe-std-status muted">正在读取当前状态…</div>
-          <div id="pipeStdFiles" class="pipe-std-files"></div>
-          <p class="muted pipe-std-note">
-            列名拿不准就先点「下载 CSV 模板」(只有表头与 2 行虚构数值,不能直接导入)。
-            每张表在哪一页、分页怎么拼,见 <code>docs/pipe-standards-index.md</code>;
-            要交给能看图的 AI 帮着抄数,直接用「复制填写提示词」,或看 <code>docs/pipe-standards-extract-prompt.md</code>。
-            文件名不用改,选中后按名字自动对到对应位置,导入完立即生效、不用重启服务。
-          </p>
-          <div id="pipeStdError" class="pipe-notice err hidden"></div>
-          <div id="pipeStdWarn" class="pipe-notice warn hidden"></div>
-          <div id="pipeStdOk" class="pipe-notice ok hidden"></div>
-          <div class="pipe-class-actions">
-            <span class="spacer"></span>
-            <button id="pipeStdImport" class="btn primary" type="button" disabled>导入并立即生效</button>
-            <button id="pipeStdCancel" class="btn" type="button">关闭</button>
-          </div>
-        </div>
-      </div>
-
     </section>
 
     <!-- 数据页:流股 / 设备 / 对比 共用 -->
@@ -371,12 +361,13 @@
         <h2 id="pageTitle">流股</h2>
       </header>
 
-      <!-- 这是工具条不是导航:用 div + role=group,免得读屏把"筛选框 + 导出按钮"
-           念成第二个导航地标 -->
+      <!-- 工具条而非导航:div + role=group,避免读屏将其识别为第二个导航地标 -->
       <div class="toolbar" role="group" aria-label="表格工具条">
         <input id="filter" type="search" placeholder="按名称筛选…" autocomplete="off" aria-label="按名称筛选">
         <!-- 设备页的类型页签:按钮由 app.js 按 /api/block-families 现填 -->
         <span id="blockFamilies" class="segmented family-bar hidden" role="tablist" aria-label="设备类型"></span>
+        <!-- 换热页的通道筛选:热交换器(HeatX) / 公用工程加热器(Heater),由 table.js 现填 -->
+        <span id="heatTypeBar" class="segmented family-bar hidden" role="tablist" aria-label="换热通道"></span>
         <span id="compareScope" class="segmented hidden">
           <button type="button" data-scope="streams" class="active">流股</button>
           <button type="button" data-scope="blocks">设备</button>
@@ -384,7 +375,7 @@
         <span id="count" class="muted"></span>
         <span class="spacer"></span>
         <button id="exportFamily" class="btn hidden" type="button"
-                title="把当前分类的设备明细导成 Excel(泵分类含流量/扬程/建议电机/p_v/NPSHₐ,便于统计选型)">导出 Excel</button>
+                title="导出 Excel:当前分类设备明细(泵含流量、扬程、建议电机、p_v、NPSHₐ)">导出 Excel</button>
         <button id="compareHint" class="icon-btn" type="button" title="对比两个工况"><svg class="ico"><use href="#i-swap"/></svg></button>
         <span id="compareControls" class="compare-controls hidden">
           <label>基础 <select id="baseSelect"></select></label>
@@ -410,32 +401,24 @@
         <label id="pumpMarginCustomWrap" class="hidden">自定义 ×
           <input id="pumpMarginCustom" type="number" step="0.01" min="1" max="5" value="1.10">
         </label>
-        <span class="muted pump-bar-hint">p_v 与粘度可手动填写,或由 Aspen 自动读取</span>
+        <span class="muted pump-bar-hint">p_v 与粘度:Aspen 自动读取或手填</span>
         <span class="pv-help" id="pvHelp">
           <button type="button" class="pv-help-btn" id="pvHelpBtn" aria-expanded="false"
-                  aria-controls="pvHelpBody" title="怎么让 Aspen 自动给出 p_v 与粘度">?</button>
+                  aria-controls="pvHelpBody" title="Aspen 输出 p_v 与粘度:配置步骤">?</button>
           <div class="pv-help-body" id="pvHelpBody">
-            <p><strong>让 Aspen 自动读取 p_v 与粘度</strong>(一次性设置)</p>
-            <ol>
-              <li>「模拟」页面 → 物性组 → 新建物性组 <code>CBPROP</code></li>
-              <li>添加物性:<code>PL</code>、<code>PBUB</code>(单位 <code>bar</code>)、
-                  <code>MUMX</code>(相态根据需要自行选择)</li>
-              <li>「模拟」页面 → 设置 → 报告选项 → 流股 → 物性组,把 <code>CBPROP</code> 加到右栏</li>
-              <li>重置并重新运行(必须跑完,节点会先出现、数值后到)</li>
-              <li>回本工具重新读取工况</li>
-            </ol>
-            <p class="muted">依据 Aspen Plus V15,其他版本菜单可能不同。模型没给读数时也可以直接手填。</p>
+            <p><strong>Aspen 输出 p_v / 粘度 / cp / λ</strong>(一次性设置)</p>
+            <p class="muted">五项物性、相态限定符与影响范围:见首页「Aspen 物性组」教程。</p>
           </div>
         </span>
         <span class="pump-bar-actions">
           <button id="pumpInherit" class="btn" type="button"
-                  title="把同一模型、更早工况里填过的 p_v 按位号搬过来;只填空着的格子,不覆盖手填值">沿用上一工况 p_v</button>
+                  title="沿用 p_v:同模型更早工况按位号继承;仅填空格,不覆盖已有值">沿用上一工况 p_v</button>
           <button id="pumpZhonglian" class="btn" type="button"
-                  title="在浏览器里打开中联水泵选型页(不带任何参数,流量/扬程由你自己填)">打开中联选型<svg class="ico"><use href="#i-external"/></svg></button>
+                  title="打开中联选型页:不携带参数,流量/扬程自行填写">打开中联选型<svg class="ico"><use href="#i-external"/></svg></button>
           <button id="pumpPromptCopy" class="btn" type="button"
-                  title="把一段针对本表的 AI 选泵提示词复制到剪贴板:配合本页「导出 Excel」用,上传文件 + 粘贴提示词即可让 AI 出选型表">复制选泵提示词</button>
+                  title="复制选泵提示词:配合「导出 Excel」,上传文件并粘贴提示词">复制选泵提示词</button>
           <button id="pumpCalcDoc" class="btn" type="button"
-                  title="导出《泵计算说明书》Word(.docx):扬程与 NPSHₐ 口径、轴功率与电机档位、算例与已知局限">导出计算书</button>
+                  title="导出计算书:扬程与 NPSHₐ 口径、轴功率与电机档位、算例与已知局限">导出计算书</button>
           <span id="pumpInheritMsg" class="muted"></span>
         </span>
       </div>
@@ -447,19 +430,44 @@
           <tbody></tbody>
         </table>
       </div>
-      <p id="empty" class="empty hidden">还没有工况。点左上角「读取当前工况」,从已经打开的 Aspen 里读一次。</p>
+      <p id="empty" class="empty hidden">无工况:左上「读取当前工况」读取 Aspen。</p>
 
       <!-- tabindex:-1 让打开时能把焦点移进来(见 app.js focusIntoDrawer);
            role=region + aria-labelledby 让读屏念出"这是哪个抽屉" -->
-      <section id="columnPanel" class="column-panel hidden" role="region"
-               aria-labelledby="columnTitle" tabindex="-1">
-        <header class="panel-head">
-          <h3 id="columnTitle">塔剖面</h3>
-          <button id="closeColumn" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+      <!-- 塔器详情:与泵/换热同一套居中悬浮窗。左列两张剖面图,右列逐级塔板数据,
+           切塔不用先关窗。 -->
+      <section id="columnPanel" class="column-panel pump-modal hidden" role="dialog"
+               aria-modal="true" aria-labelledby="columnTitle" tabindex="-1">
+        <header class="panel-head pump-modal-head">
+          <div class="pump-modal-title">
+            <h3 id="columnTitle">塔剖面</h3>
+            <span class="muted pump-modal-sub" id="columnSub">左栏:逐级温度与液/气流量 · 右栏:逐级塔板读数</span>
+          </div>
+          <div class="pump-modal-actions">
+            <button id="closeColumn" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+          </div>
         </header>
-        <div id="columnCharts" class="charts"></div>
-        <div class="table-wrap small">
-          <table id="columnTable"><thead></thead><tbody></tbody></table>
+        <div class="pump-panel-scroll">
+          <div class="pump-modal-col pump-modal-left">
+            <section class="pump-params pump-block">
+              <div class="pump-block-head">
+                <span class="pump-block-title">逐级趋势</span>
+                <span class="muted" id="columnChartHint"></span>
+              </div>
+              <div id="columnCharts" class="charts"></div>
+            </section>
+          </div>
+          <div class="pump-modal-col pump-modal-right">
+            <section class="pump-design pump-block">
+              <div class="pump-block-head">
+                <span class="pump-block-title">塔板数据</span>
+                <span class="muted" id="columnTableHint"></span>
+              </div>
+              <div class="table-wrap small" id="columnTableWrap">
+                <table id="columnTable"><thead></thead><tbody></tbody></table>
+              </div>
+            </section>
+          </div>
         </div>
       </section>
 
@@ -468,7 +476,7 @@
         <header class="panel-head pump-modal-head">
           <div class="pump-modal-title">
             <h3 id="pumpTitle">泵参数</h3>
-            <span class="muted pump-modal-sub">详细参数与设计扬程并排,切泵不用先关窗</span>
+            <span class="muted pump-modal-sub">详细参数与设计扬程并列;切换泵无需关闭</span>
           </div>
           <div class="pump-modal-actions">
             <label class="pump-switch" for="pumpSwitch">切换泵
@@ -479,7 +487,7 @@
         </header>
         <div class="pump-panel-tools">
           <p class="muted pump-panel-hint">中联表单:分类 · 型号 · 流量 · 扬程 · 配套功率</p>
-          <button id="copyPumpSpec" class="link-btn" title="把流量/扬程/配套功率合成一行,粘进中联表单,不用手敲">复制选型参数</button>
+          <button id="copyPumpSpec" class="link-btn" title="复制选型参数:流量 / 扬程 / 配套功率,单行文本">复制选型参数</button>
         </div>
         <!-- 左列只放详细参数,右列叠设计扬程与选型台账。两列各自滚动,
              参数表不再被另两块一起挤成一条横线。 -->
@@ -511,12 +519,12 @@
             <span class="muted pump-modal-sub">L1 参考结果 · 未做 EDR rating</span>
           </div>
           <div class="pump-modal-actions">
-            <button id="heatConfigBtn" class="btn small" type="button" title="查看/编辑污垢、经验 U、公用工程预设">默认参数库</button>
+            <button id="heatConfigBtn" class="btn small" type="button" title="默认参数库:污垢热阻、经验 U、公用工程预设">默认参数库</button>
             <button id="closeHeat" class="close" title="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
           </div>
         </header>
         <div class="pump-panel-tools">
-          <p class="muted pump-panel-hint" id="heatHint">面积来源 / 公用工程来源逐项标注;假设值不会写成校核值。</p>
+          <p class="muted pump-panel-hint" id="heatHint">来源逐项标注;假设值不写作校核值。</p>
         </div>
         <div class="pump-panel-scroll">
           <div class="pump-modal-col pump-modal-left">
@@ -545,20 +553,124 @@
     </section>
   </main>
 
+  <!-- 标准表统一导入:管路 3 张 + 换热器 2 张。放在页面级而不是某个页签里,
+       首页、管道页、换热详情都能打开同一个窗,不再各维护一套导入代码。
+       数据受著作权保护,不随项目分发;导入的文件只写在本机。 -->
+  <div id="stdModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="stdTitle">
+    <div class="pipe-modal-box pipe-std-box std-modal-box">
+      <header class="panel-head">
+        <h3 id="stdTitle">导入标准表</h3>
+        <button id="stdClose" class="close" title="关闭,不导入"><svg class="ico"><use href="#i-close"/></svg></button>
+      </header>
+      <p class="pipe-class-hint">
+        标准表为选型所查国标数据,受著作权保护,本工具<b>不附带</b>。取得标准后整理为 CSV 导入。<br>
+        文件<b>仅写入本机</b>,不上传、不外发;导入后立即生效,无需重启服务。
+      </p>
+
+      <section class="std-family" data-family="pipe">
+        <header class="std-family-head">
+          <h4>管路标准表 <span class="badge" data-std-badge></span></h4>
+          <span class="muted">GB/T 17395-2024 表 1、表 4 · GB/T 20801.1-2025 表 B.1</span>
+        </header>
+        <div class="pipe-std-tools">
+          <a class="btn small" data-std-template href="/api/pipe-standards-template.zip" download
+             title="下载 CSV 模板:仅表头与虚构示例值;按列名填入实际数据">下载 CSV 模板</a>
+          <button class="btn small" type="button" data-std-prompt
+                  title="复制填写提示词:按三张表列名输出 CSV(需支持读图的 AI)">复制填写提示词</button>
+          <span class="muted" data-std-msg role="status" aria-live="polite"></span>
+        </div>
+        <div class="pipe-std-status" data-std-status>正在读取当前状态…</div>
+        <div class="pipe-std-files" data-std-files></div>
+        <div class="pipe-notice err hidden" data-std-error></div>
+        <div class="pipe-notice warn hidden" data-std-warn></div>
+        <div class="pipe-notice ok hidden" data-std-ok></div>
+        <div class="pipe-class-actions">
+          <span class="spacer"></span>
+          <button class="btn primary" type="button" data-std-import disabled>导入并立即生效</button>
+        </div>
+      </section>
+
+      <section class="std-family" data-family="hx">
+        <header class="std-family-head">
+          <h4>换热器标准表 <span class="badge" data-std-badge></span></h4>
+          <span class="muted">GB/T 28712.2-2023 表 5(φ19)/ 表 7(φ25) · 壳程/管程组合</span>
+        </header>
+        <div class="pipe-std-tools">
+          <a class="btn small" data-std-template href="/api/hx-standards-template.zip" download
+             title="下载 CSV 模板:仅表头与 2 行虚构示例">下载 CSV 模板</a>
+          <button class="btn small" type="button" data-std-prompt
+                  title="复制一段提示词:交给能看图的 AI,让它按两份表的列名直接输出 CSV">复制填写提示词</button>
+          <span class="muted" data-std-msg role="status" aria-live="polite"></span>
+        </div>
+        <div class="pipe-std-status" data-std-status>正在读取当前状态…</div>
+        <div class="pipe-std-files" data-std-files></div>
+        <div class="pipe-notice err hidden" data-std-error></div>
+        <div class="pipe-notice warn hidden" data-std-warn></div>
+        <div class="pipe-notice ok hidden" data-std-ok></div>
+        <div class="pipe-class-actions">
+          <span class="spacer"></span>
+          <button class="btn primary" type="button" data-std-import disabled>导入并立即生效</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
   <div id="chartTip" class="chart-tip hidden"></div>
 
   <!-- 复制选泵提示词后的操作指引:固定右下角,不占布局、不自动消失(里面是照着做的
        步骤,读完自己关)。✕ / Esc / 点空白关闭,和 #updateNote 一个交互口径。 -->
   <div id="pumpPromptTip" class="prompt-tip hidden" role="dialog" aria-modal="false"
-       aria-label="已复制 AI 选泵提示词" tabindex="-1">
+       aria-label="AI 选泵提示词已复制" tabindex="-1">
     <div class="prompt-tip-head">
-      <span class="prompt-tip-title">已复制 AI 选泵提示词！</span>
+      <span class="prompt-tip-title">AI 选泵提示词已复制</span>
       <button id="pumpPromptTipClose" class="update-pop-close" type="button" title="关闭">
         <svg class="ico" aria-hidden="true"><use href="#i-close"/></svg>
       </button>
     </div>
-    <p>请打开任意 AI 对话框（Gemini / ChatGPT / Claude / DeepSeek），上传刚导出的 Excel 文件并粘贴提示词即可生成完整选型表。</p>
-    <p>若流程含剧毒（如 HCN）或高温/高黏介质，可在提示词末尾补充说明以获得更精准的密封与材质选型。</p>
+    <p>打开 AI 对话框(Gemini / ChatGPT / Claude / DeepSeek),上传导出的 Excel 并粘贴提示词,生成选型表。</p>
+    <p>剧毒介质(如 HCN)、高温或高黏工况:在提示词末尾补充说明,以提高密封与材质选型准确度。</p>
+  </div>
+
+  <!-- 物性组配置教程:首页卡片与数据页 p_v 浮层共用;内容为一次性 Aspen 侧操作 -->
+  <div id="propModal" class="pipe-modal hidden" role="dialog" aria-modal="true" aria-labelledby="propTitle">
+    <div class="pipe-modal-box std-modal-box prop-guide-box">
+      <header class="panel-head">
+        <h3 id="propTitle">Aspen 物性组配置</h3>
+        <button id="propClose" class="close" type="button" title="关闭">
+          <svg class="ico" aria-hidden="true"><use href="#i-close"/></svg>
+        </button>
+      </header>
+      <p class="pipe-class-hint">物性组只决定 Aspen 在结果中写哪些节点;本工具按节点读数,读不到留空并提示,不取常见值顶替。</p>
+      <ol class="prop-steps">
+        <li>「模拟」页 → 物性组 → 新建物性组 <code>Donkey</code>(实际名称不限,本教程统一按此名说明)。</li>
+        <li>添加五项:<code>PL</code>、<code>PBUB</code>(bar)、<code>MUMX</code>(cP)、<code>CPMX</code>(cal/mol-K)、<code>KMX</code>(kcal-m/hr-sqm-K);单位保持默认。</li>
+        <li>「限定符」页:相态勾 <code>Vapor</code> 与 <code>Liquid</code> 两列;只勾一侧时,另一相流股读空。</li>
+        <li>「模拟」→ 设置 → 报告选项 → 流股 → 物性组:把刚才建的 <code>Donkey</code> 加入右栏。</li>
+        <li>重置并运行至收敛 →「读取当前工况」;换热页再点「重新读物性」。</li>
+      </ol>
+      <table class="prop-map">
+        <thead><tr><th>物性</th><th>默认单位</th><th>供数给</th><th>未配置 / 读不到</th></tr></thead>
+        <tbody>
+          <tr><td><code>PBUB</code> 泡点压力</td><td>bar</td><td>泵 p_v、NPSHₐ、汽蚀判定</td><td>p_v 留空;泵页可手填</td></tr>
+          <tr><td><code>MUMX</code> 混合物粘度</td><td>cP</td><td>管道 Re 与沿程阻力;换热 Re / Pr 与膜系数;泵管路阻力</td><td>阻力与 h 缺项</td></tr>
+          <tr><td><code>CPMX</code> 混合物定压比热</td><td>cal/mol-K(摩尔基)</td><td>换热 cp → Pr、膜系数 h、需求面积 A_req</td><td>L2 仅给几何与面积</td></tr>
+          <tr><td><code>KMX</code> 混合物热导</td><td>kcal-m/hr-sqm-K</td><td>换热 λ → Pr、膜系数 h</td><td>同上</td></tr>
+          <tr><td><code>PL</code> 液相压力</td><td>bar</td><td>旧布局的 p_v 备用路径;p_v 以 PBUB 为准</td><td>不影响 PBUB 读数</td></tr>
+        </tbody>
+      </table>
+      <div class="prop-shots">
+        <figure>
+          <img src="/static/assets/aspen-property-set.png" alt="Aspen 物性组:五项物性与默认单位">
+          <figcaption>物性页:五项名称与默认单位</figcaption>
+        </figure>
+        <figure>
+          <img src="/static/assets/aspen-property-qualifiers.png" alt="Aspen 物性组限定符:相态 Vapor 与 Liquid">
+          <figcaption>限定符页:相态勾 Vapor 与 Liquid</figcaption>
+        </figure>
+      </div>
+      <p class="muted prop-note">单位换算:CPMX 为摩尔基,×4.184 → J/(mol·K),再按流股 MW 折 J/(kg·K);KMX ×1.163 → W/(m·K)。单位串认不出时留空并计入「单位未识别」,不做近似替换。</p>
+      <p class="muted prop-note">依据 Aspen Plus V15;其他版本菜单名可能不同。无读数时泵 / 换热页均可手填。</p>
+    </div>
   </div>
 
   <!-- 「检查更新」结果浮层:贴在按钮上方,不占侧栏布局;点空白 / Esc / ✕ 关闭。
@@ -574,8 +686,8 @@
     <div id="updateNoteBody"></div>
   </div>
 
-  <!-- 单个模块入口:依赖关系由 import 决定,不再靠 <script> 的先后顺序。
-       服务端对静态文件下发 Cache-Control: no-store,所以不需要 ?v= 这种手工缓存串。 -->
+  <!-- 单一模块入口:依赖由 import 决定,不依赖 <script> 顺序。
+       静态文件已下发 Cache-Control: no-store,无需手工缓存串。 -->
   <script type="module" src="/static/app.js"></script>
   <div id="heatConfigPanel" class="heat-config hidden" role="dialog" aria-modal="true" aria-label="换热器默认参数库"></div>
 </body>

@@ -249,6 +249,27 @@ class CaseRoutes:
         for item in blocks:
             item["family"] = block_family.family_of_block(item)
 
+        # 进出口流股名与进/出口压力:由连接关系 + 流股读数现算,不入库 ——
+        # 老工况读一次也能看到,不必等重读或迁移。
+        by_stream = {s["name"]: s for s in streams}
+        inflow: dict[str, list[str]] = {}
+        outflow: dict[str, list[str]] = {}
+        for link in connections:
+            bucket = inflow if (link.get("direction") or "") == "in" else outflow
+            bucket.setdefault(link.get("block"), []).append(link.get("stream"))
+        for item in blocks:
+            name = item.get("name")
+            ins = [s for s in dict.fromkeys(inflow.get(name, [])) if s in by_stream]
+            outs = [s for s in dict.fromkeys(outflow.get(name, [])) if s in by_stream]
+            item["in_streams"] = ins
+            item["out_streams"] = outs
+            main_in = next((by_stream[s] for s in ins), None)
+            main_out = next((by_stream[s] for s in outs), None)
+            # 入口/出口压力都取连接流股的 Pressure(实测),同一口径;
+            # 不要拿泵块的 IN_PRES —— 那个名字像进口压力,实测是压升。
+            item["inlet_pressure_bar"] = main_in.get("pressure_bar") if main_in else None
+            item["outlet_pressure_bar"] = main_out.get("pressure_bar") if main_out else None
+
         # 全表选型只跑一次给所有泵共用。每台泵各跑一遍是 27 × 27 ms ≈ 0.9 s
         # (实测 #67 有 27 台泵时 /blocks 0.80–0.90 s);设备表本来就不该为同一份
         # 结果算 27 次。
@@ -279,10 +300,10 @@ class CaseRoutes:
                     item["motor_note"] = motor.get("note")
                 except Exception:  # 单台泵算不出不该让整张设备表打不开
                     item["motor_suggested_kw"] = item.get("motor_kw")
-                    item["motor_power_source"] = "Aspen轴功率（回退）"
+                    item["motor_power_source"] = "Aspen 轴功率(回退)"
                     item["motor_basis_kw"] = None
                     item["motor_margin"] = None
-                    item["motor_note"] = "泵两侧管段计算失败，暂按 Aspen 轴功率列值"
+                    item["motor_note"] = "泵两侧管段计算失败:暂取 Aspen 轴功率列值"
             rows.append(item)
         self._json(rows)
 

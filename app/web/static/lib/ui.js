@@ -29,7 +29,7 @@ export function applyTheme() {
   const use = document.querySelector("#themeIcon use");
   if (use) use.setAttribute("href", THEME_ICON[themeMode]);
   const btn = document.getElementById("themeBtn");
-  if (btn) btn.title = `外观:${THEME_TEXT[themeMode]}(点一下切换)`;
+  if (btn) btn.title = `外观:${THEME_TEXT[themeMode]} · 点击切换`;
 }
 
 export function cycleTheme() {
@@ -49,15 +49,14 @@ export function initTheme() {
   themeMedia.addEventListener("change", () => { if (themeMode === "auto") applyTheme(); });
 }
 
-/* 读设计 token 的实际值:图表颜色只在 style.css 里定义一次。
-   以前 JS 里另抄一份调色板,改 CSS 忘了改这里两边就不一致。 */
+/* 读取设计 token 的实际值。图表配色只在 style.css 定义一次,
+   JS 不复制调色板,避免两处取值漂移。 */
 export function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-/* 数据页顶部的请求提示条(#dataNotice):
-   加载中说明"正在读哪一份",失败说明"屏幕上这批数字还是旧的"。
-   换工况时下拉已经指到新工况,而表格还是上一份 —— 没有这一条就容易被误读。 */
+/* 数据页请求提示条(#dataNotice):加载中标明数据来源,失败时标明表格仍为旧工况。
+   换工况时下拉已指向新工况而表格未更新,须由本条提示区分。 */
 export function showNotice(text, { err = false } = {}) {
   const el = document.getElementById("dataNotice");
   if (!el) return;
@@ -74,8 +73,8 @@ export function clearNotice() {
   el.classList.remove("err");
 }
 
-/* 忙态:给要等的那块挂 aria-busy(样式里是淡淡降透明),读屏也能念出来。
-   必须 try/finally —— 少这一次复位,一次失败就会永远停在"正在加载"。 */
+/* 忙态:为目标区块挂 aria-busy(样式降低不透明度),读屏同步播报。
+   复位必须走 finally,否则一次异常会让区块永久停留在加载态。 */
 export async function withBusy(ids, fn) {
   const els = (Array.isArray(ids) ? ids : [ids])
     .map((id) => document.getElementById(id)).filter(Boolean);
@@ -87,20 +86,20 @@ export async function withBusy(ids, fn) {
   }
 }
 
-/* 写请求统一带这个头:跨站页面加自定义头会触发预检,而服务端不回应预检 → 浏览器直接不发。
-   服务端 do_POST / do_DELETE 会校验 X-Casebook-Client(见 server.py::_guard)。 */
+/* 写请求统一携带 X-Casebook-Client:跨站请求会因自定义头触发预检而被拦截;
+   服务端在 do_POST / do_DELETE 校验该头(见 server.py::_guard)。 */
 
 
-/* 粘度按量级给位数:稀溶液 0.1156 cP 与 123.4 cP 挤在同一列,
-   固定 4 位会写成 123.4350,固定 2 位又会把最有意义的尾部抹掉。 */
+/* 粘度按量级定位数:同一列既有 0.1156 cP 也有 123.4 cP,
+   固定小数位会损失有效数字。 */
 
 
 export const SEVERITY = {
   ok: { cls: "ok", text: "收敛" },
   warning: { cls: "warn", text: "有告警" },
   error: { cls: "err", text: "有错误" },
-  // 不能叫 "empty":CSS 里 .empty 是空表占位(padding:40px / text-align:center),
-  // 判定条套上后整块被撑成巨型居中卡片(实测截图)。用专属 idle 类,样式见 .verdict.idle。
+  // 不复用 .empty:.empty 为表格空态样式(padding 40px / 居中),
+  // 套用后判定条会变成居中的大卡片。改用专属 idle 类,见 .verdict.idle。
   empty: { cls: "idle", text: "没有结果" },
 };
 
@@ -154,8 +153,8 @@ export function renderBanner() {
   }
 }
 
-/* 横幅里那句"所以能不能用" —— 只说结论,不复述状态码。
-   放在 .verdict-body 外面,折叠时它仍然可见:收起的只是明细,结论不该被收起。 */
+/* 横幅结论:只给可用性判断,不复述状态码。
+   置于 .verdict-body 之外,折叠时明细收起、结论保留。 */
 export function bannerVerdict(c) {
   const errors = (c.block_errors || []).length;
   const warns = (c.block_warnings || []).length;
@@ -163,22 +162,22 @@ export function bannerVerdict(c) {
     (t) => typeof t.error === "number" && t.tolerance && t.error > t.tolerance);
 
   if (c.severity === "empty") {
-    return "模型里没有任何结果 —— 这份文件没在 Aspen 里运行过(或结果为空),先把仿真跑完再读取。";
+    return "无结果数据:模型未在 Aspen 运行,或运行结果为空。完成仿真后重新读取。";
   }
   if (c.severity === "ok") {
-    return "没有报错 —— 这份数据可以用来做定量分析(算收率、比能耗、做工况对比)。";
+    return "无报错:可用于定量分析(收率、能耗、工况对比)。";
   }
   if (c.severity === "warning") {
     const bits = [];
     if (warns) bits.push(`${warns} 个模块告警`);
     if (badTears.length) bits.push(`${badTears.length} 条撕裂流误差超过容差`);
     const what = bits.length ? bits.join(" + ") : "有情况需要核对";
-    return `${what}、没有报错 —— 数据可用,引用时注明即可。`;
+    return `${what};无报错。数据可用,引用时注明。`;
   }
   // error:说清楚到底错在哪。撕裂流已经不参与 error 判定(见 reader.judge 的注释),
   // 剩下的硬信号只有模块级 BLKSTAT=1 和 CVSTAT≠0。
   if (errors) {
-    return `本次运行有 ${errors} 个模块报错 —— 不建议用它算收率 / 能耗 / 做工况对比;其余流股只作定性参考。`;
+    return `本次运行 ${errors} 个模块报错:不宜用于收率、能耗或工况对比;其余流股仅作定性参考。`;
   }
-  return "收敛块自己报了错(CVSTAT 非 0)—— 不建议用这份数据做定量结论。";
+  return "收敛块报错(CVSTAT 非 0):不宜作定量结论。";
 }
