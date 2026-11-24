@@ -228,7 +228,7 @@ class PumpRoutes:
                 except TablesNotReady:
                     # 标准表没录入(打包版 data/ 里没有 preview/std/ 时就这样):
                     # 内径算不出来,但必须说清原因,否则页面只留一个空白输入框
-                    id_note = "标准表未录入,内径无从算起 —— 先在「管道」页导入标准表"
+                    id_note = "标准表未录入:无法确定内径。导入入口:首页 › 标准表"
                 except Exception:
                     pass  # 标准表没录全 / 缺数据:不给默认内径,前端手填
         finally:

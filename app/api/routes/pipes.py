@@ -76,11 +76,10 @@ class PipeRoutes:
             return val
 
         def _f(key: str, default: float, lo: float, hi: float) -> float:
-            """取一个数字参数:没给 → 默认值;给了但不是有限数或超范围 → 400。
+            """取数字参数。缺失 → 默认值;非有限数或越界 → 400。
 
-            以前这里把任何解析失败都换成默认值:界面改了流速、结果却不变,
-            用户以为是"算不动",其实是参数被悄悄丢掉了。NaN/Inf 还会一路
-            传进选型计算。
+            此前解析失败一律回退默认值:界面参数已改而结果不变,且 NaN/Inf
+            会进入选型计算。现改为显式报错,使计算输入与界面一致。
             """
             raw = _q(key)
             if raw is None or str(raw).strip() == "":
@@ -94,8 +93,8 @@ class PipeRoutes:
             return value
 
         try:
-            # 管材跟着**已录入的表 B.1** 走:表里有什么牌号就能选什么(方案 A)。
-            # 以前这里把认不出的牌号静默换成 S30408,页面什么也不说;现在改成明确报错。
+            # 管材以**已录入的表 B.1** 为准:表内收录的牌号方可选(方案 A)。
+            # 无法识别的牌号不再静默替换为 S30408,改为明确报错。
             from app.design import pump_line_context
 
             available = pipe_data.piping_class_grades()

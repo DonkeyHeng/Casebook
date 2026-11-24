@@ -433,9 +433,9 @@ def test_pump_prompt() -> None:
     check("提示词:有操作指引浮层", 'id="pumpPromptTip"' in html)
     check(
         "提示词:浮层文案含三段要点",
-        "已复制 AI 选泵提示词！" in html
-        and "上传刚导出的 Excel 文件并粘贴提示词" in html
-        and "剧毒（如 HCN）" in html,
+        "AI 选泵提示词已复制" in html
+        and "上传导出的 Excel 并粘贴提示词" in html
+        and "剧毒介质(如 HCN)" in html,
     )
     from tests._harness import frontend_js
 

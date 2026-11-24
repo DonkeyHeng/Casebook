@@ -98,12 +98,12 @@ def compute(streams, blocks, connections, stages=None) -> dict[str, dict]:
             out[name] = _result(SKIP, note="按约定不校验")
             continue
         if not d_in or not d_out:
-            out[name] = _result(NO_DATA, note="连接不全(缺进口或出口流股),无法校验")
+            out[name] = _result(NO_DATA, note="连接不全(缺进口或出口流股):无法校验")
             continue
         missing = [s for s in d_in + d_out if h.get(s) is None]
         if missing:
             shown = "、".join(missing[:3]) + (" 等" if len(missing) > 3 else "")
-            out[name] = _result(NO_DATA, note=f"流股 {shown} 没有焓值(没 Run 过?或是能量流)")
+            out[name] = _result(NO_DATA, note=f"流股 {shown} 无焓值(未运行,或为能量流)")
             continue
 
         if btype == "HeatX":
@@ -134,7 +134,7 @@ def compute(streams, blocks, connections, stages=None) -> dict[str, dict]:
         if duty is None:
             if btype in DUTY_TYPES:
                 out[name] = _result(
-                    NO_DATA, dh=round(dh, 3), note="没有热负荷字段(QCALC / QNET 都读不到)"
+                    NO_DATA, dh=round(dh, 3), note="缺热负荷字段:QCALC / QNET 均未读到"
                 )
                 continue
             out[name] = _zero(block, dh, d_in, d_out, h, auto=True)
@@ -163,9 +163,9 @@ def _heatx(block, in_rows, out_rows, h) -> dict:
     cold_in = [r["stream"] for r in in_rows if r.get("side") == "cold"]
     cold_out = [r["stream"] for r in out_rows if r.get("side") == "cold"]
     if duty is None:
-        return _result(NO_DATA, note="没有 HX_DUTY,无法校验")
+        return _result(NO_DATA, note="缺 HX_DUTY:无法校验")
     if not cold_in or not cold_out:
-        return _result(NO_DATA, note="缺少冷/热侧分侧信息(FCOLD/FHOT、COLDIN/HOTOUT 读不到)")
+        return _result(NO_DATA, note="缺冷 / 热侧分侧信息:FCOLD/FHOT、COLDIN/HOTOUT 未读到")
     dh = sum(h[s] for s in cold_out) - sum(h[s] for s in cold_in)
     diff = dh - duty
     tol = max(abs(duty) * TOL_REL, TOL_ABS)
@@ -208,7 +208,7 @@ def _column(block, dh: float, stages=None) -> dict:
         reb = block.get("reb_duty_kw")
         if cond is None and reb is None:
             return _result(
-                NO_DATA, dh=round(dh, 3), note="没有逐级 duty 也没有冷凝器 / 再沸器负荷,无法校验"
+                NO_DATA, dh=round(dh, 3), note="缺逐级 duty 与冷凝器 / 再沸器负荷:无法校验"
             )
         ref = (cond or 0.0) + (reb or 0.0)
         first, last = cond, reb
@@ -239,7 +239,7 @@ def _reactor(block, d_in, d_out, h, dh: float) -> dict:
     """
     duty = block.get("duty_kw")
     if duty is None:
-        return _result(NO_DATA, dh=round(dh, 3), note="没有反应热字段(QCALC 读不到)")
+        return _result(NO_DATA, dh=round(dh, 3), note="缺反应热字段:QCALC 未读到")
 
     def verdict(ref: float, how: str) -> dict:
         diff = dh - ref
@@ -279,7 +279,7 @@ def _power(block, dh: float) -> dict:
     """泵 / 压缩机:ΔH 应等于轴功率 × 效率,所以按比值区间判。"""
     power = block.get("power_kw")
     if power is None:
-        return _result(NO_DATA, dh=round(dh, 3), note="没有轴功率字段(BRAKE_POWER / ELEC_POWER)")
+        return _result(NO_DATA, dh=round(dh, 3), note="缺轴功率字段:BRAKE_POWER / ELEC_POWER")
     ratio = dh / power if power else None
     if ratio is None:
         return _result(NO_DATA, dh=round(dh, 3), note="轴功率为 0,比值无意义")

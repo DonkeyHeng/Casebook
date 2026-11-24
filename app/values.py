@@ -103,7 +103,7 @@ def sanitize_pv_bar(p_v_bar) -> float | None:
         v = float(p_v_bar)
     except (TypeError, ValueError):
         return None
-    # NaN / ±Inf / ≤0 都不是有效蒸气压:以前只挡了 NaN,正无穷会漏过去
+    # NaN / ±Inf / ≤0 均非有效蒸气压:此前仅拦截 NaN,正无穷会漏过
     if not math.isfinite(v) or v <= 0:
         return None
     return v

@@ -60,7 +60,7 @@ class MetaRoutes:
             self._json(
                 {
                     "ok": False,
-                    "error": "已经有一次读取在进行中,等它结束再点。",
+                    "error": "已有读取任务进行中,请待其结束后重试。",
                     "job": snap,
                 },
                 409,

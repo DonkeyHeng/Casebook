@@ -10,8 +10,8 @@ from __future__ import annotations
 class BadBody(Exception):
     """请求体不合法(Content-Length 不对 / 超大 / 不是 JSON 对象 / 读到一半断了)。
 
-    单独一类异常,是为了让 do_POST 回 400。以前这里一律退回 `{}`,
-    而空对象在某些保存接口里表示"清空配置" —— 于是坏请求能静默改配置。
+    独立异常类,使 do_POST 返回 400。此前坏请求回退为 `{}`,
+    而空对象在部分保存接口表示「清空配置」,坏请求可静默修改配置。
     """
 
     def __init__(self, message: str, status: int = 400) -> None:
